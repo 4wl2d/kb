@@ -44,3 +44,8 @@ the release workflow builds archives when an owner pushes a `v0.1.0` tag.
   security; a synthetic multi-repository example; opt-in maintainer knowledge.
 - GitHub Actions upstream CI and release workflows; benchmark crate `kb-bench`.
 - Apache License 2.0 and repository metadata for [4wl2d/kb](https://github.com/4wl2d/kb).
+
+### Fixed
+
+- Use explicit launcher validation branches compatible with ShellCheck 0.9.0 on Ubuntu
+  and newer versions, preserving artifact checks and usage errors.

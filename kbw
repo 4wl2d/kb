@@ -522,11 +522,15 @@ kbw_install_artifact() { # <archive path or https URL> <--sha256|--sha256-file> 
 	{ mkdir "$KBW_TMP_WORK/x" && (cd "$KBW_TMP_WORK/x" && tar -xzof "$kbw_archive"); } ||
 		kbw_artifact_invalid "cannot extract the archive"
 	kbw_dir=$KBW_TMP_WORK/x/$kbw_top
-	[ -d "$kbw_dir" ] && [ ! -L "$kbw_dir" ] || kbw_artifact_invalid "the archive has no $kbw_top/ directory"
-	[ -f "$kbw_dir/kb" ] && [ ! -L "$kbw_dir/kb" ] && [ -x "$kbw_dir/kb" ] ||
+	if [ ! -d "$kbw_dir" ] || [ -L "$kbw_dir" ]; then
+		kbw_artifact_invalid "the archive has no $kbw_top/ directory"
+	fi
+	if [ ! -f "$kbw_dir/kb" ] || [ -L "$kbw_dir/kb" ] || [ ! -x "$kbw_dir/kb" ]; then
 		kbw_artifact_invalid "$kbw_top/kb is missing or not an executable regular file"
-	[ -f "$kbw_dir/BUILD-INFO" ] && [ ! -L "$kbw_dir/BUILD-INFO" ] ||
+	fi
+	if [ ! -f "$kbw_dir/BUILD-INFO" ] || [ -L "$kbw_dir/BUILD-INFO" ]; then
 		kbw_artifact_invalid "$kbw_top/BUILD-INFO is missing"
+	fi
 	for kbw_pair in "engine_version=$KBW_ENGINE_VERSION" "target=$kbw_host" "fingerprint=$KBW_FP"; do
 		kbw_key=${kbw_pair%%=*}
 		kbw_want=${kbw_pair#*=}
@@ -659,7 +663,9 @@ case ${1-} in
 	kbw_install_artifact "$2" "$3" "$4"
 	;;
 --kbw-package)
-	[ $# -eq 2 ] && [ -n "$2" ] || kbw_usage_error "usage: --kbw-package <out-dir>"
+	if [ $# -ne 2 ] || [ -z "$2" ]; then
+		kbw_usage_error "usage: --kbw-package <out-dir>"
+	fi
 	kbw_package "$2"
 	;;
 --kbw-*)
