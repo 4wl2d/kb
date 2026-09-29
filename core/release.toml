@@ -1,0 +1,49 @@
+# kb bootstrap and compatibility manifest.
+#
+# Stability contract: this file is read by the `kbw` launcher with line-based parsing
+# (one `key = "value"` or `key = number` per line for scalar keys) and by the `kb`
+# engine with a strict TOML parser. Keep scalar keys on single lines. It must be
+# readable without parsing any project knowledge.
+manifest = 1
+
+# Engine release version (must equal core/cli/Cargo.toml `version`).
+engine_version = "0.1.0"
+
+# Independently versioned contracts.
+document_schema = 1
+protocol = 1
+index_schema = 1
+skill_protocol = 1
+
+# Document schema versions the engine can migrate from (see `kb migrate`).
+# Version 0 is a synthetic pre-release format used only to exercise the migration
+# machinery; it was never published.
+migrates_from = [0]
+
+# Toolchain used for source bootstrap (must equal rust-toolchain.toml `channel`).
+rust_toolchain = "1.98.1"
+min_git = "2.38.0"
+
+# Paths owned by the engine (upstream). Downstream changes here are reported by
+# `kb update divergence` unless declared in project/upstream.toml.
+engine_paths = [
+  "kbw",
+  "Cargo.toml",
+  "Cargo.lock",
+  "rust-toolchain.toml",
+  "core",
+  "docs",
+  "README.md",
+  "BOOTSTRAP.md",
+  "AGENTS.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "CHANGELOG.md",
+  "LICENSE",
+  ".gitignore",
+  ".github/workflows/upstream-ci.yml",
+  ".github/workflows/release.yml",
+]
+
+# Paths owned by the downstream project.
+project_paths = ["project"]

@@ -1,0 +1,19 @@
+# SYNTHETIC EXAMPLE repositories. `.invalid` hosts never resolve.
+schema = 1
+
+[[repo]]
+id = "mobile"
+title = "Mobile application"
+remotes = ["https://git.example.invalid/example/mobile.git"]
+version_file = "VERSION"
+
+[[repo]]
+id = "backend"
+title = "Backend services"
+remotes = ["https://git.example.invalid/example/backend.git"]
+version_file = "VERSION"
+
+[[repo]]
+id = "shared-contracts"
+title = "Shared API schemas"
+remotes = ["https://git.example.invalid/example/shared-contracts.git"]

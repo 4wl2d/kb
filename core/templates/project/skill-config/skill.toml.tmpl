@@ -1,0 +1,24 @@
+# Typed settings for the generated agent skill and managed instruction blocks.
+# After editing, run `./kbw integrate --generate --apply` and commit
+# project/skill-config/generated/; then run `<kb_path>/kbw integrate --apply` in each host.
+schema = 1
+
+# Harnesses to integrate: "claude" (Claude Code), "codex" (Codex), "cursor" (Cursor).
+harnesses = {{harnesses}}
+
+# Host-relative path where host repositories mount this KB (Git submodule path).
+kb_path = "{{kb_path}}"
+
+# Intent used in the skill's example command: implement, refactor, debug, review, explain.
+default_intent = "implement"
+
+# Snapshot selection written into every kbw command of the generated skill and blocks.
+# "auto" passes no --snapshot: the host's `.kbw.toml` `selection` decides when set, else kb's
+# auto rule. "latest" or "pinned" is an explicit per-call selection that overrides it.
+snapshot = "auto"
+
+# Optional project notes appended to the skill (plain Markdown, non-normative; obligations
+# belong in typed records, not here).
+# notes = """
+# Mobile work happens in the `mobile` repository; backend services live in `backend`.
+# """

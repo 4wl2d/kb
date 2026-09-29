@@ -1,0 +1,50 @@
+# Recovery: error codes and what to do
+
+Every failure carries a stable symbolic code and exit code (`error.code`, `error.exit_code`
+in JSON), a message, optional `details` and often a `hint`. Read the hint first. Launcher:
+`{{kb_path}}/kbw`. Never work around an error by switching to `--offline`, another snapshot
+or a smaller scope without telling the user.
+
+| code | exit | what it means | what to do |
+|---|---|---|---|
+| `INTERNAL` | 1 | engine bug | Report it with the command and output; continue without claiming complete context. |
+| `USAGE` | 2 | invalid or unknown arguments | Fix the command line (`{{kb_path}}/kbw <command> --help`). |
+| `PROJECT_NOT_INITIALIZED` | 10 | the KB has no `project/project.toml` | Tell the user; initializing a KB (`kbw init`) is a maintainer decision, not yours. |
+| `CONFIG_INVALID` | 11 | project, skill or lock configuration is invalid | Report the message; configuration changes go through KB review. |
+| `UNSUPPORTED_SCHEMA_VERSION` | 13 | a file uses a schema this engine cannot read | Stop; context is not complete. The KB needs `kbw migrate` or an engine update (maintainers). |
+| `ALREADY_INITIALIZED` | 14 | `init` on an initialized KB | Nothing to do; edit `project/` instead. |
+| `UNKNOWN_SCOPE` | 15 | an explicit repo/module/feature/concept id does not exist | Check the ids in the KB registry (`project/registry/*.toml`) and retry. |
+| `NOT_FOUND` | 16 | record, section or file not found | Check the id (`{{kb_path}}/kbw search <words>{{snapshot_arg}}`); ids are stable and never reused. |
+| `FRESHNESS_UNVERIFIED` | 20 | the approved ref could not be fetched | Context is not verified. Tell the user (network, VPN, credentials). Use `--offline` only if the user accepts unverified knowledge, and report `freshness = unverified`. |
+| `UPDATE_REQUIRED` | 21 | the selected snapshot needs another engine, or the host pin differs from the approved tip | Report both revisions from `details`. Ask the user to update the KB submodule through review, or to choose `--snapshot pinned` explicitly. |
+| `SNAPSHOT_NOT_FOUND` | 22 | the requested revision does not exist locally or remotely | Check the revision; run `{{kb_path}}/kbw sync` if the user agrees to fetch. |
+| `SKILL_OUTDATED` | 23 | this skill is older than the engine | Re-read `SKILL.md`; if the protocol number did not change, ask the user to start a new session. |
+| `CONTEXT_INCOMPLETE` | 30 | completeness is `partial`, `conflict` or `incomplete` (full result printed) | Use what was delivered, but list the undetermined, conflicting or missing parts; narrow the scope with `--path`/`--repo` when that is the cause. Never call it complete. |
+| `CONTEXT_BUDGET_EXCEEDED` | 31 | mandatory knowledge does not fit the budget | Re-run with `--budget` at least the required amount from `details`; do not proceed on partial obligations. |
+| `VALIDATION_FAILED` | 40 | `validate` found errors | Fix the reported records (only your proposals) and re-run `validate`. |
+| `ROUTING_TESTS_FAILED` | 41 | golden routing cases no longer hold | Report which case failed; fix the records or the case in the KB change. |
+| `DRIFT_DETECTED` | 42 | generated files differ from their source | In the KB: `./kbw integrate --generate --apply`; in the host: `{{kb_path}}/kbw integrate --apply`. Commit through review. |
+| `ENGINE_DIVERGED` | 43 | engine-owned paths differ from the upstream base | Maintainers only: move engine changes upstream or record them in `project/upstream.toml`. |
+| `IMPACT_UNACKNOWLEDGED` | 44 | affected knowledge or unknown coverage is not acknowledged | Update the `kb-impact` block of the merge request (`none` with a reason, `linked`, or `included`) and, when knowledge changes, propose it. |
+| `CONFLICT` | 45 | generated files or managed blocks were edited outside kb | Do not pass `--force` on your own; ask the user whether the local edits can be discarded. |
+| `RUNTIME_INCOMPATIBLE` | 50 | the running binary does not match the local engine | Always run through `{{kb_path}}/kbw`; if it persists, ask the user to re-bootstrap (`{{kb_path}}/kbw --kbw-bootstrap`). |
+| `UPDATE_CONFLICT` | 51 | an upstream update could not be prepared cleanly | Maintainers resolve it in the update worktree; nothing in the main checkout changed. |
+| `MIGRATION_FAILED` | 52 | a schema migration failed | Report the message; the previous files are intact. |
+| `UPDATE_FAILED` | 53 | preparing an update failed | Report the message; the previous runtime and checkout are intact. |
+| `GIT_ERROR` | 60 | a Git command failed | Report the (redacted) message; check that you are inside the host repository. |
+| `INDEX_ERROR` | 61 | the local index cache failed | Retry once; then `{{kb_path}}/kbw index --rebuild` (the cache is derived data). |
+| `IO_ERROR` | 62 | a file could not be read or written | Report the path and message. |
+| `UNSAFE_PATH` | 63 | a path escapes its root, uses `..` or a symlink | Use repository-relative paths without `..`; symlinks are refused by design. |
+| `INVALID_INPUT` | 64 | an argument or file is malformed | Fix the input named in the message (for example malformed `<!-- kb:begin/end -->` markers). |
+
+## Launcher errors (`kbw: error[CODE]: ...` on stderr, exit 50)
+
+The launcher reports its own errors before the engine runs. It never builds or installs an
+engine implicitly: bootstrapping is an explicit, documented action.
+
+| code | what it means | what to do |
+|---|---|---|
+| `KBW_RUNTIME_NOT_BOOTSTRAPPED` | no runtime exists for this checkout's engine (first use, or the KB checkout moved to another engine version) | Tell the user. The bootstrap is `{{kb_path}}/kbw --kbw-bootstrap` (source build with the pinned toolchain) or a verified release archive (`--kbw-install-artifact`); run it only with the user's agreement. |
+| `KBW_BOOTSTRAP_FAILED` | the source build failed; any earlier runtime is intact | Report the build output; do not retry in a loop. |
+| `KBW_TOOLCHAIN_MISMATCH` | the installed rustc is not the pinned toolchain | Report it; installing toolchains is the user's decision. |
+| `KBW_ARTIFACT_INVALID` | a release archive failed verification (digest, entries, BUILD-INFO, smoke test) | Report it; never bypass digest verification. |

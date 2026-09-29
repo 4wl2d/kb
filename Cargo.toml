@@ -1,0 +1,31 @@
+[workspace]
+resolver = "3"
+members = ["core/cli", "core/benchmarks"]
+default-members = ["core/cli"]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.98"
+license = "Apache-2.0"
+repository = "https://github.com/4wl2d/kb"
+publish = false
+
+[workspace.dependencies]
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
+globset = { version = "0.4", default-features = false }
+rusqlite = { version = "0.40", features = ["bundled"] }
+schemars = "1"
+semver = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.11"
+toml = "1"
+toml_edit = "0.25"
+unicode-normalization = "0.1"
+tempfile = "3"
+proptest = { version = "1", default-features = false, features = ["std"] }
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"

@@ -1,0 +1,17 @@
+schema = 1
+
+[[repo]]
+id = "mobile"
+title = "Mobile app"
+remotes = ["example.invalid/acme/mobile"]
+version_file = "VERSION"
+
+[[repo]]
+id = "backend"
+title = "Backend services"
+remotes = ["example.invalid/acme/backend"]
+
+[[repo]]
+id = "shared"
+title = "Shared protocol definitions"
+remotes = ["example.invalid/acme/shared"]

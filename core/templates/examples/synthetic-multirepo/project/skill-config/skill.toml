@@ -1,0 +1,10 @@
+# SYNTHETIC EXAMPLE skill settings.
+schema = 1
+harnesses = ["claude", "codex", "cursor"]
+kb_path = ".kb"
+default_intent = "implement"
+snapshot = "auto"
+notes = """
+This knowledge base is the synthetic `example` project shipped with kb for demonstrations.
+Repositories: `mobile` (app), `backend` (services), `shared-contracts` (API schemas).
+"""

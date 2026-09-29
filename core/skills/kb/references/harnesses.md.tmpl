@@ -1,0 +1,58 @@
+# Harness integration
+
+`kbw integrate --generate` renders one canonical skill from `core/skills/` and
+`project/skill-config/skill.toml`; `{{kb_path}}/kbw integrate --apply` installs it into the
+host repository. The same `SKILL.md` (front matter `name: kb` plus `description`) is valid
+for all three harnesses.
+
+| harness | skill location in the host | instruction file | documentation |
+|---|---|---|---|
+| Claude Code | `.claude/skills/kb/SKILL.md` | `CLAUDE.md` | https://code.claude.com/docs/en/skills |
+| Codex | `.agents/skills/kb/SKILL.md` | `AGENTS.md` | https://developers.openai.com/codex/skills (now served at https://developers.openai.com/codex/build-skills) |
+| Cursor | `.agents/skills/kb/SKILL.md`, or `.claude/skills/kb/SKILL.md` when Claude Code is enabled | `AGENTS.md` | https://cursor.com/docs/skills |
+
+Discovery facts from that documentation (checked 2026-09-27; re-check when a harness
+changes):
+
+- **Claude Code** loads project skills from `.claude/skills/<name>/SKILL.md` in the start
+  directory and every parent up to the repository root. All front matter fields are
+  optional (`description` is recommended; `name` defaults to the directory name; unknown
+  fields are ignored). Supporting files referenced from `SKILL.md` are read only when
+  needed. Edits to `SKILL.md` are picked up during a session.
+- **Codex** scans `.agents/skills` in every directory from the current working directory up
+  to the repository root. `SKILL.md` must include `name` and `description`; an optional
+  `agents/openai.yaml` adds UI metadata and invocation policy (kb does not generate one).
+  Codex reads `AGENTS.md` instructions from the repository root down to the working
+  directory.
+- **Cursor** reads `.agents/skills` and `.cursor/skills`, and for compatibility also
+  `.claude/skills` and `.codex/skills`. `name` is required, must use lowercase letters,
+  digits and hyphens, and must match the folder name; `description` is required. Cursor
+  reads `AGENTS.md` in the project root and in subdirectories.
+
+## Avoiding duplicate skills
+
+- claude + cursor: only `.claude/skills/kb/` is installed; Cursor reads it for
+  compatibility, so no `.agents/skills/kb/` copy is made.
+- cursor alone, or codex (with or without cursor): `.agents/skills/kb/` is installed.
+- claude + codex (+ cursor): both directories are installed because Claude Code and Codex
+  each read only their own. Cursor then discovers two identical `kb` skills; how it
+  deduplicates them is not documented. If that matters for your team, enable only the
+  harnesses you use in `project/skill-config/skill.toml` (for example drop `claude` for a
+  Codex + Cursor team, or drop `codex` for a Claude Code + Cursor team).
+
+## Managed blocks and the lock
+
+`AGENTS.md` and `CLAUDE.md` are changed only between the lines
+`<!-- kb:begin kb-instructions -->` and `<!-- kb:end kb-instructions -->`; every other byte
+is preserved, and the file is created if missing. `.kbw/integration.lock` in the host
+records the hashes kb installed. A generated file or block edited by hand is reported as
+`CONFLICT` and is never overwritten silently (`--apply --force` overwrites it explicitly).
+`{{kb_path}}/kbw integrate --check` fails with `DRIFT_DETECTED` when the host differs from
+the committed bundle.
+
+## Limits
+
+Instruction files and skills are text: they make the protocol available to an agent, but
+they do not guarantee that it is followed. kb relies on no undocumented harness hooks.
+Updating a skill file does not update instructions already loaded by a running agent; a
+`SKILL_OUTDATED` error tells the agent to re-read the skill or start a new session.

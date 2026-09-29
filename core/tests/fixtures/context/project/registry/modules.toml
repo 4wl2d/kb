@@ -1,0 +1,56 @@
+schema = 1
+
+[[module]]
+id = "mobile.auth"
+repo = "mobile"
+title = "Mobile authentication"
+paths = ["app/src/auth/**"]
+features = ["login"]
+
+[[module]]
+id = "mobile.ui"
+repo = "mobile"
+title = "Mobile UI"
+paths = ["app/src/ui/**"]
+features = ["catalog"]
+
+# A glob with a wildcard before its directory part: analytics code lives in an `analytics`
+# directory of any screen package below `app/src/ui/`.
+[[module]]
+id = "mobile.analytics"
+repo = "mobile"
+title = "Mobile screen analytics"
+paths = ["app/src/ui/**/analytics/**"]
+
+[[module]]
+id = "mobile.payments"
+repo = "mobile"
+title = "Mobile payments"
+paths = ["app/src/payments/**"]
+features = ["checkout"]
+
+[[module]]
+id = "backend.api"
+repo = "backend"
+title = "Public API"
+paths = ["src/api/**"]
+features = ["login"]
+
+[[module]]
+id = "backend.billing"
+repo = "backend"
+title = "Billing"
+paths = ["src/billing/**"]
+features = ["checkout"]
+
+[[module]]
+id = "backend.domain"
+repo = "backend"
+title = "Domain model"
+paths = ["src/domain/**"]
+
+[[module]]
+id = "shared.proto"
+repo = "shared"
+title = "Protocol buffers"
+paths = ["proto/**"]

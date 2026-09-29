@@ -1,0 +1,12 @@
+# Repositories described by this knowledge base. A host repository is identified by
+# `.kbw.toml repo = "<id>"` in the host, or by matching one of `remotes` (normalized: scheme,
+# credentials and `.git` are ignored). Never identified by folder name.
+# `version_file` (optional, host-relative) holds the host code version (first line, semver)
+# used for `applicability.versions` in records.
+schema = 1
+
+# [[repo]]
+# id = "mobile"
+# title = "Mobile application"
+# remotes = ["git@git.example.invalid:your-org/mobile.git"]
+# version_file = "VERSION"

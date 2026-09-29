@@ -1,0 +1,79 @@
+# Output protocol
+
+## Formats
+
+- default `--format compact`: dense text for agents;
+- `--format human`: verbose text for people;
+- `--json` (same as `--format json`): the versioned machine protocol `kb.cli.v1`.
+
+In JSON mode stdout carries only the protocol document; progress and diagnostics go to
+stderr. Exit code 0 means success; any other code comes with `error.code` (see
+`recovery.md`). Groups: 1 internal, 2 usage, 10-19 project/config, 20-29 freshness and
+snapshots, 30-39 context, 40-49 checks, 50-59 runtime/update, 60-69 environment.
+
+## Envelope
+
+```json
+{
+  "protocol": "kb.cli.v1",
+  "command": "context",
+  "ok": true,
+  "result": { },
+  "error": null,
+  "meta": { "elapsed_ms": 12 }
+}
+```
+
+- `ok` is false when `error` is set. Some failures still carry a full `result` (for example
+  `CONTEXT_INCOMPLETE` from `context`, `VALIDATION_FAILED` from `validate`): read both.
+- `error`: `code`, `exit_code`, `message`, optional `details`, `hint`, `diagnostics`.
+- `meta` is non-deterministic (timings) and is not part of the result or the budget.
+
+## What `context` returns
+
+`{{kb_path}}/kbw schema` exports JSON Schemas only for the envelope, records and
+configuration files (in `core/schemas/`). No schema describes command results: the envelope
+schema leaves `result` unconstrained. The context result covers:
+
+- **snapshot provenance**: profile, remote name and redacted source, `approved_ref`,
+  `selection` (`latest`, `pinned`, `revision`, `working-tree`), `freshness` (`verified` or
+  `unverified`), the selected `revision`, `latest_approved`, whether the revision is
+  `approved`, the host `pin` if any, the proposal `overlay` if requested, `engine_version`
+  and the snapshot `key`;
+- **scope**: resolved repositories, modules, features and concepts, and which dimensions
+  are known or unknown;
+- **completeness**: `complete`, `partial`, `conflict` or `incomplete`. "Complete" is
+  relative to the declared, validated knowledge base; an empty knowledge base proves nothing
+  about the project;
+- **effective settings** of policies after overrides;
+- **units**: mandatory records (with every statement, condition and exception), required
+  dependencies, proposals (only with `--include-proposals`, labeled and never mandatory),
+  supplementary records and optional sections (with `--sections`);
+- **ambiguities**: task phrases that match several concepts, with candidates;
+- **diagnostics**: warnings and errors about the snapshot or the request;
+- **receipt**: `id` (see below), included ids with reasons, `requires` edges, excluded
+  candidates with reasons, undetermined obligations, warnings and source anchors.
+  `--explain` adds details (not counted in the budget).
+
+## Receipt id
+
+`receipt.id` is `sha256:` over the canonical JSON form of the result as packed for the
+selected output format (keys sorted, no whitespace, without `explain` and `receipt.id`).
+The result's `budget` carries that `format` and the amount `used`, so one request gives
+different ids in `compact`, `human` and `--json`. To verify a compact or human receipt,
+re-run the same request in the same format against the same snapshot and compare the ids.
+Only a `--json` receipt can be recomputed from the printed output.
+
+## Budget
+
+`--budget <n> --budget-unit tokens-est|bytes`. `tokens-est` is a deterministic estimate
+(`ceil(ascii_bytes/4) + ceil(non_ascii_chars/2)` per unit), not a tokenizer count; `bytes`
+is exact. Mandatory units are never truncated: if they do not fit, the call fails with
+`CONTEXT_BUDGET_EXCEEDED` and reports the required amount.
+
+## Other commands you may use
+
+- `show <id>` (optionally `--section <section>`, `--raw` for the authoritative file bytes);
+- `search <words>`: finds records, but is not a substitute for `context`;
+- `impact --base <rev> [--working-tree]`: knowledge affected by a diff, and unknown coverage;
+- `validate`: checks records, links, policies, registries and routing tests.

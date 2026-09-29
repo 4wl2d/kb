@@ -1,0 +1,14 @@
+# Synthetic routing fixture: feature-scoped contract; `related` does not pull in
+# records outside the task scope.
+schema = 1
+
+[[case]]
+name = "checkout contract by feature"
+intent = "implement"
+features = ["checkout"]
+repos = ["mobile"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = ["acme.contract.checkout-api"]
+expect_included = ["acme.feature.checkout"]
+forbid = ["acme.backend.money-minor-units", "acme.backend.rate-limit"]
+expect_status = "partial"

@@ -1,0 +1,36 @@
+schema = 1
+
+[[feature]]
+id = "typed-knowledge"
+title = "Strict typed knowledge format"
+repos = ["kb"]
+
+[[feature]]
+id = "context-assembly"
+title = "Deterministic context assembly"
+repos = ["kb"]
+
+[[feature]]
+id = "freshness"
+title = "Freshness checks and snapshot selection"
+repos = ["kb"]
+
+[[feature]]
+id = "cli-protocol"
+title = "Machine protocol and exit codes"
+repos = ["kb"]
+
+[[feature]]
+id = "runtime-bootstrap"
+title = "Launcher runtime selection and bootstrap"
+repos = ["kb"]
+
+[[feature]]
+id = "integrations"
+title = "Harness skills and managed instruction blocks"
+repos = ["kb"]
+
+[[feature]]
+id = "coordinated-updates"
+title = "Migrations and coordinated upstream updates"
+repos = ["kb"]

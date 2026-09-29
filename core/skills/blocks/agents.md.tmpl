@@ -1,0 +1,16 @@
+## Engineering knowledge base (kb)
+
+This repository uses the {{project_name}} knowledge base mounted at `{{kb_path}}`.
+Before planning or changing code, follow the `kb` skill (`{{agents_skill_path}}`): get
+scoped context with
+
+    {{kb_path}}/kbw context --intent <intent> --task "<task>" --path <path> --skill-protocol {{skill_protocol}}{{snapshot_arg}}
+
+The launcher checks freshness itself. Apply every mandatory obligation, and do not treat the
+context as complete unless kb reports `complete`. Re-request context after scope changes,
+compaction, a new session or a hand-off. Before finishing, run
+`{{kb_path}}/kbw impact --base <target branch> --working-tree{{snapshot_arg}}`. Propose new
+knowledge as `draft` records with evidence; never invent accepted rules.
+
+This block is managed by `{{kb_path}}/kbw integrate`; edit `project/skill-config/skill.toml`
+in the KB instead of this text.

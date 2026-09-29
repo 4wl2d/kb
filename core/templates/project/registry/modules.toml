@@ -1,0 +1,11 @@
+# Modules: parts of a repository selected by repo-relative path globs
+# (`*` within a segment, `**` across segments). A task path maps to the modules whose globs
+# match it; `features` lists registry features the module implements.
+schema = 1
+
+# [[module]]
+# id = "mobile.auth"
+# repo = "mobile"
+# title = "Mobile authentication"
+# paths = ["app/src/main/java/**/auth/**"]
+# features = ["login"]

@@ -1,0 +1,20 @@
+# SYNTHETIC EXAMPLE. This profile describes an invented product; it is not project data.
+schema = 1
+
+[project]
+name = "Example (synthetic multi-repo)"
+namespace = "example"
+
+[source]
+remote = "origin"
+approved_ref = "refs/heads/main"
+# `file` is allowed so the example can be tried against a local bare repository.
+allowed_protocols = ["https", "ssh", "file"]
+
+[knowledge]
+roots = ["knowledge"]
+
+[context]
+default_budget = 8000
+default_budget_unit = "tokens-est"
+max_supplementary = 12

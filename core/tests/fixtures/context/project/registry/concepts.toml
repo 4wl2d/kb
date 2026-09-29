@@ -1,0 +1,28 @@
+schema = 1
+
+[[concept]]
+id = "auth-token"
+title = "Authentication tokens"
+aliases = ["token", "refresh token", "токен*", "обновление токена"]
+
+[[concept]]
+id = "ui-composition"
+title = "UI composition (screens built from components)"
+aliases = ["композици*", "composition", "compose"]
+paths = ["mobile:app/src/ui/**"]
+
+[[concept]]
+id = "object-composition"
+title = "Object composition (domain model structure)"
+aliases = ["композици*", "composition", "композиция объектов"]
+paths = ["backend:src/domain/**"]
+
+[[concept]]
+id = "money"
+title = "Money amounts"
+aliases = ["money", "amount", "деньги", "денежн*"]
+
+[[concept]]
+id = "rate-limit"
+title = "Rate limiting"
+aliases = ["rate limit", "throttling", "лимит запросов"]

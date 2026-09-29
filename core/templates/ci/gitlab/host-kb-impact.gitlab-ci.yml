@@ -1,0 +1,33 @@
+# kb checks for a HOST repository on GitLab that mounts the KB as a Git submodule.
+# Copy this job into the host's .gitlab-ci.yml and set KB_PATH to the submodule path
+# (`kb_path` in the KB's project/skill-config/skill.toml).
+#
+# Prerequisites (maintainer actions): CI access to the KB repository (for example the job
+# token allowlist or a read-only deploy token), and "pipelines must succeed" if the check
+# should block merges.
+#
+# GitLab truncates CI_MERGE_REQUEST_DESCRIPTION for long descriptions: keep the `kb-impact`
+# block near the top of the description (see core/templates/mr/). Editing the description
+# does not start a pipeline: after fixing the block, run a new merge request pipeline (or
+# push a commit).
+#
+# The impact check reads the KB revision this host pins (`--snapshot pinned`), not the
+# default `auto`: `auto` fails with UPDATE_REQUIRED whenever the approved KB tip is ahead of
+# the pin, which is the normal state after a knowledge change is merged and before the host
+# pin update lands. Freshness is still verified and the approved tip is reported.
+kb-impact:
+  image: rust:1
+  variables:
+    KB_PATH: ".kb"
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - git submodule update --init -- "$KB_PATH"      # pinned revision, no recursion
+    - (cd "$KB_PATH" && rustup toolchain install)
+    - '"$KB_PATH/kbw" --kbw-bootstrap'               # explicit runtime bootstrap
+    - git fetch --no-tags origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+    - printf '%s\n' "$CI_MERGE_REQUEST_DESCRIPTION" > "${TMPDIR:-/tmp}/mr-description.md"
+    - '"$KB_PATH/kbw" impact --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --statement "${TMPDIR:-/tmp}/mr-description.md" --snapshot pinned --check'
+    - '"$KB_PATH/kbw" integrate --check'

@@ -1,0 +1,57 @@
+schema = 1
+
+[[module]]
+id = "kb.model"
+repo = "kb"
+title = "Typed model, parsing and validation"
+paths = ["core/cli/src/model/**", "core/cli/src/parse.rs", "core/cli/src/validate.rs", "core/cli/src/scope.rs", "core/schemas/**"]
+features = ["typed-knowledge"]
+
+[[module]]
+id = "kb.context"
+repo = "kb"
+title = "Context assembly, ranking and packing"
+paths = ["core/cli/src/context/**"]
+features = ["context-assembly"]
+
+[[module]]
+id = "kb.index"
+repo = "kb"
+title = "SQLite FTS5 index"
+paths = ["core/cli/src/index/**"]
+features = ["context-assembly"]
+
+[[module]]
+id = "kb.snapshot"
+repo = "kb"
+title = "Freshness, snapshots, overlays and host detection"
+paths = ["core/cli/src/snapshot.rs", "core/cli/src/snapshot/**", "core/cli/src/overlay.rs", "core/cli/src/host.rs", "core/cli/src/git.rs", "core/cli/src/source.rs"]
+features = ["freshness"]
+
+[[module]]
+id = "kb.cli"
+repo = "kb"
+title = "CLI, output protocol and errors"
+paths = ["core/cli/src/cli/**", "core/cli/src/output.rs", "core/cli/src/error.rs", "core/cli/src/main.rs"]
+features = ["cli-protocol"]
+
+[[module]]
+id = "kb.launcher"
+repo = "kb"
+title = "kbw launcher, runtime bootstrap and release packaging"
+paths = ["kbw", ".github/workflows/**", "core/release.toml", "rust-toolchain.toml"]
+features = ["runtime-bootstrap"]
+
+[[module]]
+id = "kb.integrate"
+repo = "kb"
+title = "Skills, templates and harness integrations"
+paths = ["core/cli/src/integrate/**", "core/cli/src/init.rs", "core/skills/**", "core/templates/**"]
+features = ["integrations"]
+
+[[module]]
+id = "kb.update"
+repo = "kb"
+title = "Migrations, upstream updates and impact analysis"
+paths = ["core/cli/src/migrate.rs", "core/cli/src/update.rs", "core/cli/src/impact.rs", "core/migrations/**"]
+features = ["coordinated-updates"]

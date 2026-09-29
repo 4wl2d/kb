@@ -1,0 +1,52 @@
+# kb knowledge checks for a downstream KB repository (installed by `kbw init` as
+# .github/workflows/kb-knowledge.yml). These checks report problems; they do not enforce
+# reviews. Branch protection, required checks and approval rules are configured separately
+# by a repository administrator.
+name: kb-knowledge
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  knowledge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history: `validate --base` and `update divergence` compare with older commits.
+          fetch-depth: 0
+
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: Cache the kb runtime
+        uses: actions/cache@v6
+        with:
+          path: .cache/runtime
+          key: kb-runtime-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'core/release.toml', 'core/cli/**') }}
+
+      - name: Bootstrap the kb runtime of this checkout (explicit; source build or cache hit)
+        run: ./kbw --kbw-bootstrap
+
+      - name: Validate records, links, policies, registries and routing tests
+        run: ./kbw validate
+
+      - name: Historical ids stay addressable (against the target branch)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: ./kbw validate --base "origin/$BASE_REF"
+
+      - name: Generated skill bundle matches project/skill-config
+        run: ./kbw integrate --generate --check
+
+      - name: Engine-owned paths match the recorded upstream base
+        run: ./kbw update divergence
+
+      - name: JSON schemas match the engine
+        run: ./kbw schema --check

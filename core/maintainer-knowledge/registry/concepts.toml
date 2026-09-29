@@ -1,0 +1,26 @@
+schema = 1
+
+[[concept]]
+id = "freshness"
+title = "Remote freshness verification"
+aliases = ["fresh", "stale", "offline", "fetch", "актуальность", "свежест*"]
+
+[[concept]]
+id = "snapshot"
+title = "Immutable knowledge snapshot"
+aliases = ["snapshot*", "pin", "pinned", "revision", "снимок", "снапшот*"]
+
+[[concept]]
+id = "budget"
+title = "Context budget and packing"
+aliases = ["budget", "tokens", "packing", "бюджет*"]
+
+[[concept]]
+id = "determinism"
+title = "Deterministic output"
+aliases = ["deterministic", "stable order", "ranking", "tie break", "детерминирован*"]
+
+[[concept]]
+id = "runtime"
+title = "Engine runtime and launcher"
+aliases = ["runtime", "launcher", "bootstrap", "artifact", "kbw"]

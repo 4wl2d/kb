@@ -1,0 +1,48 @@
+# SYNTHETIC EXAMPLE modules.
+schema = 1
+
+[[module]]
+id = "mobile.auth"
+repo = "mobile"
+title = "Mobile authentication and session"
+paths = ["app/auth/**"]
+features = ["login"]
+
+[[module]]
+id = "mobile.ui"
+repo = "mobile"
+title = "Mobile UI components and screens"
+paths = ["app/ui/**"]
+
+[[module]]
+id = "mobile.checkout"
+repo = "mobile"
+title = "Mobile checkout flow"
+paths = ["app/checkout/**"]
+features = ["checkout"]
+
+[[module]]
+id = "backend.api"
+repo = "backend"
+title = "Public HTTP API"
+paths = ["src/api/**"]
+features = ["login"]
+
+[[module]]
+id = "backend.payments"
+repo = "backend"
+title = "Payment processing"
+paths = ["src/payments/**"]
+features = ["checkout"]
+
+[[module]]
+id = "backend.domain"
+repo = "backend"
+title = "Domain model and persistence"
+paths = ["src/domain/**"]
+
+[[module]]
+id = "shared-contracts.schemas"
+repo = "shared-contracts"
+title = "API schema definitions"
+paths = ["schemas/**"]

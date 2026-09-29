@@ -1,0 +1,7 @@
+schema = 1
+
+# The engine repository itself. Remote URLs are deployment parameters and are not
+# listed here; use `--repo kb` or a `.kbw.toml` binding when working on the engine.
+[[repo]]
+id = "kb"
+title = "kb engine (upstream)"

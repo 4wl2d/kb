@@ -1,0 +1,31 @@
+# kb knowledge checks for a downstream KB repository on GitLab. Include this file from
+# .gitlab-ci.yml (`include: local: core/templates/ci/gitlab/kb-knowledge.gitlab-ci.yml`) or
+# copy the job. The checks report problems; protected branches, required approvals and
+# "pipelines must succeed" are project settings configured by a maintainer.
+kb-knowledge:
+  image: rust:1
+  variables:
+    # Full history: `validate --base` and `update divergence` compare with older commits.
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+  cache:
+    key:
+      # GitLab accepts at most two files here; the runtime directory is keyed by its own
+      # fingerprint (toolchain included), so this key only affects cache reuse.
+      files: [Cargo.lock, core/release.toml]
+    paths: [.cache/runtime]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  script:
+    - rustup toolchain install   # the version pinned in rust-toolchain.toml
+    - ./kbw --kbw-bootstrap      # explicit runtime bootstrap (source build or cache hit)
+    - ./kbw validate
+    - |
+      if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
+        git fetch --no-tags origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        ./kbw validate --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+      fi
+    - ./kbw integrate --generate --check
+    - ./kbw update divergence
+    - ./kbw schema --check

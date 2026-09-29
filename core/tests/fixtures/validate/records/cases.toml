@@ -1,0 +1,83 @@
+# Expected verdicts for the fixtures in invalid/ (read by tests/schema_conformance.rs).
+#
+# code:   a diagnostic code the strict parser (`parse::parse_record`) must report.
+# schema: "reject"      the defect is expressible in JSON Schema: the generated record
+#                       schema must reject the front matter too;
+#         "accept"      runtime-only rule (listed in core/schemas/README.md): the schema
+#                       accepts, only the parser rejects;
+#         "no-instance" the file has no JSON form (front matter missing or not TOML).
+#
+# Every fixture in valid/ must be accepted by both the parser and the schema.
+
+[cases]
+# Unknown fields, wrong types, bad enums, missing required fields.
+"policy-unknown-field.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"policy-unknown-nested-field.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"feature-wrong-type.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"invariant-bad-status.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"invariant-bad-level.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"gap-bad-enum.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"anchor-bad-kind.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"selector-bad-intent.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"setting-bad-override-mode.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"contract-missing-obligations.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"decision-missing-context.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"missing-owner.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
+"reference-unknown-kind.md" = { code = "KIND_UNKNOWN", schema = "reject" }
+"schema-version-2.md" = { code = "UNSUPPORTED_SCHEMA_VERSION", schema = "reject" }
+"schema-missing.md" = { code = "SCHEMA_FIELD_MISSING", schema = "reject" }
+# Id and text shape.
+"decision-bad-id.md" = { code = "ID_INVALID", schema = "reject" }
+"local-id-invalid.md" = { code = "LOCAL_ID_INVALID", schema = "reject" }
+"setting-bad-name.md" = { code = "SETTING_NAME_INVALID", schema = "reject" }
+"link-bad-id.md" = { code = "LINK_ID_INVALID", schema = "reject" }
+"gap-affects-bad-id.md" = { code = "LINK_ID_INVALID", schema = "reject" }
+"override-bad-target.md" = { code = "OVERRIDE_TARGET_INVALID", schema = "reject" }
+"title-multiline.md" = { code = "TITLE_INVALID", schema = "reject" }
+"title-blank.md" = { code = "TITLE_INVALID", schema = "reject" }
+"owner-blank.md" = { code = "OWNER_MISSING", schema = "reject" }
+"text-blank.md" = { code = "TEXT_EMPTY", schema = "reject" }
+"exception-blank.md" = { code = "TEXT_EMPTY", schema = "reject" }
+"reference-blank-summary.md" = { code = "TEXT_EMPTY", schema = "reject" }
+"override-blank-reason.md" = { code = "TEXT_EMPTY", schema = "reject" }
+"anchor-bad-commit.md" = { code = "ANCHOR_COMMIT_INVALID", schema = "reject" }
+# Required non-empty lists and per-kind shape.
+"policy-empty.md" = { code = "POLICY_EMPTY", schema = "reject" }
+"feature-empty-behaviors.md" = { code = "FEATURE_BEHAVIORS_EMPTY", schema = "reject" }
+"invariant-empty-statements.md" = { code = "INVARIANT_EMPTY", schema = "reject" }
+"contract-one-party.md" = { code = "CONTRACT_PARTIES", schema = "reject" }
+"decision-empty-reasons.md" = { code = "DECISION_REASONS_EMPTY", schema = "reject" }
+"procedure-empty-steps.md" = { code = "PROCEDURE_STEPS_EMPTY", schema = "reject" }
+"procedure-empty-expected.md" = { code = "PROCEDURE_EXPECTED_EMPTY", schema = "reject" }
+"scope-empty.md" = { code = "SCOPE_EMPTY", schema = "reject" }
+"scope-product-and-repos.md" = { code = "SCOPE_INVALID", schema = "reject" }
+"anchor-source-without-path.md" = { code = "ANCHOR_INVALID", schema = "reject" }
+"anchor-change-without-ref.md" = { code = "ANCHOR_INVALID", schema = "reject" }
+# Uniqueness of scalar lists.
+"scope-duplicate-repo.md" = { code = "LIST_DUPLICATE", schema = "reject" }
+"link-duplicate.md" = { code = "LIST_DUPLICATE", schema = "reject" }
+"selector-duplicate-concept.md" = { code = "LIST_DUPLICATE", schema = "reject" }
+"setting-set-duplicate.md" = { code = "LIST_DUPLICATE", schema = "reject" }
+# Setting consistency.
+"setting-type-mismatch.md" = { code = "SETTING_TYPE_MISMATCH", schema = "reject" }
+"setting-stricter-missing.md" = { code = "SETTING_STRICTER_MISSING", schema = "reject" }
+"setting-stricter-invalid.md" = { code = "SETTING_STRICTER_INVALID", schema = "reject" }
+"setting-stricter-string.md" = { code = "SETTING_STRICTER_INVALID", schema = "reject" }
+"setting-stricter-unused.md" = { code = "SETTING_STRICTER_UNUSED", schema = "reject" }
+"setting-owners-unused.md" = { code = "SETTING_OWNERS_UNUSED", schema = "reject" }
+# Runtime-only rules.
+"link-self.md" = { code = "LINK_SELF", schema = "accept" }
+"override-self.md" = { code = "OVERRIDE_SELF", schema = "accept" }
+"override-duplicate.md" = { code = "OVERRIDE_DUPLICATE", schema = "accept" }
+"setting-duplicate.md" = { code = "SETTING_DUPLICATE", schema = "accept" }
+"statement-duplicate-id.md" = { code = "LOCAL_ID_DUPLICATE", schema = "accept" }
+"contract-undeclared-party.md" = { code = "CONTRACT_PARTY_UNKNOWN", schema = "accept" }
+"selector-path-traversal.md" = { code = "SELECTOR_PATH_INVALID", schema = "accept" }
+"selector-alias-empty.md" = { code = "SELECTOR_ALIAS_INVALID", schema = "accept" }
+"anchor-path-traversal.md" = { code = "ANCHOR_PATH_INVALID", schema = "accept" }
+"applicability-bad-semver.md" = { code = "APPLICABILITY_INVALID", schema = "accept" }
+"body-duplicate-section.md" = { code = "BODY_INVALID", schema = "accept" }
+# No JSON instance.
+"duplicate-key.md" = { code = "FRONT_MATTER_SYNTAX", schema = "no-instance" }
+"no-front-matter.md" = { code = "FRONT_MATTER_MISSING", schema = "no-instance" }
+"unclosed-front-matter.md" = { code = "FRONT_MATTER_MISSING", schema = "no-instance" }

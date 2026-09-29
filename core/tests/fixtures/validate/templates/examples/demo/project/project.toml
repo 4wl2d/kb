@@ -1,0 +1,7 @@
+schema = 1
+[project]
+name = "Demo (synthetic example)"
+namespace = "demo"
+[source]
+remote = "origin"
+approved_ref = "refs/heads/main"

@@ -1,0 +1,21 @@
+# Synthetic routing fixture: Cyrillic task text routed through registry aliases.
+schema = 1
+
+[[case]]
+name = "russian alias routes to the token concept"
+intent = "debug"
+task = "Бесконечный 401 после обновления токена"
+repos = ["mobile"]
+host_versions = ["mobile=2.3.0"]
+expect_included = [
+  "acme.procedure.debug-token-refresh",
+  "acme.reference.oauth",
+  "acme.contract.token-refresh",
+]
+forbid = [
+  "acme.procedure.rotate-signing-key",
+  "acme.backend.rate-limit",
+  "acme.backend.refresh-rotation",
+  "acme.backend.sql-parameters",
+]
+expect_status = "partial"

@@ -1,0 +1,32 @@
+schema = 1
+
+[[case]]
+name = "changing the index pulls determinism and completeness obligations"
+intent = "implement"
+repos = ["kb"]
+paths = ["core/cli/src/index/mod.rs"]
+expect_mandatory = [
+  "kb.policy.engine-changes-upstream",
+  "kb.policy.test-isolation",
+  "kb.invariant.deterministic-context",
+  "kb.invariant.mandatory-completeness",
+]
+forbid = ["kb.invariant.read-only-knowledge-queries", "kb.gap.cursor-duplicate-skill"]
+expect_status = "complete"
+
+[[case]]
+name = "snapshot work pulls the read-only invariant"
+intent = "debug"
+repos = ["kb"]
+paths = ["core/cli/src/overlay.rs"]
+task = "proposal overlay shows stale revision"
+expect_mandatory = ["kb.invariant.read-only-knowledge-queries", "kb.policy.engine-changes-upstream"]
+expect_included = ["kb.decision.isolated-mirror"]
+forbid = ["kb.invariant.deterministic-context"]
+
+[[case]]
+name = "skill template changes include the protocol contract and the known gap"
+intent = "implement"
+repos = ["kb"]
+paths = ["core/skills/kb/SKILL.md.tmpl"]
+expect_mandatory = ["kb.contract.cli-protocol", "kb.gap.cursor-duplicate-skill"]

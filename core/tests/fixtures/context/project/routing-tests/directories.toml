@@ -1,0 +1,95 @@
+# Synthetic routing fixture: a directory path selects the same obligations as a file path
+# inside it; a parent directory selects the obligations of every module below it, including
+# modules whose wildcard globs may match inside it.
+schema = 1
+
+[[case]]
+name = "module root directory without a trailing slash"
+intent = "implement"
+paths = ["mobile:app/src/auth"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.product.logging",
+  "acme.product.network",
+  "acme.mobile.network",
+  "acme.mobile.auth-network",
+  "acme.mobile.token-storage",
+  "acme.contract.token-refresh",
+  "acme.backend.refresh-rotation",
+]
+forbid = [
+  "acme.backend.rate-limit",
+  "acme.mobile.ui-accessibility",
+  "acme.mobile.legacy-keystore",
+]
+expect_status = "complete"
+
+[[case]]
+name = "module root directory with a trailing slash"
+intent = "implement"
+paths = ["mobile:app/src/auth/"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.product.logging",
+  "acme.product.network",
+  "acme.mobile.network",
+  "acme.mobile.auth-network",
+  "acme.mobile.token-storage",
+  "acme.contract.token-refresh",
+  "acme.backend.refresh-rotation",
+]
+forbid = [
+  "acme.backend.rate-limit",
+  "acme.mobile.ui-accessibility",
+  "acme.mobile.legacy-keystore",
+]
+expect_status = "complete"
+
+[[case]]
+name = "parent directory of several modules"
+intent = "implement"
+paths = ["mobile:app/src"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.mobile.auth-network",
+  "acme.mobile.token-storage",
+  "acme.contract.token-refresh",
+  "acme.mobile.ui-accessibility",
+  "acme.gap.offline-catalog",
+  "acme.contract.checkout-api",
+]
+forbid = ["acme.backend.rate-limit", "acme.mobile.legacy-keystore"]
+
+# `mobile.analytics` (`app/src/ui/**/analytics/**`) has a wildcard before its directory part.
+# The directory `app/src/ui/catalog` maps to `mobile.ui` by its directory form, and it may
+# also contain `app/src/ui/catalog/analytics/`, so the analytics obligations apply too.
+[[case]]
+name = "directory below the literal prefix of a wildcard module glob"
+intent = "implement"
+paths = ["mobile:app/src/ui/catalog"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.mobile.ui-accessibility",
+  "acme.gap.offline-catalog",
+  "acme.mobile.analytics-consent",
+]
+forbid = ["acme.mobile.token-storage", "acme.backend.rate-limit"]
+expect_status = "complete"
+
+[[case]]
+name = "file outside a wildcard module glob does not select it"
+intent = "implement"
+paths = ["mobile:app/src/ui/catalog/CatalogScreen.kt"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = ["acme.mobile.ui-accessibility", "acme.gap.offline-catalog"]
+forbid = ["acme.mobile.analytics-consent", "acme.mobile.token-storage"]
+expect_status = "complete"
+
+[[case]]
+name = "directory without a registry module leaves module-scoped obligations undetermined"
+intent = "implement"
+paths = ["mobile:app/src/checkout"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = ["acme.mobile.network"]
+forbid = ["acme.backend.rate-limit"]
+expect_status = "partial"

@@ -1,0 +1,17 @@
+schema = 1
+
+[project]
+name = "kb engine (maintainer profile)"
+namespace = "kb"
+
+[source]
+remote = "origin"
+approved_ref = "refs/heads/main"
+allowed_protocols = ["https", "ssh"]
+
+[knowledge]
+roots = ["knowledge"]
+
+[context]
+default_budget = 6000
+default_budget_unit = "tokens-est"

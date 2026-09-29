@@ -1,0 +1,7 @@
+schema = 1
+
+[[case]]
+name = "logging rules apply to app work"
+intent = "implement"
+repos = ["app"]
+expect_mandatory = ["demo.app.logging"]

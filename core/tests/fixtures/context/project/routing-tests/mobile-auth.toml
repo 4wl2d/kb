@@ -1,0 +1,47 @@
+# Synthetic routing fixture: mobile authentication work.
+schema = 1
+
+[[case]]
+name = "cross-repo contract and backend dependency from a mobile auth path"
+intent = "implement"
+paths = ["mobile:app/src/auth/storage/TokenStore.kt"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.product.logging",
+  "acme.product.network",
+  "acme.mobile.network",
+  "acme.mobile.auth-network",
+  "acme.mobile.token-storage",
+  "acme.contract.token-refresh",
+  "acme.backend.refresh-rotation",
+]
+expect_included = ["acme.decision.encrypted-storage", "acme.feature.login"]
+forbid = [
+  "acme.backend.rate-limit",
+  "acme.backend.sql-parameters",
+  "acme.backend.money-minor-units",
+  "acme.mobile.ui-accessibility",
+  "acme.decision.compose-ui",
+  "acme.reference.design-system",
+  "acme.mobile.legacy-keystore",
+  "acme.mobile.biometric-login",
+  "acme.contract.legacy-auth",
+  "acme.reference.oauth",
+]
+expect_status = "complete"
+
+[[case]]
+name = "old app version conflicts with the required contract"
+intent = "implement"
+paths = ["mobile:app/src/auth/storage/TokenStore.kt"]
+host_versions = ["mobile=1.9.0"]
+expect_mandatory = ["acme.mobile.legacy-keystore", "acme.contract.token-refresh"]
+expect_status = "conflict"
+
+[[case]]
+name = "unknown app version is partial"
+intent = "implement"
+paths = ["mobile:app/src/auth/storage/TokenStore.kt"]
+expect_mandatory = ["acme.mobile.token-storage", "acme.contract.token-refresh"]
+forbid = ["acme.mobile.legacy-keystore"]
+expect_status = "partial"

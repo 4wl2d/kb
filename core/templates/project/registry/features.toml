@@ -1,0 +1,9 @@
+# Product features. `repos` lists the repositories implementing the feature; `paths` are
+# optional globs (qualify with `repo:` when the feature spans repositories).
+schema = 1
+
+# [[feature]]
+# id = "login"
+# title = "Sign-in and session handling"
+# repos = ["mobile", "backend"]
+# paths = ["mobile:app/src/main/java/**/login/**", "backend:src/auth/**"]

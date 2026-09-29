@@ -1,0 +1,87 @@
+# SYNTHETIC EXAMPLE routing tests for the mobile repository. Every case gives the repository
+# and a `repo:path`, so applicability is decided by scope rather than by wording.
+schema = 1
+
+[[case]]
+name = "token refresh: storage policy, refresh contract and the shared error envelope"
+intent = "implement"
+task = "Retry the token refresh after a network error"
+repos = ["mobile"]
+paths = ["mobile:app/auth/TokenRefresher.kt"]
+# Every dimension is known and every required record is accepted (freshness and approval of
+# the snapshot are not part of this knowledge status).
+expect_status = "complete"
+expect_mandatory = [
+  "example.common.code-review",
+  "example.contract.error-envelope",
+  "example.contract.token-refresh",
+  "example.mobile.single-refresh",
+  "example.mobile.token-storage",
+]
+# The rationale of the storage policy.
+expect_included = ["example.decision.secure-token-storage"]
+forbid = [
+  "example.backend.composition-over-inheritance",
+  "example.backend.migration-compat",
+  "example.backend.payments-review",
+  "example.contract.payment-intent",
+  "example.decision.token-in-preferences",
+  "example.feature.checkout",
+  "example.gap.offline-checkout",
+  "example.mobile.biometric-unlock",
+  "example.mobile.state-hoisting",
+  "example.procedure.add-api-schema",
+  "example.procedure.rotate-signing-keys",
+]
+
+[[case]]
+name = "weak wording still gets every applicable obligation"
+intent = "refactor"
+task = "rename a local variable"
+repos = ["mobile"]
+paths = ["mobile:app/auth/SessionStore.kt"]
+expect_mandatory = [
+  "example.common.code-review",
+  "example.contract.error-envelope",
+  "example.contract.token-refresh",
+  "example.mobile.single-refresh",
+  "example.mobile.token-storage",
+]
+forbid = [
+  "example.backend.composition-over-inheritance",
+  "example.backend.migration-compat",
+  "example.mobile.state-hoisting",
+]
+
+[[case]]
+name = "композиция with a UI path resolves to UI composition"
+intent = "implement"
+task = "Исправить композицию экрана профиля"
+repos = ["mobile"]
+paths = ["mobile:app/ui/ProfileScreen.kt"]
+expect_mandatory = ["example.common.code-review", "example.mobile.state-hoisting"]
+forbid = [
+  "example.backend.composition-over-inheritance",
+  "example.backend.migration-compat",
+  "example.backend.payments-review",
+  "example.contract.error-envelope",
+  "example.contract.token-refresh",
+  "example.gap.offline-checkout",
+  "example.mobile.single-refresh",
+  "example.mobile.token-storage",
+]
+
+[[case]]
+name = "композиция without a path is ambiguous and module rules stay undetermined"
+intent = "explain"
+task = "Как устроена композиция?"
+repos = ["mobile"]
+expect_ambiguous = ["композиция"]
+# Module-scoped obligations of `mobile` are undetermined without a path or module.
+expect_status = "partial"
+expect_mandatory = ["example.common.code-review"]
+forbid = [
+  "example.backend.payments-review",
+  "example.procedure.add-api-schema",
+  "example.reference.api-v1",
+]

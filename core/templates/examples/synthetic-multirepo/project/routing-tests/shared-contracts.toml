@@ -1,0 +1,20 @@
+# SYNTHETIC EXAMPLE routing tests for the shared-contracts repository.
+schema = 1
+
+[[case]]
+name = "error schema change: the envelope contract is mandatory in its own repository"
+intent = "implement"
+task = "Add a retry-after field to the error envelope"
+repos = ["shared-contracts"]
+paths = ["shared-contracts:schemas/errors/envelope.json"]
+expect_mandatory = ["example.common.code-review", "example.contract.error-envelope"]
+forbid = [
+  "example.backend.migration-compat",
+  "example.backend.payments-review",
+  "example.contract.payment-intent",
+  "example.contract.token-refresh",
+  "example.gap.offline-checkout",
+  "example.mobile.single-refresh",
+  "example.mobile.state-hoisting",
+  "example.mobile.token-storage",
+]

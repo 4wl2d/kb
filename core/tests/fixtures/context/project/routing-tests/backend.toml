@@ -1,0 +1,39 @@
+# Synthetic routing fixture: backend work.
+schema = 1
+
+[[case]]
+name = "backend api path"
+intent = "implement"
+paths = ["backend:src/api/token/RefreshHandler.kt"]
+expect_mandatory = [
+  "acme.product.logging",
+  "acme.backend.rate-limit",
+  "acme.backend.sql-parameters",
+  "acme.backend.money-minor-units",
+  "acme.backend.refresh-rotation",
+  "acme.contract.token-refresh",
+]
+forbid = [
+  "acme.mobile.token-storage",
+  "acme.mobile.network",
+  "acme.mobile.ui-accessibility",
+  "acme.decision.compose-ui",
+]
+expect_status = "complete"
+
+[[case]]
+name = "explicit backend module with the mobile repo"
+intent = "implement"
+repos = ["mobile"]
+modules = ["backend.api"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = [
+  "acme.product.logging",
+  "acme.backend.rate-limit",
+  "acme.backend.sql-parameters",
+  "acme.backend.money-minor-units",
+  "acme.backend.refresh-rotation",
+  "acme.contract.token-refresh",
+]
+forbid = ["acme.mobile.token-storage", "acme.mobile.ui-accessibility"]
+expect_status = "complete"

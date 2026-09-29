@@ -1,0 +1,17 @@
+# Synthetic migration fixture: not real project data.
+schema = 1
+
+[[owner]]
+id = "arch"
+title = "Architecture group"
+product = true
+
+[[owner]]
+id = "team-mobile"
+title = "Mobile team"
+repos = ["mobile"]
+
+[[owner]]
+id = "team-backend"
+title = "Backend team"
+repos = ["backend"]

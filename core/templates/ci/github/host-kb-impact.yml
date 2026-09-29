@@ -1,0 +1,74 @@
+# kb checks for a HOST repository that mounts the KB as a Git submodule.
+# Copy to .github/workflows/kb-impact.yml in the host and set KB_PATH to the submodule path
+# (`kb_path` in the KB's project/skill-config/skill.toml).
+#
+# Prerequisites (administrator actions, not provided by this file):
+# * read access to the KB repository for the checkout (for a private KB, a read-only deploy
+#   key or token configured as a secret);
+# * branch protection that makes this workflow a required check, if it should block merges.
+#
+# The impact check verifies that the merge request description contains a well-formed
+# `kb-impact` block (see core/templates/mr/) and relates the diff to knowledge. It cannot
+# verify the engineering reasoning in that block; reviewers do.
+#
+# It reads the KB revision this host pins (`--snapshot pinned`), not the default `auto`:
+# `auto` fails with UPDATE_REQUIRED whenever the approved KB tip is ahead of the pin, which
+# is the normal state after a knowledge change is merged and before the host pin update
+# lands (see the linked-MR checklist in core/templates/mr/). Freshness is still verified and
+# the approved tip is reported.
+name: kb-impact
+
+on:
+  pull_request:
+    # `edited`: the checked input is the description, so editing the `kb-impact` block must
+    # re-run the check (re-running a job replays the old description).
+    types: [opened, synchronize, reopened, edited]
+
+concurrency:
+  group: kb-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  KB_PATH: .kb
+
+jobs:
+  kb-impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Check out the pinned KB revision (no recursive submodules)
+        run: git submodule update --init -- "$KB_PATH"
+
+      - name: Install the KB's pinned Rust toolchain
+        working-directory: ${{ env.KB_PATH }}
+        run: rustup toolchain install
+
+      - name: Cache the kb runtime
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.KB_PATH }}/.cache/runtime
+          key: kb-runtime-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', env.KB_PATH), format('{0}/core/release.toml', env.KB_PATH), format('{0}/core/cli/**', env.KB_PATH)) }}
+
+      - name: Bootstrap the kb runtime of the pinned KB (explicit; source build or cache hit)
+        run: '"$KB_PATH/kbw" --kbw-bootstrap'
+
+      - name: Save the merge request description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s\n' "$PR_BODY" > "$RUNNER_TEMP/mr-description.md"
+
+      - name: Knowledge impact of this change (kb-impact block required)
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        # Pinned KB revision (the checkout bootstrapped above); see the header.
+        run: '"$KB_PATH/kbw" impact --base "origin/$BASE_REF" --statement "$RUNNER_TEMP/mr-description.md" --snapshot pinned --check'
+
+      - name: Installed agent skill and managed blocks are current
+        run: '"$KB_PATH/kbw" integrate --check'

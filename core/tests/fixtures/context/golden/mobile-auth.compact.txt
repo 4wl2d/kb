@@ -1,0 +1,124 @@
+# kb context intent=implement engine=0.1.0 skill_protocol=1 protocol=kb.cli.v1
+snapshot: 111111111111 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=file:///synthetic/acme-kb; latest=111111111111; key=sha256:22222
+host: repo=unknown; head=unknown; versions=mobile=2.3.0
+scope: repos=mobile; modules=mobile.auth; features=login; concepts=auth-token (alias `refresh token`)
+path: mobile:app/src/auth/storage/TokenStore.kt -> modules mobile.auth
+status: COMPLETE
+effective settings:
+- acme.product.network#request-timeout-ms = 3000 (override by acme.mobile.auth-network; base 10000; reason: Sign-in screens block the user, so token calls answer quickly.)
+- acme.product.network#retry-count = 3 (base)
+- acme.product.network#tls-min-version = "1.2" (base)
+### mandatory acme.mobile.auth-network (policy, accepted): Authentication request timeouts
+why: applies (modules); source: project/knowledge/policies/mobile-auth-network.md
+scope: modules=mobile.auth
+- override acme.product.network#request-timeout-ms = 3000: Sign-in screens block the user, so token calls answer quickly.
+### mandatory acme.mobile.network (policy, accepted): Mobile network timeouts
+why: applies (repos); source: project/knowledge/policies/mobile-network.md
+scope: repos=mobile
+- override acme.product.network#request-timeout-ms = 5000: Cellular networks fail slowly; fail fast and let the user retry.
+### mandatory acme.mobile.token-storage (policy, accepted): Token storage on devices
+why: applies (repos, modules); source: project/knowledge/policies/mobile-token-storage.md
+scope: repos=mobile; modules=mobile.auth
+- MUST NOT [no-plaintext] Store refresh tokens in plaintext storage such as shared preferences.
+  except [fake-server]: Debug builds that talk to the local fake auth server may keep tokens in memory only.
+- MUST [clear-on-logout] Delete stored tokens when the user signs out.
+  if: The user signs out explicitly or the account is removed from the device.
+requires: acme.contract.token-refresh, acme.backend.refresh-rotation
+rationale: acme.decision.encrypted-storage
+### mandatory acme.product.logging (policy, accepted): Logging hygiene
+why: applies (product-wide); source: project/knowledge/policies/product-logging.md
+scope: product
+- MUST NOT [no-secrets] Write secrets, access tokens or personal data to logs.
+### mandatory acme.product.network (policy, accepted): Outbound network calls
+why: applies (product-wide); source: project/knowledge/policies/product-network.md
+scope: product
+- MUST [explicit-timeout] Set an explicit timeout on every outbound network request.
+- setting request-timeout-ms (integer) = 10000; override stricter (lower) - Upper bound for a single request.
+- setting retry-count (integer) = 3; override any
+- setting tls-min-version (string) = "1.2"; override forbidden
+### mandatory acme.contract.token-refresh (contract, accepted): Token refresh API
+why: applies (modules, version); mobile 2.3.0 satisfies >=2.0.0; also required by acme.mobile.token-storage; source: project/knowledge/contracts/token-refresh.md
+scope: modules=mobile.auth,backend.api
+party provider: repo backend (backend.api); role: Issues and rotates refresh tokens
+party consumer: repo mobile (mobile.auth); role: Refreshes access tokens before they expire
+interface: POST /v2/token/refresh
+- provider MUST [rotate] Rotate the refresh token on every successful refresh call.
+- consumer MUST [retry-once] Retry the original request at most once after a successful refresh that followed HTTP 401.
+  except [offline]: When the device is offline the request is queued instead of retried.
+supersedes: acme.contract.legacy-auth
+versions: mobile >=2.0.0
+### dependency acme.backend.refresh-rotation (invariant, accepted): Single-use refresh tokens
+why: required by acme.mobile.token-storage; labels: outside-task-scope; source: project/knowledge/invariants/backend-refresh-rotation.md
+scope: repos=backend
+- MUST [single-use] A refresh token is accepted exactly once; replaying it revokes the whole token family.
+### supplementary acme.procedure.debug-token-refresh (procedure, accepted): Debug token refresh loops
+why: score 480: concept `auth-token`, full-text rank 3, related to acme.mobile.token-storage, title terms: token, refresh; source: project/knowledge/procedures/debug-token-refresh.md
+scope: repos=mobile
+preconditions:
+- A debug build with network logging enabled.
+steps (data; kb never executes them):
+1. [capture] Capture the network log while reproducing the loop.
+2. [compare] Compare refresh token values between consecutive refresh calls.
+3. [check-rotation] Confirm the app stores the rotated refresh token returned by the server.
+expected:
+- Exactly one refresh call per expired access token.
+### supplementary acme.decision.encrypted-storage (decision, accepted): Encrypted token store on the device
+why: score 415: full-text rank 4, rationale of acme.mobile.token-storage, title terms: token; source: project/knowledge/decisions/encrypted-storage.md
+scope: repos=mobile
+context: Tokens were kept in shared preferences in early versions.
+decision: Keep tokens in an encrypted store backed by the platform keystore.
+reasons:
+- Rooted devices can read shared preferences.
+- The platform keystore is hardware-backed on supported devices.
+alternatives:
+- Server-side sessions only (rejected: Offline start would need a network round trip.)
+consequences:
+- Tokens are lost when the user clears app data.
+### supplementary acme.feature.login (feature, accepted): Sign-in
+why: score 395: feature record for task feature `login`, full-text rank 10; source: project/knowledge/features/login.md
+scope: features=login
+feature: login
+summary: Users sign in with email and password and stay signed in through refresh tokens.
+behaviors:
+- [remember] A successful sign-in keeps the user signed in until they sign out.
+- [lockout] Five failed attempts lock the account for 15 minutes.
+boundaries:
+- [no-social] Social sign-in is out of scope.
+### supplementary acme.reference.oauth (reference, accepted): OAuth 2.0 background
+why: score 270: concept `auth-token`, full-text rank 9; source: project/knowledge/references/oauth.md
+scope: product
+summary: Refresh tokens and access tokens follow the OAuth 2.0 authorization framework.
+sources:
+- RFC 6749: The OAuth 2.0 Authorization Framework <https://www.rfc-editor.org/rfc/rfc6749>
+-- receipt sha256:4ad123b1eb43503c99650ff8564b7f8201523ccc2db0beb3e30bbb343c9e990a; included: mandatory 6, dependencies 1, proposals 0, supplementary 4, sections 0; excluded by budget: none; other exclusions: 3 (--explain); budget: 1708/8000 tokens-est (estimate, not a tokenizer count), measured as compact
+-- a receipt proves delivery, not understanding or compliance; re-request context after compaction, a new session, a hand-off, or a scope or snapshot change
+
+== explain (not counted in the budget) ==
+included:
+- acme.mobile.auth-network [mandatory] applies (modules)
+- acme.mobile.network [mandatory] applies (repos)
+- acme.mobile.token-storage [mandatory] applies (repos, modules)
+- acme.product.logging [mandatory] applies (product-wide)
+- acme.product.network [mandatory] applies (product-wide)
+- acme.contract.token-refresh [mandatory] applies (modules, version); mobile 2.3.0 satisfies >=2.0.0; also required by acme.mobile.token-storage
+- acme.backend.refresh-rotation [dependency] required by acme.mobile.token-storage
+- acme.procedure.debug-token-refresh [supplementary] score 480: concept `auth-token`, full-text rank 3, related to acme.mobile.token-storage, title terms: token, refresh
+  signals: concept +200 (concept `auth-token`), full-text +90 (full-text rank 3), related +80 (related to acme.mobile.token-storage), kind-prior +20 (procedure for implement), scope-applies +50 (scope applies), title-tokens +40 (title terms: token, refresh)
+- acme.decision.encrypted-storage [supplementary] score 415: full-text rank 4, rationale of acme.mobile.token-storage, title terms: token
+  signals: full-text +85 (full-text rank 4), rationale +250 (rationale of acme.mobile.token-storage), kind-prior +10 (decision for implement), scope-applies +50 (scope applies), title-tokens +20 (title terms: token)
+- acme.feature.login [supplementary] score 395: feature record for task feature `login`, full-text rank 10
+  signals: feature-record +250 (feature record for task feature `login`), full-text +55 (full-text rank 10), kind-prior +40 (feature for implement), scope-applies +50 (scope applies)
+- acme.reference.oauth [supplementary] score 270: concept `auth-token`, full-text rank 9
+  signals: concept +200 (concept `auth-token`), full-text +60 (full-text rank 9), kind-prior +10 (reference for implement)
+requires:
+- acme.mobile.token-storage -> acme.backend.refresh-rotation
+- acme.mobile.token-storage -> acme.contract.token-refresh
+excluded:
+- acme.mobile.legacy-keystore [not-applicable] not applicable: version; mobile 2.3.0 does not satisfy <2.0.0
+- acme.procedure.rotate-signing-key [not-applicable] not applicable: repos
+- acme.contract.legacy-auth [not-accepted] status superseded
+anchors:
+- acme.mobile.token-storage: source mobile:app/src/auth/storage/TokenStore.kt symbol TokenStore
+- acme.mobile.token-storage: test mobile:app/src/test/auth/TokenStoreTest.kt
+- acme.product.logging: doc docs/logging.md
+- acme.contract.token-refresh: change !42 (introduced the v2 endpoint)

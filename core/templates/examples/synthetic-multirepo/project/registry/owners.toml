@@ -1,0 +1,22 @@
+# SYNTHETIC EXAMPLE owners (invented teams).
+schema = 1
+
+[[owner]]
+id = "architecture"
+title = "Architecture group (synthetic)"
+product = true
+
+[[owner]]
+id = "team-mobile"
+title = "Mobile team (synthetic)"
+repos = ["mobile"]
+
+[[owner]]
+id = "team-backend"
+title = "Backend team (synthetic)"
+repos = ["backend"]
+
+[[owner]]
+id = "team-platform"
+title = "API platform team (synthetic)"
+repos = ["shared-contracts"]

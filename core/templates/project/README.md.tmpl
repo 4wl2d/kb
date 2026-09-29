@@ -1,0 +1,51 @@
+# {{name}}: engineering knowledge base
+
+This directory holds the project-owned knowledge of **{{name}}** (record id namespace
+`{{namespace}}`). Everything outside `project/` (and the downstream CI workflow
+`.github/workflows/kb-knowledge.yml`) is the shared kb engine and is updated from upstream
+with `./kbw update`, not edited here.
+
+## Layout
+
+| path | content |
+|---|---|
+| `project.toml` | profile config: namespace, approved source (`{{remote}}` / `{{approved_ref}}`), knowledge roots, context budget |
+| `registry/` | owners, repositories, modules, features and concepts (multilingual aliases) |
+| `knowledge/<group>/*.md` | typed records (`+++` TOML front matter + optional Markdown); groups are for people only |
+| `routing-tests/*.toml` | golden context requests checked by `./kbw validate` |
+| `skill-config/skill.toml` | settings of the generated agent skill; `generated/` is rendered from it |
+| `upstream.toml` | upstream base used by `./kbw update divergence` and `./kbw update prepare` |
+
+Record templates for all kinds are in `core/templates/records/`.
+
+## Everyday commands
+
+```sh
+./kbw validate                          # records, links, policies, registries, routing tests
+./kbw context --intent implement --task "..." --repo <repo> --path <repo>:<path>
+./kbw show <record-id>                  # full record; --section <id> for one section
+./kbw integrate --generate --apply      # after editing skill-config/skill.toml
+```
+
+## Workflow
+
+1. Knowledge changes go through merge requests like code. New knowledge starts as
+   `status = "draft"` with evidence (`anchors`); reviewers accept it by merging a change to
+   `status = "accepted"`. The approved ref `{{approved_ref}}` is the trust boundary: context
+   is served from what is merged there, and branch protection (configured by an
+   administrator) is what makes that meaningful.
+2. Host repositories mount this KB as a Git submodule at `{{kb_path}}` and run
+   `{{kb_path}}/kbw integrate --apply` to install the agent skill and managed instruction
+   blocks; the host CI template is `core/templates/ci/github/host-kb-impact.yml`
+   (GitLab: `core/templates/ci/gitlab/`).
+3. Code changes that affect knowledge use the linked-MR checklist in
+   `core/templates/mr/`: prepare knowledge, test code against that KB revision, merge the
+   reviewed knowledge, then update the host pin through review.
+
+Optional templates to adapt: `core/templates/ownership/CODEOWNERS.tmpl` and
+`core/templates/security/SECURITY.md.tmpl` (publish the latter as `.github/SECURITY.md`,
+which GitHub prefers over the engine-owned root `SECURITY.md`; organization names are
+explicit parameters; kb ships no defaults).
+
+Typing does not make knowledge true and does not remove natural-language prompt injection:
+records are data for agents and people, and kb never executes their content.

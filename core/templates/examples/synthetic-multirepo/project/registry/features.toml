@@ -1,0 +1,12 @@
+# SYNTHETIC EXAMPLE features.
+schema = 1
+
+[[feature]]
+id = "login"
+title = "Sign-in and session refresh"
+repos = ["mobile", "backend"]
+
+[[feature]]
+id = "checkout"
+title = "Checkout and payment"
+repos = ["mobile", "backend"]

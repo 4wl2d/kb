@@ -1,0 +1,27 @@
+# Profile configuration of this downstream knowledge base (trusted configuration).
+# Created by `kbw init`; reviewed like code. See docs/architecture.md §4.
+schema = 1
+
+[project]
+name = "{{name}}"
+# First segment of every record id, e.g. `{{namespace}}.mobile.token-storage`.
+namespace = "{{namespace}}"
+
+[source]
+# The approved ref of this remote is the trust boundary: context is served from what was
+# reviewed and merged there. Reviews/approvals themselves are enforced by the Git host
+# (branch protection), not by kb.
+remote = "{{remote}}"
+approved_ref = "{{approved_ref}}"
+# Explicit transport policy for freshness fetches (https, ssh, git, file, http).
+allowed_protocols = ["https", "ssh"]
+
+[knowledge]
+# Knowledge roots relative to project/. Every *.md file below them (except README.md) is a record.
+roots = ["knowledge"]
+
+[context]
+default_budget = 8000
+# `tokens-est` is a deterministic estimate, not a tokenizer count; `bytes` is exact.
+default_budget_unit = "tokens-est"
+max_supplementary = 12

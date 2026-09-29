@@ -1,0 +1,11 @@
+# Synthetic routing fixture: the mandatory part never gets truncated.
+schema = 1
+
+[[case]]
+name = "mandatory part does not fit a tiny budget"
+intent = "implement"
+paths = ["mobile:app/src/auth/storage/TokenStore.kt"]
+host_versions = ["mobile=2.3.0"]
+budget = 60
+budget_unit = "tokens-est"
+expect_budget_exceeded = true

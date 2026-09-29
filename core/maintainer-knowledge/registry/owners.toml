@@ -1,0 +1,6 @@
+schema = 1
+
+[[owner]]
+id = "maintainers"
+title = "kb engine maintainers"
+product = true

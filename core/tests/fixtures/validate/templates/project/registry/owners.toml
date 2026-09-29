@@ -1,0 +1,6 @@
+schema = 1
+# Add owners here, e.g.:
+# [[owner]]
+# id = "architecture"
+# title = "Architecture group"
+# product = true

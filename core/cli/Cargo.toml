@@ -1,0 +1,35 @@
+[package]
+name = "kb"
+version = "0.1.0"
+description = "Typed, verifiable engineering knowledge base CLI for coding agents and people"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[lib]
+name = "kb"
+path = "src/lib.rs"
+
+[[bin]]
+name = "kb"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+globset.workspace = true
+rusqlite.workspace = true
+schemars.workspace = true
+semver.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
+unicode-normalization.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest.workspace = true
+jsonschema = { version = "0.58", default-features = false }

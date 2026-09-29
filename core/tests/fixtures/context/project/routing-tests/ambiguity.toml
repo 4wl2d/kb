@@ -1,0 +1,38 @@
+# Synthetic routing fixture: "композиция" means UI composition or object composition.
+schema = 1
+
+[[case]]
+name = "composition without hints is ambiguous"
+intent = "explain"
+task = "Объясни, как устроена композиция"
+expect_ambiguous = ["композиция"]
+expect_included = ["acme.decision.compose-ui", "acme.decision.domain-composition"]
+expect_status = "partial"
+
+[[case]]
+name = "composition resolved by a path hint"
+intent = "refactor"
+task = "Упростить композицию экрана"
+paths = ["mobile:app/src/ui/catalog/CatalogScreen.kt"]
+host_versions = ["mobile=2.3.0"]
+expect_included = ["acme.decision.compose-ui", "acme.reference.design-system"]
+forbid = ["acme.decision.domain-composition"]
+expect_status = "complete"
+
+[[case]]
+name = "composition resolved by an explicit concept"
+intent = "explain"
+task = "Объясни композицию"
+concepts = ["object-composition"]
+repos = ["backend"]
+expect_included = ["acme.decision.domain-composition"]
+forbid = ["acme.decision.compose-ui"]
+expect_status = "partial"
+
+[[case]]
+name = "longer alias wins over the shared prefix alias"
+intent = "explain"
+task = "Композиция объектов в домене"
+repos = ["backend"]
+expect_included = ["acme.decision.domain-composition"]
+forbid = ["acme.decision.compose-ui", "acme.reference.design-system"]

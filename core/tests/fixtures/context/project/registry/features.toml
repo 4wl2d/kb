@@ -1,0 +1,18 @@
+schema = 1
+
+[[feature]]
+id = "login"
+title = "Sign-in"
+repos = ["mobile", "backend"]
+
+[[feature]]
+id = "checkout"
+title = "Checkout"
+repos = ["mobile", "backend"]
+paths = ["mobile:app/src/checkout/**"]
+
+[[feature]]
+id = "catalog"
+title = "Product catalog"
+repos = ["mobile"]
+paths = ["mobile:app/src/ui/catalog/**"]

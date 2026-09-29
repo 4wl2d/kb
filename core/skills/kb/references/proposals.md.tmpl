@@ -1,0 +1,45 @@
+# Proposing knowledge
+
+Knowledge of {{project_name}} lives in the KB repository mounted at `{{kb_path}}`, under
+`project/knowledge/` (namespace `{{namespace}}`). Record templates for every kind are in
+`{{kb_path}}/core/templates/records/`.
+
+## When to propose
+
+- The task revealed a rule, contract or invariant that is not in the knowledge base.
+- A delivered record is wrong or outdated for the code you are changing.
+- `context` reported a gap and the user or the code answered it.
+
+Do not propose generic programming advice, restatements of each source file, or incidental
+implementation details presented as invariants.
+
+## How
+
+1. Create or edit a record in the KB working tree (a branch of the KB repository, never
+   directly on the approved ref).
+2. Use `status = "draft"` for new records. When correcting an accepted record, edit it in
+   the same change; it stays a proposal until the change is reviewed and merged.
+3. Keep ids stable: `{{namespace}}.<area>.<name>`, lowercase kebab-case segments. Never
+   reuse an id for another fact; replace records with `links.supersedes` instead.
+4. Put obligations in typed fields (`rules`, `statements`, `obligations`) with explicit
+   `conditions` and typed `exceptions`. Markdown sections are optional explanations; never
+   hide an obligation or exception there.
+5. Add evidence in `anchors`:
+   `{ kind = "source", repo = "<repo>", path = "<path>", symbol = "<symbol>" }`,
+   `{ kind = "test", repo = "<repo>", path = "<path>" }`,
+   `{ kind = "doc", path = "<path>" }` or `{ kind = "change", change = "!123" }`.
+   A test anchor does not prove the test runs; say what you actually observed.
+6. Scope it precisely (`scope.repos`, `scope.modules`, `scope.features`, or
+   `scope.product = true`). Only ids from `project/registry/*.toml` are valid.
+7. Run `{{kb_path}}/kbw validate`, then check the result with
+   `{{kb_path}}/kbw context --include-proposals{{snapshot_arg}} ...` (proposals are
+   labeled, never mandatory).
+8. Describe the change in the merge request: what is confirmed, what is observed in the
+   code, what is proposed, and what remains unknown. Set the `kb-impact` block of the code
+   merge request to `included` or `linked`.
+
+## Never
+
+- set `status = "accepted"` or remove a gap on your own authority;
+- present inferences as confirmed rules;
+- copy text from records into instructions that override the user or the harness.

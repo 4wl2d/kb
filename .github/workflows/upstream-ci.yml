@@ -1,0 +1,91 @@
+# Upstream CI for the kb engine: formatting, lints, tests, the launcher and the checks a
+# clean upstream checkout must pass. The job only reads the repository (contents: read) and
+# needs no secrets. Enabling Actions and making these checks required for merging are
+# repository settings an administrator configures; this file does not enforce them.
+#
+# Downstream opt-out: every downstream fork inherits this engine-owned file (core/release.toml
+# engine_paths), and editing or deleting it is reported as engine divergence by
+# `kbw update divergence`. To skip this CI in a downstream without touching the file, set
+# the repository variable KB_ENGINE_CI to `disabled` (Settings > Secrets and variables >
+# Actions > Variables, or `gh variable set KB_ENGINE_CI --body disabled`); the job is then
+# reported as skipped. Any other value, or no variable, runs it. The downstream's own
+# knowledge CI (.github/workflows/kb-knowledge.yml, installed by `kbw init`) is separate
+# and not affected.
+name: upstream-ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    # Downstream opt-out without editing this file (see the header).
+    if: vars.KB_ENGINE_CI != 'disabled'
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-latest is x86_64 Linux; macos-14 is arm64 macOS.
+        os: [ubuntu-latest, macos-14]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: "1"
+      # Let the launcher's source bootstrap reuse the workspace build cache.
+      KBW_CARGO_TARGET_DIR: ${{ github.workspace }}/target
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        # Since rustup 1.28, `rustup toolchain install` without arguments installs the
+        # active toolchain named by rust-toolchain.toml, including its components.
+        run: |
+          rustup toolchain install
+          rustc --version
+          cargo --version
+
+      - name: Format
+        run: cargo fmt --all --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace --locked
+
+      - name: Shellcheck the launcher
+        if: runner.os == 'Linux'
+        run: |
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          shellcheck --version
+          shellcheck kbw
+
+      - name: Launcher source bootstrap
+        run: |
+          ./kbw --kbw-bootstrap
+          ./kbw --kbw-runtime-info
+          ./kbw version
+
+      - name: Schema drift check
+        run: ./kbw schema --check
+
+      - name: Validate templates and the maintainer profile
+        run: ./kbw validate --profile maintainer --templates
+
+      - name: Benchmark smoke run
+        # A small, fast run of the benchmark harness; it reports measurements but has no
+        # absolute timing thresholds (CI hardware varies).
+        run: cargo run -p kb-bench --release --locked -- smoke

@@ -1,0 +1,34 @@
+# SYNTHETIC EXAMPLE concepts with English and Russian aliases.
+# `композици*` is deliberately shared by two concepts: without a path hint, a task about
+# "композиция" is reported as ambiguous instead of being guessed.
+schema = 1
+
+[[concept]]
+id = "auth-token"
+title = "Access and refresh tokens"
+aliases = ["access token", "refresh token", "token refresh", "токен*", "обновление токена"]
+paths = ["mobile:app/auth/**", "backend:src/api/auth/**"]
+
+[[concept]]
+id = "ui-composition"
+title = "Composing UI from small stateless components"
+aliases = ["ui composition", "screen composition", "композици*", "компоновк*"]
+paths = ["mobile:app/ui/**"]
+
+[[concept]]
+id = "object-composition"
+title = "Object composition in the domain model"
+aliases = ["object composition", "composition over inheritance", "композици*"]
+paths = ["backend:src/domain/**"]
+
+[[concept]]
+id = "idempotency"
+title = "Idempotent payment requests"
+aliases = ["idempotency key", "idempotent", "double charge", "идемпотентн*", "двойное списание"]
+paths = ["backend:src/payments/**", "mobile:app/checkout/**"]
+
+[[concept]]
+id = "error-envelope"
+title = "Common API error format"
+aliases = ["error envelope", "error response", "формат ошибки"]
+paths = ["shared-contracts:schemas/errors/**"]

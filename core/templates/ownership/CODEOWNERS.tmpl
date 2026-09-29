@@ -1,0 +1,21 @@
+# CODEOWNERS for a downstream KB repository (GitHub: .github/CODEOWNERS; GitLab: CODEOWNERS
+# or .gitlab/CODEOWNERS). Replace the placeholders with real handles of your organization,
+# for example `@your-org/kb-engine`; kb ships no default owners.
+#   {{engine_owners}}     reviewers of engine updates (paths that come from upstream)
+#   {{knowledge_owners}}  reviewers of project knowledge and its CI
+# Code owners only request reviews. Making their approval mandatory requires branch
+# protection / approval rules configured by an administrator.
+
+# Engine-owned paths (core/release.toml `engine_paths`): change them through `kbw update`.
+/kbw                      {{engine_owners}}
+/Cargo.toml               {{engine_owners}}
+/Cargo.lock               {{engine_owners}}
+/rust-toolchain.toml      {{engine_owners}}
+/core/                    {{engine_owners}}
+/docs/                    {{engine_owners}}
+
+# Project knowledge. Narrow it per group or repository when teams own different parts, e.g.
+# /project/knowledge/repos/mobile/  @your-org/mobile
+/project/                 {{knowledge_owners}}
+/project/upstream.toml    {{engine_owners}}
+/.github/workflows/kb-knowledge.yml {{knowledge_owners}}

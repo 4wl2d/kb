@@ -1,0 +1,15 @@
+# Synthetic migration fixture: not real project data.
+schema = 0
+
+[kb]
+name = "Legacy Example (synthetic)"
+namespace = "legacy"
+
+# Branch of the KB origin that holds reviewed knowledge.
+[origin]
+remote = "origin"
+branch = "main"
+protocols = ["file"] # local bare remotes in tests
+
+[knowledge]
+roots = ["knowledge"]

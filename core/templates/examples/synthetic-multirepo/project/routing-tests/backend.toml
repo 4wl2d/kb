@@ -1,0 +1,50 @@
+# SYNTHETIC EXAMPLE routing tests for the backend repository.
+schema = 1
+
+[[case]]
+name = "payment code: stricter review override, payment contract, known gap"
+intent = "implement"
+task = "Add a retry to the charge call"
+repos = ["backend"]
+paths = ["backend:src/payments/ChargeService.kt"]
+expect_mandatory = [
+  "example.backend.payments-review",
+  "example.common.code-review",
+  "example.contract.payment-intent",
+  "example.gap.offline-checkout",
+]
+expect_included = ["example.contract.error-envelope", "example.decision.integer-money"]
+forbid = [
+  "example.backend.composition-over-inheritance",
+  "example.backend.migration-compat",
+  "example.contract.token-refresh",
+  "example.decision.secure-token-storage",
+  "example.feature.login",
+  "example.mobile.biometric-unlock",
+  "example.mobile.single-refresh",
+  "example.mobile.state-hoisting",
+  "example.mobile.token-storage",
+  "example.procedure.rotate-signing-keys",
+  "example.reference.auth-overview",
+]
+
+[[case]]
+name = "domain refactoring: migration invariant and composition policy only"
+intent = "refactor"
+task = "Split the order aggregate into smaller services"
+repos = ["backend"]
+paths = ["backend:src/domain/order/OrderAggregate.kt"]
+expect_mandatory = [
+  "example.backend.composition-over-inheritance",
+  "example.backend.migration-compat",
+  "example.common.code-review",
+]
+forbid = [
+  "example.backend.payments-review",
+  "example.contract.payment-intent",
+  "example.contract.token-refresh",
+  "example.gap.offline-checkout",
+  "example.mobile.single-refresh",
+  "example.mobile.state-hoisting",
+  "example.mobile.token-storage",
+]

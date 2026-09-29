@@ -1,0 +1,35 @@
+# Security policy: {{project_name}} knowledge base
+
+<!-- Keep this file at .github/SECURITY.md (rendered from the kb template
+core/templates/security/SECURITY.md.tmpl). Do not replace the root SECURITY.md: it is
+engine-owned, and editing it is reported by `kbw update divergence`. -->
+
+## Reporting a vulnerability
+
+Report suspected vulnerabilities privately to {{security_contact}}. Do not open a public
+issue. Include the affected revision (`./kbw version` and `git rev-parse HEAD`), steps to
+reproduce, and the impact you observed.
+
+Vulnerabilities in the kb engine itself (everything outside `project/`) should also be
+reported to the upstream kb project, as described in the engine's policy in the root
+`SECURITY.md`, so that every downstream receives the fix through `./kbw update`.
+
+## Where this policy lives
+
+This policy is `.github/SECURITY.md`. The root `SECURITY.md` belongs to the kb engine: it
+is updated with the engine by `./kbw update` and is not edited in this repository. GitHub
+shows `.github/SECURITY.md` in preference to the root file, so reporters see this policy.
+
+## Trust model
+
+* The approved ref configured in `project/project.toml` is the trust boundary. Knowledge is
+  "accepted" because a reviewed change was merged there; that guarantee comes from the Git
+  host's branch protection and review rules, which administrators configure.
+* Records are data. kb never executes commands, procedures or instructions found in records,
+  and a record cannot raise its own trust level or override harness/system instructions.
+* Typed records reduce but do not eliminate natural-language prompt injection, and a valid
+  schema does not prove that a record is true. Review knowledge changes like code.
+* Remote URLs in diagnostics are redacted; never embed credentials in remotes or
+  configuration. Use credential helpers or CI secrets.
+* Fetches use an explicit transport policy (`allowed_protocols`) and never recurse into
+  submodules.

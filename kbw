@@ -1,0 +1,685 @@
+#!/bin/sh
+# kbw: the project launcher for the kb engine (docs/architecture.md, section 9).
+#
+# kbw runs the runtime built from THIS checkout's engine sources and never a `kb` found on
+# PATH. The runtime lives in .cache/runtime/<fingerprint>/ (kb + BUILD-INFO), where the
+# fingerprint is the sha256 over the sorted `sha256  path` lines of the engine build
+# inputs. The runtime is created explicitly: --kbw-bootstrap builds it from source with the
+# pinned toolchain (the fingerprint is compiled in and must be reported back by
+# `kb --json version`) and activates it by an atomic rename, or --kbw-install-artifact installs
+# a verified release archive. Normal commands fail with KBW_RUNTIME_NOT_BOOTSTRAPPED instead of
+# building implicitly (unless KBW_AUTO_BOOTSTRAP=1). Launcher flags are
+# recognized only as the first argument; every other invocation is passed to the runtime
+# unchanged, with KB_ROOT and KBW_FINGERPRINT exported. Progress goes to stderr only.
+set -eu
+unset CDPATH
+
+KBW_EXIT_USAGE=2
+KBW_EXIT_RUNTIME=50
+
+kbw_note() {
+	printf 'kbw: %s\n' "$*" >&2
+}
+
+kbw_die() { # <error code> <exit status> <message...>
+	kbw_code=$1
+	kbw_status=$2
+	shift 2
+	printf 'kbw: error[%s]: %s\n' "$kbw_code" "$*" >&2
+	exit "$kbw_status"
+}
+
+kbw_usage_error() {
+	kbw_die KBW_USAGE "$KBW_EXIT_USAGE" "$* (see ./kbw --kbw-help)"
+}
+
+kbw_bootstrap_failed() {
+	kbw_die KBW_BOOTSTRAP_FAILED "$KBW_EXIT_RUNTIME" "$*; any previously built runtime is unchanged"
+}
+
+kbw_artifact_invalid() {
+	kbw_die KBW_ARTIFACT_INVALID "$KBW_EXIT_RUNTIME" "$*; the active runtime is unchanged"
+}
+
+kbw_help() {
+	cat <<'EOF'
+kbw - project launcher for the kb engine
+
+Usage:
+  ./kbw <kb arguments...>          run the bootstrapped runtime of this checkout
+  ./kbw --kbw-help                 show this help
+  ./kbw --kbw-fingerprint          print the engine fingerprint of this checkout
+  ./kbw --kbw-bootstrap            ensure the runtime exists and print its directory
+  ./kbw --kbw-runtime-info         print fingerprint, runtime path, source, engine version, target
+  ./kbw --kbw-install-artifact <archive-path|https-url> (--sha256 <hex> | --sha256-file <SHA256SUMS>)
+                                   verify and activate a release archive for this exact engine
+  ./kbw --kbw-package <out-dir>    write kb-<version>-<target>.tar.gz and its .sha256 file
+
+Launcher flags are recognized only as the first argument.
+
+Environment:
+  KBW_CARGO_TARGET_DIR             cargo target directory for source builds
+                                   (default: <root>/.cache/cargo-target); a relative
+                                   value is resolved against the directory kbw is run
+                                   from, not against <root>
+  KBW_ALLOW_TOOLCHAIN_MISMATCH=1   build with a rustc other than the pinned one (warns)
+  KBW_AUTO_BOOTSTRAP=1             let normal commands build a missing runtime (CI); by
+                                   default a missing runtime is an error and bootstrap is
+                                   the explicit --kbw-bootstrap action
+
+Errors are reported as `kbw: error[CODE]: message` on stderr with exit status 50
+(KBW_RUNTIME_NOT_BOOTSTRAPPED, KBW_BOOTSTRAP_FAILED, KBW_TOOLCHAIN_MISMATCH,
+KBW_ARTIFACT_INVALID, KBW_PACKAGE_FAILED, KBW_MANIFEST_INVALID) or 2 (KBW_USAGE).
+EOF
+}
+
+# --- locations -------------------------------------------------------------------------
+
+# Physical directory of this script, following symlinks to the launcher itself.
+kbw_resolve_root() {
+	kbw_self=$0
+	case $kbw_self in */*) ;; *) kbw_self=./$kbw_self ;; esac
+	while [ -L "$kbw_self" ]; do
+		kbw_link=$(readlink -- "$kbw_self") || return 1
+		case $kbw_link in
+		/*) kbw_self=$kbw_link ;;
+		*) kbw_self=${kbw_self%/*}/$kbw_link ;;
+		esac
+	done
+	kbw_dir=${kbw_self%/*}
+	cd -P -- "${kbw_dir:-/}" && pwd
+}
+
+KBW_ROOT=$(kbw_resolve_root) || kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "cannot resolve the launcher directory from $0"
+KBW_MANIFEST=$KBW_ROOT/core/release.toml
+KBW_RUNTIME=$KBW_ROOT/.cache/runtime
+KBW_STAMP=$KBW_RUNTIME/stamp
+
+# --- temporary paths and cleanup -------------------------------------------------------
+
+KBW_TMP_REF=
+KBW_TMP_BUILD=
+KBW_TMP_WORK=
+KBW_TMP_STAGE=
+KBW_TMP_PREV=
+KBW_TMP_OUT=
+
+# Remove one of the launcher's own temporary directories; nothing else is ever removed.
+kbw_rm_tmp() {
+	case $1 in
+	*/../* | */..) kbw_note "internal: refusing to remove $1" ;;
+	"$KBW_RUNTIME"/.tmp.*) rm -rf -- "$1" ;;
+	*) kbw_note "internal: refusing to remove $1" ;;
+	esac
+}
+
+# Create a fresh launcher temporary directory `.cache/runtime/.tmp.<name>.<pid>`.
+kbw_mktmp() { # <name>
+	kbw_tmp=$KBW_RUNTIME/.tmp.$1.$$
+	[ ! -e "$kbw_tmp" ] || kbw_rm_tmp "$kbw_tmp"
+	mkdir -p "$KBW_RUNTIME" && mkdir "$kbw_tmp" && printf '%s\n' "$kbw_tmp"
+}
+
+kbw_cleanup() {
+	for kbw_p in "$KBW_TMP_REF" "$KBW_TMP_BUILD" "$KBW_TMP_WORK" "$KBW_TMP_STAGE" "$KBW_TMP_PREV"; do
+		if [ -n "$kbw_p" ] && [ -e "$kbw_p" ]; then kbw_rm_tmp "$kbw_p"; fi
+	done
+	if [ -n "$KBW_TMP_OUT" ] && [ -f "$KBW_TMP_OUT" ]; then rm -f -- "$KBW_TMP_OUT"; fi
+	KBW_TMP_PREV=''
+	KBW_TMP_REF=''
+	KBW_TMP_BUILD=''
+	KBW_TMP_WORK=''
+	KBW_TMP_STAGE=''
+	KBW_TMP_OUT=''
+}
+
+trap kbw_cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+# --- manifest, hashing, fingerprint ----------------------------------------------------
+
+# Scalar string value of core/release.toml (line-based: key = "value").
+kbw_manifest_value() { # <key>
+	sed -n 's/^'"$1"'[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p' "$KBW_MANIFEST" | sed -n 1p
+}
+
+kbw_load_manifest() {
+	[ -f "$KBW_MANIFEST" ] || kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "missing $KBW_MANIFEST (is $KBW_ROOT a kb checkout?)"
+	KBW_ENGINE_VERSION=$(kbw_manifest_value engine_version)
+	KBW_RUST_TOOLCHAIN=$(kbw_manifest_value rust_toolchain)
+	case $KBW_ENGINE_VERSION in
+	'' | *[!0-9A-Za-z.+-]*) kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "core/release.toml: engine_version is missing or malformed" ;;
+	esac
+	case $KBW_RUST_TOOLCHAIN in
+	'' | *[!0-9A-Za-z._-]*) kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "core/release.toml: rust_toolchain is missing or malformed" ;;
+	esac
+}
+
+kbw_is_hex64() {
+	case $1 in '' | *[!0-9a-f]*) return 1 ;; esac
+	[ ${#1} -eq 64 ]
+}
+
+# Lowercase hex sha256 of stdin.
+kbw_sha256_stdin() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		kbw_sum=$(sha256sum) || return 1
+	elif command -v shasum >/dev/null 2>&1; then
+		kbw_sum=$(shasum -a 256) || return 1
+	else
+		kbw_note "neither sha256sum nor shasum is available"
+		return 1
+	fi
+	printf '%s\n' "${kbw_sum%% *}"
+}
+
+kbw_sha256_file() {
+	kbw_sha256_stdin <"$1"
+}
+
+# Run find over the engine build inputs, relative to the root; extra arguments are the
+# find expression. Directories are included so that deletions and renames are noticed.
+kbw_find_inputs() {
+	(cd "$KBW_ROOT" && find Cargo.toml Cargo.lock rust-toolchain.toml core/release.toml \
+		core/cli/Cargo.toml core/cli/src "$@")
+}
+
+# `sha256  path` lines of the build inputs (hidden files and editor backups are ignored).
+kbw_hash_inputs() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		kbw_find_inputs -type f ! -name '.*' ! -name '*~' -exec sha256sum -- {} +
+	else
+		kbw_find_inputs -type f ! -name '.*' ! -name '*~' -exec shasum -a 256 -- {} +
+	fi
+}
+
+# Fingerprint = sha256 of the LC_ALL=C sorted `sha256  path` lines, each ending in "\n".
+kbw_compute_fingerprint() {
+	kbw_lines=$(kbw_hash_inputs) ||
+		kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "cannot hash the engine build inputs under $KBW_ROOT (missing Cargo.toml, Cargo.lock, rust-toolchain.toml, core/release.toml or core/cli?)"
+	KBW_FP=$(printf '%s\n' "$kbw_lines" | LC_ALL=C sort | kbw_sha256_stdin) ||
+		kbw_die KBW_MANIFEST_INVALID "$KBW_EXIT_RUNTIME" "cannot compute the engine fingerprint"
+}
+
+# Warm path: reuse the stamp's fingerprint when no build input changed since it was written
+# and its runtime exists. Sets KBW_FP; returns non-zero when the fingerprint must be computed.
+kbw_cached_fingerprint() {
+	[ -f "$KBW_STAMP" ] || return 1
+	KBW_FP=
+	IFS= read -r KBW_FP <"$KBW_STAMP" || :
+	kbw_is_hex64 "$KBW_FP" || return 1
+	[ -f "$KBW_RUNTIME/$KBW_FP/kb" ] && [ -x "$KBW_RUNTIME/$KBW_FP/kb" ] || return 1
+	kbw_changed=$(kbw_find_inputs \( -newer "$KBW_STAMP" -o -cnewer "$KBW_STAMP" \) -print 2>/dev/null) || return 1
+	[ -z "$kbw_changed" ]
+}
+
+# Compute the fingerprint, first creating a reference file whose mtime later becomes the
+# stamp's mtime, so edits made while hashing or building are noticed by the next run.
+kbw_fresh_fingerprint() {
+	KBW_TMP_REF=$KBW_RUNTIME/.tmp.ref.$$
+	if ! { mkdir -p "$KBW_RUNTIME" && touch "$KBW_TMP_REF"; } 2>/dev/null; then
+		KBW_TMP_REF=
+	fi
+	kbw_compute_fingerprint
+}
+
+kbw_write_stamp() { # <fingerprint>
+	[ -n "$KBW_TMP_REF" ] || return 0
+	kbw_stamp_tmp=$KBW_RUNTIME/.tmp.stamp.$$
+	if printf '%s\n' "$1" >"$kbw_stamp_tmp" && touch -r "$KBW_TMP_REF" "$kbw_stamp_tmp" &&
+		mv -f "$kbw_stamp_tmp" "$KBW_STAMP"; then
+		:
+	else
+		rm -f -- "$kbw_stamp_tmp"
+		kbw_note "warning: could not update $KBW_STAMP; the next run re-hashes the engine inputs"
+	fi
+}
+
+kbw_target() {
+	case "$(uname -s)/$(uname -m)" in
+	Darwin/arm64 | Darwin/aarch64) echo aarch64-apple-darwin ;;
+	Darwin/x86_64) echo x86_64-apple-darwin ;;
+	Linux/x86_64 | Linux/amd64) echo x86_64-unknown-linux-gnu ;;
+	Linux/aarch64 | Linux/arm64) echo aarch64-unknown-linux-gnu ;;
+	*) echo unknown ;;
+	esac
+}
+
+# The single value of <key> in a BUILD-INFO file; fails when missing or repeated.
+kbw_info_value() { # <file> <key>
+	kbw_count=$(grep -c "^$2=" "$1") || :
+	[ "$kbw_count" = 1 ] || return 1
+	sed -n "s/^$2=//p" "$1"
+}
+
+# --- runtime build and activation ------------------------------------------------------
+
+kbw_runtime_ready() { # <fingerprint>
+	[ -f "$KBW_RUNTIME/$1/kb" ] && [ -x "$KBW_RUNTIME/$1/kb" ]
+}
+
+# The binary must run and report, through `kb --json version`, this engine version and the
+# fingerprint it was built for (result.engine_version, result.build_fingerprint): a binary
+# is never labelled with engine inputs other than those compiled into it. On failure
+# KBW_SMOKE_ERROR says what the binary reported.
+kbw_smoke() { # <kb binary> <fingerprint>
+	KBW_SMOKE_ERROR="\`kb --json version\` failed"
+	kbw_out=$(KB_ROOT=$KBW_ROOT "$1" --json version </dev/null 2>/dev/null) || return 1
+	# The JSON is pretty-printed; none of the compared values contains whitespace.
+	kbw_out=$(printf '%s\n' "$kbw_out" | tr -d ' \t\r\n') || return 1
+	kbw_got_version=$(printf '%s\n' "$kbw_out" | sed -n 's/.*"engine_version":"\([^"]*\)".*/\1/p')
+	kbw_got_build=$(printf '%s\n' "$kbw_out" | sed -n 's/.*"build_fingerprint":"\([^"]*\)".*/\1/p')
+	KBW_SMOKE_ERROR="it reports engine ${kbw_got_version:-(none)} and build fingerprint ${kbw_got_build:-(none)}, expected engine $KBW_ENGINE_VERSION and build fingerprint $2"
+	case $kbw_out in *'"ok":true'*) ;; *) return 1 ;; esac
+	[ "$kbw_got_version" = "$KBW_ENGINE_VERSION" ] && [ "$kbw_got_build" = "$2" ]
+}
+
+kbw_built_from() {
+	kbw_rev=
+	if command -v git >/dev/null 2>&1; then
+		kbw_rev=$(
+			unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE
+			cd "$KBW_ROOT" || exit 1
+			[ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$KBW_ROOT" ] || exit 1
+			git rev-parse --verify -q 'HEAD^{commit}' 2>/dev/null
+		) || kbw_rev=
+	fi
+	if [ -n "$kbw_rev" ]; then echo "git:$kbw_rev"; else echo unknown; fi
+}
+
+# Fail unless the rustc on PATH (as selected in the root, where rustup honors
+# rust-toolchain.toml) is the pinned toolchain from core/release.toml.
+kbw_check_toolchain() {
+	KBW_RUSTC=$(cd "$KBW_ROOT" && rustc --version 2>/dev/null) || KBW_RUSTC=
+	case $KBW_RUST_TOOLCHAIN in
+	[0-9]*.[0-9]*) ;;
+	*)
+		# A channel name (e.g. "stable") can only be honored through rustup.
+		if command -v rustup >/dev/null 2>&1; then return 0; fi
+		;;
+	esac
+	kbw_have=$(printf '%s\n' "$KBW_RUSTC" | sed -n 's/^rustc \([^ ]*\).*$/\1/p')
+	[ "$kbw_have" != "$KBW_RUST_TOOLCHAIN" ] || return 0
+	kbw_msg="rustc ${kbw_have:-(not found)} is not the pinned toolchain $KBW_RUST_TOOLCHAIN (core/release.toml rust_toolchain); install it with rustup (it reads rust-toolchain.toml), or set KBW_ALLOW_TOOLCHAIN_MISMATCH=1 to build anyway"
+	if [ "${KBW_ALLOW_TOOLCHAIN_MISMATCH:-}" = 1 ]; then
+		kbw_note "warning[KBW_TOOLCHAIN_MISMATCH]: $kbw_msg"
+		return 0
+	fi
+	kbw_die KBW_TOOLCHAIN_MISMATCH "$KBW_EXIT_RUNTIME" "$kbw_msg"
+}
+
+kbw_cargo_build() { # <cargo target dir> <fingerprint>
+	(
+		cd "$KBW_ROOT" || exit 1
+		if [ "$(uname -s)" = Darwin ] && [ -z "${SDKROOT:-}" ] && command -v xcrun >/dev/null 2>&1; then
+			SDKROOT=$(xcrun --show-sdk-path 2>/dev/null) || SDKROOT=
+			if [ -n "$SDKROOT" ]; then export SDKROOT; fi
+		fi
+		unset CARGO_BUILD_TARGET
+		CARGO_TARGET_DIR=$1
+		# Compiled into the binary (kb --json version: result.build_fingerprint). As a tracked
+		# build input it also makes cargo recompile the engine whenever the fingerprint
+		# changes, even when mtimes look fresh (mtime-preserving copies, shared target dirs).
+		KBW_BUILD_FINGERPRINT=$2
+		export CARGO_TARGET_DIR KBW_BUILD_FINGERPRINT
+		exec cargo build --release --locked -p kb --manifest-path "$KBW_ROOT/Cargo.toml" 1>&2
+	)
+}
+
+kbw_write_build_info() { # <file> <fingerprint> <source>
+	{
+		printf 'engine_version=%s\n' "$KBW_ENGINE_VERSION"
+		printf 'fingerprint=%s\n' "$2"
+		printf 'target=%s\n' "$(kbw_target)"
+		printf 'source=%s\n' "$3"
+		printf 'rustc=%s\n' "$KBW_RUSTC"
+		printf 'built_from=%s\n' "$(kbw_built_from)"
+	} >"$1"
+}
+
+# Build the runtime from source into KBW_TMP_BUILD (smoke-tested, not yet active).
+kbw_stage_source_build() { # <fingerprint>
+	command -v cargo >/dev/null 2>&1 ||
+		kbw_bootstrap_failed "cargo is not on PATH; install Rust (rustup reads rust-toolchain.toml) or install a release archive with --kbw-install-artifact"
+	kbw_check_toolchain
+	kbw_target_dir=${KBW_CARGO_TARGET_DIR:-$KBW_ROOT/.cache/cargo-target}
+	# Cargo runs in the root: anchor a relative value at the caller's directory first (as
+	# `kb update prepare` does), so cargo and the check below use the same path.
+	case $kbw_target_dir in
+	/*) ;;
+	*)
+		kbw_cwd=$(pwd -P) || kbw_bootstrap_failed "cannot resolve the current directory for the relative KBW_CARGO_TARGET_DIR '$kbw_target_dir'"
+		kbw_target_dir=$kbw_cwd/$kbw_target_dir
+		;;
+	esac
+	kbw_note "building the kb runtime from source (engine $KBW_ENGINE_VERSION, fingerprint $1)"
+	kbw_cargo_build "$kbw_target_dir" "$1" || kbw_bootstrap_failed "cargo build --release --locked -p kb failed"
+	# An input edited while cargo ran may or may not be compiled in: label the binary with
+	# neither fingerprint.
+	kbw_compute_fingerprint
+	kbw_after=$KBW_FP
+	KBW_FP=$1
+	[ "$kbw_after" = "$1" ] ||
+		kbw_bootstrap_failed "the engine build inputs changed during the build (fingerprint $1 before, $kbw_after after); bootstrap again once the edits are finished"
+	kbw_bin=$kbw_target_dir/release/kb
+	[ -f "$kbw_bin" ] || kbw_bootstrap_failed "cargo did not produce $kbw_bin"
+	KBW_TMP_BUILD=$(kbw_mktmp build) || kbw_bootstrap_failed "cannot create a staging directory under $KBW_RUNTIME"
+	{
+		cp "$kbw_bin" "$KBW_TMP_BUILD/kb" && chmod 755 "$KBW_TMP_BUILD/kb" &&
+			kbw_write_build_info "$KBW_TMP_BUILD/BUILD-INFO" "$1" source-build
+	} || kbw_bootstrap_failed "cannot stage the runtime in $KBW_TMP_BUILD"
+	kbw_smoke "$KBW_TMP_BUILD/kb" "$1" || kbw_bootstrap_failed "the built binary failed the smoke test ($KBW_SMOKE_ERROR)"
+}
+
+# Replace the files of an existing runtime directory by renames over the old ones, so that
+# <dir>/kb resolves at every moment and running processes keep their binary. BUILD-INFO goes
+# first: an interruption between the two renames leaves the old kb described by the new
+# BUILD-INFO (same fingerprint), which never lets --kbw-package take an installed artifact
+# for a source build. A failed kb rename restores the previous BUILD-INFO.
+kbw_replace_runtime_files() { # <staged dir> <runtime dir>
+	if [ ! -d "$2" ] || [ -L "$2" ] || [ -d "$2/kb" ] || [ -d "$2/BUILD-INFO" ]; then
+		kbw_note "$2 is not a runtime directory (kb and BUILD-INFO files); remove it and retry"
+		return 1
+	fi
+	KBW_TMP_PREV=$(kbw_mktmp prev) || return 1
+	if [ -f "$2/BUILD-INFO" ]; then cp -p "$2/BUILD-INFO" "$KBW_TMP_PREV/BUILD-INFO" || return 1; fi
+	mv -f "$1/BUILD-INFO" "$2/BUILD-INFO" || return 1
+	if ! mv -f "$1/kb" "$2/kb"; then
+		if [ -f "$KBW_TMP_PREV/BUILD-INFO" ]; then
+			mv -f "$KBW_TMP_PREV/BUILD-INFO" "$2/BUILD-INFO" || kbw_note "could not restore $2/BUILD-INFO"
+		else
+			rm -f -- "$2/BUILD-INFO"
+		fi
+		return 1
+	fi
+	# Accompanying documents (LICENSE, README.md of an artifact).
+	for kbw_f in "$1"/*; do
+		if [ -f "$kbw_f" ] && [ ! -L "$kbw_f" ] && [ ! -d "$2/${kbw_f##*/}" ]; then
+			mv -f "$kbw_f" "$2/" || kbw_note "warning: could not install ${kbw_f##*/} into $2"
+		fi
+	done
+	kbw_rm_tmp "$KBW_TMP_PREV"
+	KBW_TMP_PREV=
+}
+
+# Activate a staged runtime directory as .cache/runtime/<fingerprint> without any moment in
+# which <fingerprint>/kb does not resolve: a new runtime directory is moved into place by one
+# rename; an existing one keeps its directory and has its files replaced by renames. With
+# replace=0 an existing complete runtime (a concurrent bootstrap) is kept.
+kbw_activate() { # <staged dir> <fingerprint> <replace: 0|1>
+	kbw_dest=$KBW_RUNTIME/$2
+	if [ "$3" = 0 ] && kbw_runtime_ready "$2"; then
+		kbw_rm_tmp "$1"
+		return 0
+	fi
+	if [ -e "$kbw_dest" ] || [ -L "$kbw_dest" ]; then
+		kbw_replace_runtime_files "$1" "$kbw_dest" || return 1
+		kbw_rm_tmp "$1"
+		return 0
+	fi
+	mv "$1" "$kbw_dest" || return 1
+	kbw_nested=$kbw_dest/${1##*/}
+	if [ -e "$kbw_nested" ]; then
+		# The destination appeared concurrently and mv nested ours inside it; keep theirs.
+		mv "$kbw_nested" "$1" && kbw_rm_tmp "$1"
+	fi
+	return 0
+}
+
+# Ensure the runtime for KBW_FP exists (building it from source if needed) and record the
+# stamp for the warm path.
+kbw_ensure_runtime() {
+	if ! kbw_runtime_ready "$KBW_FP"; then
+		kbw_stage_source_build "$KBW_FP"
+		kbw_activate "$KBW_TMP_BUILD" "$KBW_FP" 0 ||
+			kbw_bootstrap_failed "cannot activate $KBW_RUNTIME/$KBW_FP"
+		KBW_TMP_BUILD=
+		kbw_note "runtime ready: $KBW_RUNTIME/$KBW_FP"
+	fi
+	kbw_write_stamp "$KBW_FP"
+}
+
+# --- artifact install ------------------------------------------------------------------
+
+# Archive file name of a path or URL (a URL loses its query and fragment).
+kbw_source_name() { # <source>
+	kbw_name=$1
+	case $kbw_name in
+	*://*)
+		kbw_name=${kbw_name%%#*}
+		kbw_name=${kbw_name%%\?*}
+		;;
+	esac
+	printf '%s\n' "${kbw_name##*/}"
+}
+
+# The digest recorded for <name> in a sha256sum-format file (`<hex>  <name>` or `<hex> *<name>`).
+kbw_digest_from_sums() { # <sums file> <name>
+	[ -f "$1" ] || kbw_artifact_invalid "checksum file not found: $1"
+	KBW_SUMS_NAME=$2 awk '
+		{ sub(/\r$/, "") }
+		length($0) > 66 && substr($0, 65, 1) == " " && (substr($0, 66, 1) == " " || substr($0, 66, 1) == "*") &&
+			substr($0, 67) == ENVIRON["KBW_SUMS_NAME"] { print substr($0, 1, 64); n++ }
+		END { exit n == 1 ? 0 : 1 }
+	' "$1" || kbw_artifact_invalid "$1 does not contain exactly one entry for $2"
+}
+
+# Reject archives with absolute paths, `..` components, entries outside <top>/ and any
+# entry type other than regular files and directories. Nothing is extracted here.
+kbw_check_listing() { # <archive> <top dir name>
+	kbw_names=$(tar -tzf "$1" 2>/dev/null) || kbw_artifact_invalid "cannot list the archive (not a gzip-compressed tar?)"
+	[ -n "$kbw_names" ] || kbw_artifact_invalid "the archive is empty"
+	kbw_bad=$(printf '%s\n' "$kbw_names" | KBW_TOP=$2 awk '
+		BEGIN { top = ENVIRON["KBW_TOP"] }
+		{
+			ok = ($0 == top || $0 == top "/" || substr($0, 1, length(top) + 1) == top "/")
+			if (index("/" $0 "/", "/../") > 0) ok = 0
+			if (!ok) { print; exit 1 }
+		}') || kbw_artifact_invalid "unsafe archive entry '$kbw_bad' (entries must stay inside $2/ without '..' components)"
+	kbw_types=$(tar -tvzf "$1" 2>/dev/null) || kbw_artifact_invalid "cannot list the archive"
+	kbw_bad=$(printf '%s\n' "$kbw_types" | awk '
+		{ t = substr($0, 1, 1); if (t != "-" && t != "d") { print; exit 1 } }') ||
+		kbw_artifact_invalid "archive entry is not a regular file or directory: $kbw_bad"
+}
+
+kbw_install_artifact() { # <archive path or https URL> <--sha256|--sha256-file> <value>
+	case $2 in
+	--sha256) kbw_expected=$3 ;;
+	--sha256-file) kbw_expected=$(kbw_digest_from_sums "$3" "$(kbw_source_name "$1")") || exit "$KBW_EXIT_RUNTIME" ;;
+	esac
+	kbw_expected=$(printf '%s' "$kbw_expected" | tr 'A-F' 'a-f')
+	kbw_is_hex64 "$kbw_expected" || kbw_artifact_invalid "the expected sha256 must be 64 hexadecimal characters"
+	kbw_host=$(kbw_target)
+	[ "$kbw_host" != unknown ] || kbw_artifact_invalid "unsupported host platform $(uname -s)/$(uname -m)"
+	kbw_fresh_fingerprint
+	kbw_top=kb-$KBW_ENGINE_VERSION-$kbw_host
+	KBW_TMP_WORK=$(kbw_mktmp install) || kbw_artifact_invalid "cannot create a work directory under $KBW_RUNTIME"
+	kbw_archive=$KBW_TMP_WORK/artifact.tar.gz
+
+	case $1 in
+	https://*)
+		command -v curl >/dev/null 2>&1 || kbw_artifact_invalid "curl is required to download $1"
+		kbw_note "downloading $1"
+		curl --proto =https --proto-redir =https --tlsv1.2 -fsSL -o "$kbw_archive" "$1" ||
+			kbw_artifact_invalid "download failed: $1"
+		;;
+	*://*) kbw_artifact_invalid "only https:// URLs and local paths are accepted: $1" ;;
+	*)
+		[ -f "$1" ] || kbw_artifact_invalid "archive not found: $1"
+		# Verify and extract a private copy so the file cannot change after verification.
+		cp "$1" "$kbw_archive" || kbw_artifact_invalid "cannot copy $1"
+		;;
+	esac
+
+	kbw_actual=$(kbw_sha256_file "$kbw_archive") || kbw_artifact_invalid "cannot hash the archive"
+	[ "$kbw_actual" = "$kbw_expected" ] ||
+		kbw_artifact_invalid "sha256 mismatch for $1: expected $kbw_expected, got $kbw_actual (nothing was extracted)"
+	kbw_check_listing "$kbw_archive" "$kbw_top"
+
+	# -o: do not restore the archived owner when running as root.
+	{ mkdir "$KBW_TMP_WORK/x" && (cd "$KBW_TMP_WORK/x" && tar -xzof "$kbw_archive"); } ||
+		kbw_artifact_invalid "cannot extract the archive"
+	kbw_dir=$KBW_TMP_WORK/x/$kbw_top
+	[ -d "$kbw_dir" ] && [ ! -L "$kbw_dir" ] || kbw_artifact_invalid "the archive has no $kbw_top/ directory"
+	[ -f "$kbw_dir/kb" ] && [ ! -L "$kbw_dir/kb" ] && [ -x "$kbw_dir/kb" ] ||
+		kbw_artifact_invalid "$kbw_top/kb is missing or not an executable regular file"
+	[ -f "$kbw_dir/BUILD-INFO" ] && [ ! -L "$kbw_dir/BUILD-INFO" ] ||
+		kbw_artifact_invalid "$kbw_top/BUILD-INFO is missing"
+	for kbw_pair in "engine_version=$KBW_ENGINE_VERSION" "target=$kbw_host" "fingerprint=$KBW_FP"; do
+		kbw_key=${kbw_pair%%=*}
+		kbw_want=${kbw_pair#*=}
+		kbw_got=$(kbw_info_value "$kbw_dir/BUILD-INFO" "$kbw_key") ||
+			kbw_artifact_invalid "BUILD-INFO must contain exactly one $kbw_key= line"
+		[ "$kbw_got" = "$kbw_want" ] ||
+			kbw_artifact_invalid "BUILD-INFO $kbw_key is '$kbw_got' but this checkout needs '$kbw_want'"
+	done
+	{
+		{
+			awk '!/^(source|artifact_sha256)=/' "$kbw_dir/BUILD-INFO"
+			printf 'source=artifact\nartifact_sha256=%s\n' "$kbw_actual"
+		} >"$kbw_dir/BUILD-INFO.new" && mv -f "$kbw_dir/BUILD-INFO.new" "$kbw_dir/BUILD-INFO"
+	} || kbw_artifact_invalid "cannot record the artifact source in BUILD-INFO"
+	kbw_smoke "$kbw_dir/kb" "$KBW_FP" || kbw_artifact_invalid "the archived kb failed the smoke test ($KBW_SMOKE_ERROR)"
+
+	KBW_TMP_STAGE=$KBW_RUNTIME/.tmp.stage.$$
+	[ ! -e "$KBW_TMP_STAGE" ] || kbw_rm_tmp "$KBW_TMP_STAGE"
+	mv "$kbw_dir" "$KBW_TMP_STAGE" || kbw_artifact_invalid "cannot stage the runtime"
+	kbw_activate "$KBW_TMP_STAGE" "$KBW_FP" 1 || kbw_artifact_invalid "cannot activate $KBW_RUNTIME/$KBW_FP"
+	KBW_TMP_STAGE=
+	kbw_write_stamp "$KBW_FP"
+	kbw_note "installed $kbw_top (sha256 $kbw_actual) as the active runtime"
+	printf '%s\n' "$KBW_RUNTIME/$KBW_FP"
+}
+
+# --- packaging -------------------------------------------------------------------------
+
+kbw_package_failed() {
+	kbw_die KBW_PACKAGE_FAILED "$KBW_EXIT_RUNTIME" "$*"
+}
+
+# Create an uncompressed tar of <dir> without platform metadata (xattrs, ACLs, AppleDouble).
+kbw_tar_create() { # <archive> <dir>; run inside the parent of <dir>
+	if tar --version 2>/dev/null | grep -q bsdtar; then
+		COPYFILE_DISABLE=1 tar --no-xattrs --no-acls --no-fflags -cf "$1" "$2"
+	else
+		tar -cf "$1" "$2"
+	fi
+}
+
+kbw_package() { # <out dir>
+	kbw_host=$(kbw_target)
+	[ "$kbw_host" != unknown ] || kbw_package_failed "unsupported host platform $(uname -s)/$(uname -m)"
+	kbw_fresh_fingerprint
+	kbw_ensure_runtime
+	kbw_src=$KBW_RUNTIME/$KBW_FP
+	kbw_origin=$(kbw_info_value "$kbw_src/BUILD-INFO" source) || kbw_origin=
+	if [ "$kbw_origin" != source-build ] || ! kbw_smoke "$kbw_src/kb" "$KBW_FP"; then
+		# Never repackage an installed artifact, nor a binary that does not report this
+		# fingerprint (e.g. built by an older launcher): build this engine from source instead.
+		kbw_stage_source_build "$KBW_FP"
+		kbw_src=$KBW_TMP_BUILD
+	fi
+	kbw_top=kb-$KBW_ENGINE_VERSION-$kbw_host
+	mkdir -p "$1" || kbw_package_failed "cannot create $1"
+	KBW_TMP_WORK=$(kbw_mktmp package) || kbw_package_failed "cannot create a work directory under $KBW_RUNTIME"
+	kbw_pkg=$KBW_TMP_WORK/$kbw_top
+	{
+		mkdir "$kbw_pkg" && chmod 755 "$kbw_pkg" &&
+			cp "$kbw_src/kb" "$kbw_pkg/kb" && chmod 755 "$kbw_pkg/kb" &&
+			cp "$kbw_src/BUILD-INFO" "$kbw_pkg/BUILD-INFO" && chmod 644 "$kbw_pkg/BUILD-INFO"
+	} || kbw_package_failed "cannot stage the package contents"
+	for kbw_doc in LICENSE README.md; do
+		if [ -f "$KBW_ROOT/$kbw_doc" ]; then
+			{ cp "$KBW_ROOT/$kbw_doc" "$kbw_pkg/$kbw_doc" && chmod 644 "$kbw_pkg/$kbw_doc"; } ||
+				kbw_package_failed "cannot copy $kbw_doc"
+		fi
+	done
+	(cd "$KBW_TMP_WORK" && kbw_tar_create "$kbw_top.tar" "$kbw_top") || kbw_package_failed "tar failed"
+	kbw_file=$kbw_top.tar.gz
+	KBW_TMP_OUT=$1/.$kbw_file.tmp.$$
+	gzip -n -9 <"$KBW_TMP_WORK/$kbw_top.tar" >"$KBW_TMP_OUT" || kbw_package_failed "gzip failed"
+	kbw_sum=$(kbw_sha256_file "$KBW_TMP_OUT") || kbw_package_failed "cannot hash the archive"
+	mv -f "$KBW_TMP_OUT" "$1/$kbw_file" || kbw_package_failed "cannot write $1/$kbw_file"
+	KBW_TMP_OUT=$1/.$kbw_file.sha256.tmp.$$
+	{ printf '%s  %s\n' "$kbw_sum" "$kbw_file" >"$KBW_TMP_OUT" && mv -f "$KBW_TMP_OUT" "$1/$kbw_file.sha256"; } ||
+		kbw_package_failed "cannot write $1/$kbw_file.sha256"
+	KBW_TMP_OUT=''
+	printf '%s\n%s\n' "$1/$kbw_file" "$1/$kbw_file.sha256"
+}
+
+# --- entry point -----------------------------------------------------------------------
+
+kbw_runtime_info() {
+	kbw_cached_fingerprint || kbw_compute_fingerprint
+	kbw_dir=$KBW_RUNTIME/$KBW_FP
+	kbw_state=missing
+	kbw_origin=none
+	if kbw_runtime_ready "$KBW_FP"; then
+		kbw_state=active
+		kbw_origin=$(kbw_info_value "$kbw_dir/BUILD-INFO" source 2>/dev/null) || kbw_origin=unknown
+	fi
+	printf 'fingerprint=%s\nruntime=%s\nstatus=%s\nsource=%s\nengine_version=%s\ntarget=%s\n' \
+		"$KBW_FP" "$kbw_dir" "$kbw_state" "$kbw_origin" "$KBW_ENGINE_VERSION" "$(kbw_target)"
+}
+
+if [ "${1-}" = --kbw-help ]; then
+	[ $# -eq 1 ] || kbw_usage_error "--kbw-help takes no arguments"
+	kbw_help
+	exit 0
+fi
+
+kbw_load_manifest
+
+case ${1-} in
+--kbw-fingerprint)
+	[ $# -eq 1 ] || kbw_usage_error "--kbw-fingerprint takes no arguments"
+	kbw_cached_fingerprint || kbw_compute_fingerprint
+	printf '%s\n' "$KBW_FP"
+	;;
+--kbw-bootstrap)
+	[ $# -eq 1 ] || kbw_usage_error "--kbw-bootstrap takes no arguments"
+	if ! kbw_cached_fingerprint; then
+		kbw_fresh_fingerprint
+		kbw_ensure_runtime
+	fi
+	printf '%s\n' "$KBW_RUNTIME/$KBW_FP"
+	;;
+--kbw-runtime-info)
+	[ $# -eq 1 ] || kbw_usage_error "--kbw-runtime-info takes no arguments"
+	kbw_runtime_info
+	;;
+--kbw-install-artifact)
+	[ $# -eq 4 ] || kbw_usage_error "usage: --kbw-install-artifact <archive-path|https-url> (--sha256 <hex> | --sha256-file <SHA256SUMS>)"
+	case $3 in
+	--sha256 | --sha256-file) ;;
+	*) kbw_usage_error "expected --sha256 or --sha256-file after the archive, got '$3'" ;;
+	esac
+	kbw_install_artifact "$2" "$3" "$4"
+	;;
+--kbw-package)
+	[ $# -eq 2 ] && [ -n "$2" ] || kbw_usage_error "usage: --kbw-package <out-dir>"
+	kbw_package "$2"
+	;;
+--kbw-*)
+	kbw_usage_error "unknown launcher flag $1"
+	;;
+*)
+	if ! kbw_cached_fingerprint; then
+		kbw_fresh_fingerprint
+		if ! kbw_runtime_ready "$KBW_FP" && [ "${KBW_AUTO_BOOTSTRAP:-}" != 1 ]; then
+			# Knowledge commands never build or install an engine implicitly: the first
+			# bootstrap of a checkout's engine is an explicit, documented action.
+			kbw_die KBW_RUNTIME_NOT_BOOTSTRAPPED "$KBW_EXIT_RUNTIME" "no runtime for engine $KBW_ENGINE_VERSION (fingerprint $KBW_FP) in this checkout; bootstrap it explicitly with '$0 --kbw-bootstrap' (source build with the pinned toolchain) or '$0 --kbw-install-artifact ...', or set KBW_AUTO_BOOTSTRAP=1 to allow implicit builds (CI)"
+		fi
+		kbw_ensure_runtime
+	fi
+	kbw_cleanup
+	trap - EXIT HUP INT TERM
+	KB_ROOT=$KBW_ROOT
+	KBW_FINGERPRINT=$KBW_FP
+	export KB_ROOT KBW_FINGERPRINT
+	exec "$KBW_RUNTIME/$KBW_FP/kb" "$@"
+	;;
+esac

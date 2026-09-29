@@ -1,0 +1,18 @@
+schema = 1
+
+[project]
+name = "Acme Shop (synthetic context fixture)"
+namespace = "acme"
+
+[source]
+remote = "origin"
+approved_ref = "refs/heads/main"
+allowed_protocols = ["file"]
+
+[knowledge]
+roots = ["knowledge"]
+
+[context]
+default_budget = 8000
+default_budget_unit = "tokens-est"
+max_supplementary = 6

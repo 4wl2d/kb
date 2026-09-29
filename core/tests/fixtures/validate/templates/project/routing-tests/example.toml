@@ -1,0 +1,9 @@
+schema = 1
+
+[[case]]
+name = "token storage on mobile"
+intent = "implement"
+repos = ["mobile"]
+paths = ["app/auth/TokenStore.kt"]
+expect_mandatory = ["example.mobile.token-storage"]
+forbid = ["example.backend.rate-limit"]

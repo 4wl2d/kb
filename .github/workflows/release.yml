@@ -1,0 +1,172 @@
+# Release workflow: builds versioned kb runtime archives for macOS arm64 and Linux x86_64
+# with the project launcher (`./kbw --kbw-package`), writes SHA256SUMS and creates a GitHub
+# release. It has not published anything by itself; a release exists only after an owner
+# pushes a tag and this workflow succeeds.
+#
+# Prerequisites (administrator/owner actions, not guaranteed by this file):
+#   * GitHub Actions is enabled for the repository.
+#   * The organization/repository policy allows GITHUB_TOKEN to be granted
+#     `contents: write`; only the final `publish` job requests it.
+#   * A maintainer bumps `engine_version` in core/release.toml (and core/cli/Cargo.toml)
+#     through review, then pushes a tag `v<engine_version>` pointing at the reviewed
+#     commit, e.g. `git tag -s v0.1.0 && git push origin v0.1.0`. Protecting `v*` tags with
+#     a ruleset limits who can trigger a release.
+#   * `workflow_dispatch` rebuilds an existing tag (for example after a runner outage); it
+#     does not create tags.
+#
+# Consumers install an archive with an explicit digest, never by piping to a shell:
+#   ./kbw --kbw-install-artifact <archive-url> --sha256 <digest from SHA256SUMS>
+# The archive only activates when its BUILD-INFO fingerprint equals the local engine's.
+# The Linux binary is built on ubuntu-latest and needs a glibc at least as new as that
+# runner's.
+#
+# Downstream opt-out: every downstream fork inherits this engine-owned file (core/release.toml
+# engine_paths), and editing or deleting it is reported as engine divergence by
+# `kbw update divergence`. A downstream that does not publish its own runtime archives sets
+# the repository variable KB_RELEASE to `disabled` (Settings > Secrets and variables >
+# Actions > Variables, or `gh variable set KB_RELEASE --body disabled`): every job is then
+# skipped, so pushing a `v*` tag builds and publishes nothing. Any other value, or no
+# variable, keeps the release enabled.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to build (for example v0.1.0)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  CARGO_TERM_COLOR: always
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    name: verify tag
+    # Downstream opt-out without editing this file (see the header).
+    if: vars.KB_RELEASE != 'disabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Tag must equal v + engine_version
+        id: version
+        run: |
+          set -eu
+          version=$(sed -n 's/^engine_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p' core/release.toml)
+          crate=$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p' core/cli/Cargo.toml | head -n 1)
+          if [ -z "$version" ] || [ "$TAG" != "v$version" ]; then
+            echo "::error::tag '$TAG' does not match engine_version '$version' in core/release.toml"
+            exit 1
+          fi
+          if [ "$crate" != "$version" ]; then
+            echo "::error::core/cli/Cargo.toml version '$crate' differs from engine_version '$version'"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: build (${{ matrix.target }})
+    needs: verify
+    if: vars.KB_RELEASE != 'disabled'
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-14
+            target: aarch64-apple-darwin
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      TARGET: ${{ matrix.target }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          persist-credentials: false
+
+      - name: Install the pinned toolchain (rust-toolchain.toml)
+        run: |
+          rustup toolchain install
+          rustc --version
+
+      - name: Build the release archive
+        # Source-builds the runtime (cargo build --release --locked -p kb with the pinned
+        # toolchain) and writes dist/kb-<version>-<target>.tar.gz plus its .sha256 file.
+        run: ./kbw --kbw-package dist
+
+      - name: Verify the archive with the installer
+        run: |
+          set -eu
+          archive="dist/kb-$VERSION-$TARGET.tar.gz"
+          test -f "$archive"
+          (cd dist && shasum -a 256 -c "kb-$VERSION-$TARGET.tar.gz.sha256")
+          ./kbw --kbw-install-artifact "$archive" --sha256-file "$archive.sha256"
+          ./kbw --kbw-runtime-info
+          ./kbw version
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: kb-${{ matrix.target }}
+          path: |
+            dist/kb-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz
+            dist/kb-${{ needs.verify.outputs.version }}-${{ matrix.target }}.tar.gz.sha256
+          if-no-files-found: error
+
+  publish:
+    name: publish GitHub release
+    needs: [verify, build]
+    if: vars.KB_RELEASE != 'disabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          pattern: kb-*
+          merge-multiple: true
+
+      - name: Verify archives and write SHA256SUMS
+        working-directory: dist
+        run: |
+          set -eu
+          export LC_ALL=C
+          for sum in *.sha256; do sha256sum -c "$sum"; done
+          set -- kb-*.tar.gz
+          test "$#" -eq 2
+          sha256sum "$@" > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create the GitHub release
+        run: |
+          set -eu
+          gh release create "$TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "kb $VERSION" \
+            --notes "kb $VERSION runtime archives for aarch64-apple-darwin and x86_64-unknown-linux-gnu. Install with ./kbw --kbw-install-artifact <archive-url> --sha256 <digest from SHA256SUMS>; the archive activates only for a checkout whose engine fingerprint matches its BUILD-INFO." \
+            dist/kb-*.tar.gz dist/kb-*.tar.gz.sha256 dist/SHA256SUMS

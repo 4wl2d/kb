@@ -1,0 +1,13 @@
+# Upstream base of this downstream: the upstream repository and the commit the engine-owned
+# paths (core/release.toml `engine_paths`) were last taken from.
+# `kbw update divergence` reports engine paths that differ from `revision`;
+# `kbw update prepare` rewrites this file in its reviewable update branch.
+schema = 1
+{{upstream_url_line}}
+{{upstream_revision_line}}
+
+# Intentional local engine patches exempt from divergence errors (keep this list short and
+# send the patches upstream):
+# [[engine_patches]]
+# path = "core/cli/src/some_file.rs"
+# reason = "why this downstream must differ from upstream"

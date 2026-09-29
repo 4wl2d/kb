@@ -1,0 +1,19 @@
+# Synthetic routing fixture: an obligation applies without any keyword overlap.
+schema = 1
+
+[[case]]
+name = "obligation without keyword overlap"
+intent = "implement"
+task = "Сделать кнопку на экране каталога зелёной"
+paths = ["mobile:app/src/ui/catalog/CatalogScreen.kt"]
+host_versions = ["mobile=2.3.0"]
+expect_mandatory = ["acme.mobile.ui-accessibility", "acme.gap.offline-catalog", "acme.product.logging"]
+expect_included = ["acme.reference.design-system", "acme.feature.catalog"]
+forbid = [
+  "acme.mobile.token-storage",
+  "acme.backend.rate-limit",
+  "acme.backend.refresh-rotation",
+  "acme.contract.token-refresh",
+  "acme.decision.domain-composition",
+]
+expect_status = "complete"
