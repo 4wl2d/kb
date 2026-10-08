@@ -1,5 +1,8 @@
 //! Synthetic offline protocol fixture, not an AI agent or a benchmark contender.
 use std::fs;
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     if args.iter().any(|s| s == "--version") {
@@ -10,6 +13,41 @@ fn main() {
         assert!(
             fs::read(forbidden).is_err(),
             "fixture could read a protected file"
+        );
+    }
+    // Pinned Codex clients refuse to start when CODEX_HOME names a missing directory.
+    if let Some(home) = std::env::var_os("CODEX_HOME") {
+        assert!(
+            std::path::Path::new(&home).is_dir(),
+            "CODEX_HOME does not exist"
+        );
+    }
+    // Network stages reach the controller's egress proxy, which refuses unapproved targets.
+    // The request never names an approved host, so nothing leaves the machine.
+    let mut proxy_port = None;
+    if let Ok(url) = std::env::var("HTTPS_PROXY") {
+        let address = url.strip_prefix("http://").expect("loopback proxy URL");
+        proxy_port = address.rsplit_once(':').map(|(_, port)| port.to_string());
+        let mut proxy = TcpStream::connect(address).expect("sandbox blocked the egress proxy");
+        proxy
+            .set_read_timeout(Some(Duration::from_secs(10)))
+            .unwrap();
+        proxy
+            .write_all(b"CONNECT unapproved.example.invalid:443 HTTP/1.1\r\n\r\n")
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = proxy.read_to_end(&mut reply);
+        assert!(
+            !reply.starts_with(b"HTTP/1.1 200"),
+            "proxy tunnelled an unapproved host"
+        );
+    }
+    if let Ok(port) = std::env::var("KB_EVAL_DENIED_PORT")
+        && proxy_port.as_deref() != Some(port.as_str())
+    {
+        assert!(
+            TcpStream::connect(("127.0.0.1", port.parse::<u16>().unwrap())).is_err(),
+            "sandbox reached a host loopback port other than the egress proxy"
         );
     }
     assert!(

@@ -31,6 +31,8 @@ impl Area {
         for dir in [&area.home, &area.temp, &area.private] {
             fs::create_dir(dir)?;
         }
+        // `run` points CODEX_HOME here; Codex refuses to load its configuration without it.
+        fs::create_dir(area.home.join(".codex"))?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -148,8 +150,9 @@ pub fn seatbelt(
     }
     text.push_str("(allow file-read* file-write* (literal \"/dev/null\"))\n(allow file-read* (literal \"/dev/urandom\") (literal \"/dev/random\"))\n");
     if let Some(port) = proxy_port {
+        // Seatbelt accepts only `*` or `localhost` as the host; `localhost` means loopback.
         text.push_str(&format!(
-            "(allow network-outbound (remote ip \"127.0.0.1:{port}\"))\n"
+            "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
         ));
     }
     Ok(text)
@@ -280,7 +283,7 @@ pub fn run(
     program.validate()?;
     crate::model::id(name)?;
     let egress = if network && !policy.api_hosts.is_empty() {
-        Some(proxy::Proxy::start(&area.private, &policy.api_hosts)?)
+        Some(proxy::Proxy::start(&policy.api_hosts)?)
     } else {
         None
     };
@@ -442,9 +445,10 @@ mod tests {
             environment: Default::default(),
             api_hosts: vec![],
         };
+        assert!(a.home.join(".codex").is_dir());
         let profile = seatbelt(&a, &p, &[], Some(3210)).unwrap();
         assert!(profile.starts_with("(version 1)\n(deny default)"));
-        assert!(profile.contains("127.0.0.1:3210"));
+        assert!(profile.contains("(allow network-outbound (remote ip \"localhost:3210\"))"));
         assert!(!profile.contains(&format!("(subpath {})", quote(&a.private).unwrap())));
         assert!(!profile.contains("(allow network*)"));
     }

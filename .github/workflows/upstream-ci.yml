@@ -63,15 +63,6 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
-      - name: Install the Linux replay isolation backend
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y bubblewrap
-
-      - name: Replay isolation smoke (synthetic, offline, no model credentials)
-        run: cargo test -p kb-eval --locked --test replay_workflow -- --ignored
-
       - name: Shellcheck the launcher
         if: runner.os == 'Linux'
         run: |
@@ -103,3 +94,33 @@ jobs:
         # A small, fast run of the benchmark harness; it reports measurements but has no
         # absolute timing thresholds (CI hardware varies).
         run: cargo run -p kb-bench --release --locked -- smoke
+
+      # The replay steps run last, so a host that cannot sandbox does not skip the checks above.
+      - name: Install the Linux replay isolation backend
+        if: runner.os == 'Linux'
+        # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor
+        # (kernel.apparmor_restrict_unprivileged_userns), so bwrap cannot set up its
+        # namespaces. When that restriction is what blocks it, a binary-scoped profile grants
+        # `userns` to /usr/bin/bwrap alone; the host-wide sysctl is never lowered. A backend
+        # that still cannot create the namespaces fails this step with a clear message.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+          probe() { bwrap --unshare-all --die-with-parent --ro-bind / / /bin/true; }
+          if ! probe 2>/dev/null; then
+            restrict=/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+            if [ "$(cat "$restrict" 2>/dev/null)" = 1 ]; then
+              echo "Granting userns to /usr/bin/bwrap with a binary-scoped AppArmor profile"
+              printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+                'profile kb-eval-bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' \
+                | sudo tee /etc/apparmor.d/kb-eval-bwrap >/dev/null
+              sudo apparmor_parser -r /etc/apparmor.d/kb-eval-bwrap
+            fi
+            probe || {
+              echo "::error::bubblewrap cannot create isolated namespaces on this runner"
+              exit 1
+            }
+          fi
+
+      - name: Replay isolation smoke (synthetic, offline, no model credentials)
+        run: cargo test -p kb-eval --locked --test replay_workflow -- --ignored

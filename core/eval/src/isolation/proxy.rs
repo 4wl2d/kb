@@ -4,9 +4,11 @@ use crate::{Result, ensure};
 use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream, ToSocketAddrs};
+#[cfg(target_os = "linux")]
+use std::os::unix::net::UnixListener;
 #[cfg(unix)]
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::{Path, PathBuf};
+use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -188,23 +190,34 @@ fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) 
 
 pub(super) struct Proxy {
     pub port: u16,
-    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-    pub socket: PathBuf,
+    /// The Unix socket bubblewrap exposes inside the private network namespace.
+    #[cfg(target_os = "linux")]
+    pub socket: std::path::PathBuf,
     stop: Arc<AtomicBool>,
     active: Connections,
     worker: Option<std::thread::JoinHandle<()>>,
+    // Removed with the socket after `drop` has joined the listener thread.
+    #[cfg(target_os = "linux")]
+    _socket_dir: tempfile::TempDir,
 }
 impl Proxy {
-    pub fn start(dir: &Path, allowed: &[String]) -> Result<Self> {
-        let socket = dir.join("egress.sock");
+    pub fn start(allowed: &[String]) -> Result<Self> {
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
         listener.set_nonblocking(true)?;
-        #[cfg(unix)]
-        let unix = {
+        // A fresh 0700 directory directly under /tmp: `sun_path` holds at most 108 bytes,
+        // and stage directories can be nested arbitrarily deep.
+        #[cfg(target_os = "linux")]
+        let (socket_dir, socket, unix) = {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::Builder::new()
+                .prefix("kb-eval-")
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir_in("/tmp")?;
+            let socket = dir.path().join("egress.sock");
             let u = UnixListener::bind(&socket)?;
             u.set_nonblocking(true)?;
-            u
+            (dir, socket, u)
         };
         let stop = Arc::new(AtomicBool::new(false));
         let active: Connections = Default::default();
@@ -215,11 +228,17 @@ impl Proxy {
             let ids = AtomicU64::new(0);
             while !st.load(Ordering::Acquire) {
                 let mut clients = Vec::new();
-                if let Ok((c, _)) = listener.accept() {
+                // BSD accept(2) copies O_NONBLOCK from the polled listener; client I/O must
+                // block (bounded by `Socket::timeout`) or reads fail with WouldBlock.
+                if let Ok((c, _)) = listener.accept()
+                    && c.set_nonblocking(false).is_ok()
+                {
                     clients.push(Socket::Tcp(c));
                 }
-                #[cfg(unix)]
-                if let Ok((c, _)) = unix.accept() {
+                #[cfg(target_os = "linux")]
+                if let Ok((c, _)) = unix.accept()
+                    && c.set_nonblocking(false).is_ok()
+                {
                     clients.push(Socket::Unix(c));
                 }
                 for client in clients {
@@ -251,10 +270,13 @@ impl Proxy {
         });
         Ok(Self {
             port,
+            #[cfg(target_os = "linux")]
             socket,
             stop,
             active,
             worker: Some(worker),
+            #[cfg(target_os = "linux")]
+            _socket_dir: socket_dir,
         })
     }
 }
@@ -347,5 +369,32 @@ mod tests {
         ] {
             assert!(authority(h, &hosts).is_err());
         }
+    }
+    #[test]
+    fn accepted_clients_wait_for_their_request() {
+        let proxy = Proxy::start(&["api.example.invalid".into()]).unwrap();
+        let mut client = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+        // Stay idle past the proxy's accept: a non-blocking accepted socket fails its first
+        // read and is closed instead of waiting for the request.
+        client
+            .set_read_timeout(Some(Duration::from_millis(500)))
+            .unwrap();
+        let idle = client.read(&mut [0; 64]);
+        assert!(
+            idle.as_ref().is_err_and(|e| matches!(
+                e.kind(),
+                std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+            )),
+            "proxy closed a client before its request arrived: {idle:?}"
+        );
+        client
+            .write_all(b"CONNECT other.example.invalid:443 HTTP/1.1\r\n\r\n")
+            .unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        assert!(reply.is_empty(), "an unapproved target received a reply");
     }
 }

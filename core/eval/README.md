@@ -83,6 +83,10 @@ other trials and hidden inputs are not mounted/allowed. Every stage executes a c
 that proves its private sibling file cannot be read or written. A missing or broken
 backend fails closed; there is no unsandboxed execution path. Linux requires a host that
 permits bubblewrap's user namespaces; do not weaken host-wide policy to make a run pass.
+When AppArmor's unprivileged user namespace restriction blocks bubblewrap (Ubuntu 24.04),
+the upstream CI grants `userns` to `/usr/bin/bwrap` alone with a binary-scoped AppArmor
+profile, and probes `bwrap --unshare-all` before the replay smoke; the host-wide
+`kernel.apparmor_restrict_unprivileged_userns` setting stays unchanged.
 
 The controller fetches the full base commit into a standalone repository, shallow or with
 its past ancestry according to the registered task. It verifies that every object in the
@@ -99,7 +103,8 @@ raw output, exit/signal, timeout and output-limit results remain available on fa
 Network is disabled by default. For an authorized model run, exact `api_hosts` permit only
 HTTPS CONNECT on port 443 through a local proxy. Other ports, arbitrary destinations and
 private/loopback DNS results are rejected. macOS permits only the proxy's loopback port;
-Linux exposes its Unix socket and bridges it inside the private network namespace.
+Linux exposes its Unix socket, created in a fresh private directory under `/tmp` so its
+path fits the socket address limit, and bridges it inside the private network namespace.
 Proxy payloads and credentials are never logged. Clients that ignore proxy configuration
 fail instead of receiving unrestricted network access. The synthetic tests do not contact
 the network; real transport compatibility still needs an authorized pilot per client.
@@ -223,7 +228,10 @@ cargo test -p kb-eval --locked --test replay_workflow -- --ignored
 ```
 
 The second command explicitly runs the OS-dependent synthetic coder/judge fixture and
-makes no model or network calls. The ordinary suite separately checks hidden/future Git
-object exclusion, accounting, pairing, missingness, bootstrap/sign-flip calculations,
-Holm, equivalence, ordering, duplicate cells and profile construction. A synthetic fixture
-pass verifies the runner; it provides no evidence that a model or knowledge arm is better.
+makes no model or public network calls: its coder and judge send only an unapproved
+target to the egress proxy, and on macOS it also loads the generated Seatbelt profile
+and checks that only the proxy's port is reachable. The ordinary suite separately checks
+hidden/future Git object exclusion, accounting, pairing, missingness, bootstrap/sign-flip
+calculations, Holm, equivalence, ordering, duplicate cells, profile construction and the
+proxy waiting for a client's request. A synthetic fixture pass verifies the runner; it
+provides no evidence that a model or knowledge arm is better.

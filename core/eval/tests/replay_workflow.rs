@@ -105,6 +105,8 @@ fn isolated_qualification_coder_judge_and_accounting_workflow() {
     fs::write(hidden.join("hidden-expected.txt"), "fixed\n").unwrap();
     let canary = t.path().join("private-future.txt");
     fs::write(&canary, "synthetic future").unwrap();
+    // A live host loopback port that no sandboxed stage may reach.
+    let denied = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let program = |exe: &str, args: Vec<&str>| Program {
         program: exe.into(),
         args: args.into_iter().map(str::to_string).collect(),
@@ -243,11 +245,19 @@ fn isolated_qualification_coder_judge_and_accounting_workflow() {
         }],
         isolation: Isolation {
             read_roots: vec![],
-            environment: BTreeMap::from([(
-                "KB_EVAL_FORBIDDEN".into(),
-                canary.to_string_lossy().into_owned(),
-            )]),
-            api_hosts: vec![],
+            environment: BTreeMap::from([
+                (
+                    "KB_EVAL_FORBIDDEN".into(),
+                    canary.to_string_lossy().into_owned(),
+                ),
+                (
+                    "KB_EVAL_DENIED_PORT".into(),
+                    denied.local_addr().unwrap().port().to_string(),
+                ),
+            ]),
+            // Starts the egress proxy for the coder and judge; the fixture sends it only
+            // an unapproved target, so no stage contacts the network.
+            api_hosts: vec!["api.example.invalid".into()],
         },
         decision_rules: "Synthetic protocol smoke only; it cannot establish model quality.".into(),
     };
@@ -298,7 +308,10 @@ fn isolated_qualification_coder_judge_and_accounting_workflow() {
     assert_eq!(q["accepted"], true);
     assert_eq!(q["base"]["hidden"], false);
     assert_eq!(q["golden"]["hidden"], true);
-    let trial_root = t.path().join("trial");
+    // Deep enough that a socket under the stage directory would exceed `sun_path`.
+    let trial_root = t
+        .path()
+        .join("trial-output-with-a-deliberately-long-name-beyond-the-unix-socket-path-limit");
     let trial = run(
         &home,
         &[
@@ -360,4 +373,46 @@ fn isolated_qualification_coder_judge_and_accounting_workflow() {
             .iter()
             .all(|c| c["decision"] == "insufficient-evidence")
     );
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+#[ignore = "requires a functioning Seatbelt host; run explicitly in the isolation CI step"]
+fn seatbelt_profile_loads_and_admits_only_the_proxy_port() {
+    use std::net::TcpListener;
+    let t = tempfile::tempdir().unwrap();
+    let area = kb_eval::isolation::Area::create(&t.path().join("stage")).unwrap();
+    fs::create_dir(&area.work).unwrap();
+    let proxy = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let other = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let policy = Isolation {
+        read_roots: vec![],
+        environment: BTreeMap::new(),
+        api_hosts: vec![],
+    };
+    let profile = t.path().join("stage.sb");
+    let text = kb_eval::isolation::seatbelt(
+        &area,
+        &policy,
+        &[],
+        Some(proxy.local_addr().unwrap().port()),
+    )
+    .unwrap();
+    fs::write(&profile, text).unwrap();
+    let connect = |listener: &TcpListener| {
+        Command::new("/usr/bin/sandbox-exec")
+            .arg("-f")
+            .arg(&profile)
+            .args(["/usr/bin/nc", "-z", "-G", "5", "127.0.0.1"])
+            .arg(listener.local_addr().unwrap().port().to_string())
+            .output()
+            .unwrap()
+    };
+    let allowed = connect(&proxy);
+    assert!(
+        allowed.status.success(),
+        "Seatbelt rejected the profile or the proxy port: {}",
+        String::from_utf8_lossy(&allowed.stderr)
+    );
+    assert!(!connect(&other).status.success());
 }
