@@ -1,63 +1,97 @@
 # Verification
 
-## Current upgrade workspace (2026-10-07)
+## Current upgrade branch (2026-10-08)
 
-These results cover the uncommitted `feature/upstream-knowledge-upgrade` workspace based
-on `1ffbeef05d7f408bd23399445e0ce341a428b3c5`. They are local implementation evidence,
-not a published release or proof of better model outcomes. The engine version remains
-0.1.0 unreleased; document/index/skill contracts are 2, CLI protocol is 1 and parser
-version is 5. The source launcher was rebuilt for the current engine inputs.
+These results cover branch `feature/upstream-knowledge-upgrade` at `fd19fed` (based on
+`1ffbeef05d7f408bd23399445e0ce341a428b3c5`): the schema-2 upgrade commit `a967abb` and the
+pre-merge audit fixes after it; later commits on the branch change only documentation.
+They are local implementation evidence from macOS arm64, not a published release or proof
+of better model outcomes. The engine version remains 0.1.0 unreleased; document/index/skill
+contracts are 2, CLI protocol is 1 and parser version is 6. The source launcher was rebuilt
+for these engine inputs.
 
 | Check | Observed result |
 |---|---|
 | `cargo fmt --all --check` | Exit 0 |
 | `cargo clippy --workspace --all-targets --locked -- -D warnings` | Exit 0, no warnings |
-| `cargo test --workspace --locked --no-fail-fast` | Exit 0; 407 passed, zero failed, one OS-dependent test ignored |
-| `cargo test -p kb-eval --locked --test replay_workflow -- --ignored` | Exit 0; the separate macOS Seatbelt synthetic replay test passed |
-| `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` | Exit 0 |
+| `cargo test --workspace --locked --no-fail-fast` | Exit 0; 470 passed, zero failed, two OS-dependent tests ignored |
+| `cargo test -p kb-eval --locked --test replay_workflow -- --ignored` | Exit 0; both ignored tests passed on macOS Seatbelt (the synthetic replay workflow and the Seatbelt egress profile) |
+| `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` | Exit 0 (also with `-s dash`) |
+| Hook and CI-script tests with `/bin/dash` as the shell | `verify_workflow` 18/18 and `knowledge_ci` 3/3 in a scratch clone whose scripts and test launchers used `/bin/dash` |
 | `./kbw --kbw-bootstrap` | Exit 0; source runtime built and activated |
 | `./kbw schema --check` | Exit 0; 23 generated schemas in sync |
 | `./kbw validate --profile maintainer --templates` | Exit 0; 20 records, zero errors/warnings, templates checked, 3/3 routing cases |
-| `./kbw eval routing --example synthetic-multirepo --json` | Exit 0; 7/7 cases |
-| Tier A with `--context-format terse` | Exit 0; synthetic 7/7 and maintainer 3/3 |
+| `./kbw eval routing` (maintainer and `--example synthetic-multirepo`) | Exit 0; maintainer 3/3 and synthetic 7/7, with both `--context-format compact` and `terse` |
 | `cargo run -p kb-bench --release --locked -- smoke` | Exit 0; 300-record synthetic smoke checks passed |
 | YAML parsing and `git diff --check` | Ten workflow/template YAML files parse; no whitespace errors |
+| README quickstart replay | Section 2 replayed with the engine in a scratch clone: same header, scope, units and receipt lines as the README excerpt (only ids, keys and the path-dependent token estimate differ) |
 
-The tests include real launcher initialization and update, schema 0 → 1 → 2 migrations,
-old-format context goldens, draft validation/deduplication, temporal routing, provider
-commit/hash checks, uncertain/deleted dependents, delivery reuse, stale anchors, declarative
-probes, append-only local usage and offline CI exports. Synthetic regressions cover terse
-size reduction without dropping obligations, immutable replay objects, usage accounting,
-paired cohorts, multiplicity, equivalence and missing evidence. Source tests are not proof
-of physical-device behavior, real agent compliance or remote service integration.
+The tests include real launcher initialization and update, schema 0 → 1 → 2 migrations
+(also with CRLF files), old-format context goldens, draft validation/deduplication,
+temporal routing, provider commit/hash checks and deadlines, uncertain/deleted dependents,
+delivery reuse, stale anchors, declarative probes, real `git commit`/`git rebase` runs of
+the shipped commit-msg hook, append-only local usage and offline CI exports. Synthetic
+regressions cover terse size reduction without dropping obligations, immutable replay
+objects, usage accounting, paired cohorts, multiplicity, equivalence and missing evidence.
+Source tests are not proof of physical-device behavior, real agent compliance or remote
+service integration.
 
-Installed ast-index 3.54.0 and CodeGraph 1.6.1 also indexed frozen synthetic Git trees;
-repeated adapter responses were byte-identical. Native replay clients passed isolated
-`--version` startup: Codex 0.153.4, Claude Code 2.1.274, Cursor
-2026.08.11-e8db854 and Grok 1.0.46. No model credentials or billable jobs were used in
-these checks. The replay fixture uses a synthetic executable, including its judge.
+### Pre-merge audit
+
+Before the branch was proposed for review, nine read-only auditors (one per requirement
+area U1–U7, CI/repository hygiene and documentation) reported 51 findings; independent
+verifiers that tried to refute each one confirmed 45 and refuted 6. The fixes landed in
+three rounds (`ab9c36e` to `fd19fed`); each fix carries regression tests that fail without
+it, and each round's commits were reviewed again, with the reviewers' follow-ups fixed in
+the next round. A final read-only pass reviewed the last code commit, read every
+Linux-only `cfg` block and the CI steps for Ubuntu 24.04 (no failure found; nothing
+Linux-specific has been executed), and cross-checked codes, flags, versions and links in
+the documentation. Notable corrections:
+
+* identifier discovery, oversized patches and inferred-path caps can no longer narrow
+  obligations or fail `context`, and diff paths no longer count against `--path`;
+* `--since-receipt` never reuses units that were only referenced through the always-on
+  core;
+* repo qualifiers of verify-probe, selector and registry globs must name registry repos as
+  written (parser version 6); `validate --templates` checks registry templates strictly;
+* migration and anchor stamping keep line endings and untouched bytes;
+* the commit-msg hook reads the index Git hands it (`verify --index-file`), cleans the
+  message as Git does, supplies the branch during a rebase, selects its snapshot from the
+  host layout and is shipped executable;
+* provider deadlines end nested commands; optional code evidence never fails `context`;
+* replay egress works under Seatbelt, refusals are an observable `403`, and the Linux CI
+  smoke grants bubblewrap user namespaces through a binary-scoped AppArmor profile.
+
+Observed on 2026-10-07 at the pre-audit tree and not repeated since: installed ast-index
+3.54.0 and CodeGraph 1.6.1 indexed frozen synthetic Git trees and repeated adapter responses
+were byte-identical; native replay clients passed isolated `--version` startup (Codex
+0.153.4, Claude Code 2.1.274, Cursor 2026.08.11-e8db854 and Grok 1.0.46). No model
+credentials or billable jobs were used in any check. The replay fixture uses a synthetic
+executable, including its judge.
 
 Raw local logs are retained under the ignored `.cache/upstream-upgrade/` directory:
-`final-workspace-tests-5.log`, `final-fmt-5.log`, `final-clippy-5.log`,
-`final-replay-isolation-7.log`, `final-shellcheck-1.log`, `final-schema-check-2.log`,
-`final-maintainer-validate-2.log`, `final-routing-*.json` and `final-yaml-1.log`.
-Earlier failed and superseded logs are preserved; they do not override the named final
-results. The benchmark smoke is a sanity check without a comparable performance baseline.
+`final-workspace-tests-6.log`, `final-fmt-6.log`, `final-clippy-6.log`,
+`final-replay-isolation-8.log`, `final-shellcheck-2.log`, `final-bootstrap-1.log`,
+`final-schema-check-3.log`, `final-maintainer-validate-3.log`, `final-routing-*-2.json`,
+`final-bench-smoke-2.log` and `final-yaml-2.log`. Earlier failed and superseded logs are
+preserved; they do not override the named final results. The benchmark smoke is a sanity
+check without a comparable performance baseline.
 
-An additional offline runtime probe used an immutable historical Android checkout and
-the exact cached Gradle 9.5.0 distribution (its archive digest matched the host wrapper).
-JDK 25 startup passed in Seatbelt, but Gradle failed before project configuration with
-`FileLockContentionHandler` / `SocketException: Operation not permitted`, including with
-`--offline --no-daemon`. Both copies were rejected by qualification; no model or hidden
-product test ran. The default macOS profile therefore does not yet provide a usable
+An additional offline runtime probe (2026-10-07) used an immutable historical Android
+checkout and the exact cached Gradle 9.5.0 distribution (its archive digest matched the host
+wrapper). JDK 25 startup passed in Seatbelt, but Gradle failed before project configuration
+with `FileLockContentionHandler` / `SocketException: Operation not permitted`, including
+with `--offline --no-daemon`. Both copies were rejected by qualification; no model or
+hidden product test ran. The default macOS profile therefore does not yet provide a usable
 Android replay worker. This probe is deliberately ineligible as a scored task.
 
-Still unverified: Linux/bubblewrap execution, remote GitHub/GitLab jobs, live client
-authentication/transport, real harness loading/consultation, a working isolated Android
-build/test setup and all preregistered held-out model acceptance gates. No new release
-has been tagged or published. The proposed ADRs and draft maintainer records still need
-review. [Upgrade tracking](upstream-upgrade.md) and [evaluation](evaluation.md) describe the
-remaining requirements; a green local suite does not close them.
+Still unverified: Linux/bubblewrap execution and the remote `upstream-ci` run for this
+branch, remote GitHub/GitLab host jobs, live client authentication/transport, real harness
+loading/consultation, a working isolated Android build/test setup and all preregistered
+held-out model acceptance gates. No new release has been tagged or published. The proposed
+ADRs and draft maintainer records still need review. [Upgrade tracking](upstream-upgrade.md)
+and [evaluation](evaluation.md) describe the remaining requirements; a green local suite
+does not close them.
 
 ## Historical verification baseline (0.1.0)
 
@@ -75,7 +109,7 @@ ShellCheck from Homebrew. On this machine the bundled SQLite C build needs
 `SDKROOT=$(xcrun --show-sdk-path)` for plain `cargo` commands; `kbw` sets it automatically
 when it is unset (verified by running the launcher with `SDKROOT` unset).
 
-## Static checks and tests (repository root)
+### Static checks and tests (repository root)
 
 | command | result |
 |---|---|
@@ -115,7 +149,7 @@ production launcher, offline with local bare repositories:
 6. a host pin refresh through a normal commit;
 7. `update check` and `update prepare` of a new upstream tag in an isolated worktree, with the main checkout unchanged.
 
-## Launcher and CI commands (repository root)
+### Launcher and CI commands (repository root)
 
 These are the commands `.github/workflows/upstream-ci.yml` runs, executed locally with
 `KBW_CARGO_TARGET_DIR=$PWD/target`:
@@ -140,7 +174,7 @@ The archive was then installed into a clean copy of the checkout with
 `source=artifact`, same build fingerprint). The same install with a wrong digest was refused
 before extraction (exit 50, `KBW_ARTIFACT_INVALID`).
 
-## Documented quickstart
+### Documented quickstart
 
 The README quickstart was executed verbatim in a scratch copy of this tree, committed there
 because `git clone .` needs history:
@@ -161,20 +195,20 @@ The documentation writers additionally ran every command shown in README, BOOTST
 `docs/*.md` against scratch KBs and host repositories, including host integration, proposals,
 `UPDATE_REQUIRED`/pinned/latest, `impact --check` and `update check`.
 
-## Benchmarks
+### Benchmarks
 
 See [benchmarks.md](benchmarks.md). Measured at 10 000 records on this machine: warm
 in-process query p50 22 ms; warm `kb --offline context` through the real executable p50
 53 ms, p95 57 ms.
 
-## Reviews
+### Reviews
 
 Two adversarial review rounds were run over the code. Each finding was independently
 verified before any fix. Round one confirmed 21 findings and refuted 3; round two confirmed 17
 and refuted 3. All confirmed findings were fixed, each with a regression test that failed
 before the fix.
 
-## Not verified
+### Not verified
 
 * **Linux x86_64.** No Linux environment was available. GNU `find`/`tar`/`sha256sum` paths
   of `kbw`, the Linux release build, and `dash` as `/bin/sh` on Linux are covered only by the

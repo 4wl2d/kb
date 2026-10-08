@@ -110,24 +110,36 @@ withhold undated records and require frozen registries/host inputs for replay ac
   syntax checked, not remotely executed; model drafting and draft-MR publication remain
   opt-in deployment steps requiring team configuration and authority.
 
-## Final local verification (2026-10-07)
+- Audit checkpoint (2026-10-08): a pre-merge audit of the committed feature (`a967abb`)
+  confirmed 45 of 51 findings after adversarial verification; three fix rounds
+  (`ab9c36e`..`fd19fed`) added regression tests for each and were re-reviewed. They harden
+  identifier discovery and patch bounds, receipt reuse of core references, as-written repo
+  qualifiers (parser version 6), line-ending-preserving migration and stamping, the
+  commit-msg hook (index, message cleanup, rebase branch, snapshot selection), provider
+  deadlines, replay egress and the Linux CI isolation smoke. The scenario counts in the
+  checkpoints above describe `a967abb`; the suites have grown since.
 
-The current workspace passes fmt, workspace clippy with warnings denied, and the workspace
-test suite: **407 passed, zero failed, one OS-dependent test excluded by default**. That
-test was then run explicitly on macOS Seatbelt and passed. It uses a synthetic Rust
-process, not an AI model. ShellCheck passes for the launcher and all shipped CI/hook
-scripts. All 23 generated schemas match, all 20 maintainer records and templates validate
-without warnings, and Tier A passes for the synthetic (7 cases) and maintainer (3 cases)
-corpora with compact and terse rendering. The launcher source bootstrap and the small
-benchmark smoke also pass. See [verification](verification.md) for scope and limitations.
+## Final local verification (2026-10-08)
 
-The replay kit now preserves historical Git boundaries, qualifies base/golden hidden
-tests, checks OS isolation with a canary, pins native clients, retains raw usage segments,
-isolates blinded judges and reports paired statistical comparisons with missingness and
-sensitivity. Installed Codex, Claude Code, Cursor and Grok passed isolated version-startup
+Branch `feature/upstream-knowledge-upgrade` at `fd19fed` (later commits change only
+documentation) passes fmt, workspace clippy with warnings denied, and the workspace test
+suite: **470 passed, zero failed, two OS-dependent tests excluded by default**. Both were
+then run explicitly on macOS Seatbelt and passed; they use a synthetic Rust process, not an
+AI model. ShellCheck passes for the launcher and all shipped CI/hook scripts, which also
+pass their tests with `/bin/dash`. All 23 generated schemas match, all 20 maintainer records
+and templates validate without warnings, and Tier A passes for the synthetic (7 cases) and
+maintainer (3 cases) corpora with compact and terse rendering. The launcher source
+bootstrap, the small benchmark smoke and a replay of the README quickstart also pass. See
+[verification](verification.md) for scope, the audit and limitations.
+
+The replay kit preserves historical Git boundaries, qualifies base/golden hidden tests,
+checks OS isolation with a canary, pins native clients, retains raw usage segments, isolates
+blinded judges and reports paired statistical comparisons with missingness and sensitivity.
+On 2026-10-07, installed Codex, Claude Code, Cursor and Grok passed isolated version-startup
 preflight. This establishes neither live authentication nor model transport, instruction
-loading, consultation behavior or downstream quality. Linux execution remains a remote
-CI gate; the workflow has not run from this workspace.
+loading, consultation behavior or downstream quality. Linux execution remains a remote CI
+gate: `upstream-ci.yml`, including the bubblewrap smoke changed by the audit, has not run
+for this branch.
 
 A subsequent offline Android runtime probe found a concrete worker limitation: JDK 25
 starts in Seatbelt, but the pinned Gradle 9.5.0 fails when binding its local cache-lock
