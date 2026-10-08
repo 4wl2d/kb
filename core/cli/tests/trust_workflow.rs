@@ -188,6 +188,34 @@ fn stamping_a_crlf_record_only_inserts_crlf_lines() {
 }
 
 #[test]
+fn stamping_a_crlf_record_keeps_bare_line_feeds_inside_multi_line_strings() {
+    let w = World::new();
+    let path = w.policy("persist");
+    // The rule text is a multi-line string whose own line break is a bare LF.
+    let before = fs::read_to_string(&path)
+        .unwrap()
+        .replace('\n', "\r\n")
+        .replace(
+            "text = \"Persist synthetic state.\"",
+            "text = \"\"\"\r\nPersist synthetic\nstate.\"\"\"",
+        );
+    write(&path, &before);
+    let show = || w.run(&["show", "acme.policy.evidence"], 0)["result"]["record"]["rules"].clone();
+    let rules = show();
+    assert_eq!(rules[0]["text"], "Persist synthetic\nstate.", "{rules}");
+    assert_eq!(w.stamp()["result"]["written"], 1);
+    assert_eq!(show(), rules);
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(after.contains("Persist synthetic\nstate."), "{after:?}");
+    // Every other line keeps its CRLF.
+    assert_eq!(
+        after.replace("\r\n", "").matches('\n').count(),
+        1,
+        "{after:?}"
+    );
+}
+
+#[test]
 fn upper_case_stamp_commit_at_its_own_revision_is_a_broken_stamp_not_drift() {
     let w = World::new();
     let path = w.policy("persist");

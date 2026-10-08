@@ -299,9 +299,10 @@ override_owners = ["arch", "ghost-team"]
 fn verify_probe_globs_must_name_registered_repos() {
     let kb = Kb::new();
     // A qualifier is checked as written: `Mobile` is not id-shaped, so the glob would
-    // otherwise be read as a literal pattern that never matches.
+    // otherwise be read as a literal pattern that never matches. A `:` inside a class or
+    // brace group is pattern text, not a qualifier.
     let rules = r#"[selectors]
-paths = ["Mobile:app/**", "docs/a:b.md"]
+paths = ["Mobile:app/**", "docs/a:b.md", "[a:b]/x.md", "{a:b,c}/x.md"]
 
 [[rules]]
 id = "no-print"
@@ -310,7 +311,7 @@ text = "Print to standard output."
 
 [[rules.verify]]
 kind = "banned-api"
-paths = ["mobil:app/**", "mobile:app/**", "app/**", "Mobile:app/**", "app/x:y/**"]
+paths = ["mobil:app/**", "mobile:app/**", "app/**", "Mobile:app/**", "app/x:y/**", "x[:]y.md"]
 pattern = "println"
 
 [[rules.verify]]
@@ -1307,13 +1308,24 @@ fn change_types_template_is_parsed_strictly_and_must_declare_schema_two() {
             ),
             &["REGISTRY_ALIAS_INVALID", "REGISTRY_DUPLICATE_ID"],
         ),
-        // Repo qualifiers name the downstream's repos and are checked there.
+        // Id-shaped repo qualifiers name the downstream's repos and are checked there.
         (
             format!(
                 "schema = 2\n{}",
-                entry("retry", "paths = [\"mobile:app/**\"]")
+                entry("retry", "paths = [\"mobile:app/**\", \"[a:b]/x.md\"]")
             ),
             &[],
+        ),
+        // A qualifier that is not a registry id names no repo in any downstream.
+        (
+            format!(
+                "schema = 2\n{}",
+                entry(
+                    "retry",
+                    "paths = [\"mobile:app/**\", \"Mobile:app/**\", \"-web:src/**\"]"
+                )
+            ),
+            &["REGISTRY_UNKNOWN_REPO", "REGISTRY_UNKNOWN_REPO"],
         ),
     ] {
         common::write(&root.join(rel), &text);

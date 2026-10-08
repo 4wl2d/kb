@@ -332,7 +332,7 @@ pub fn plan_stamps(
         let after = format!(
             "{}{}{}",
             &text[..start],
-            keep_line_endings(front, doc.to_string()),
+            keep_line_endings(front, &doc.to_string()),
             &text[end..]
         );
         crate::parse::parse_record(&entry.path, after.as_bytes()).map_err(|d| {
@@ -357,13 +357,41 @@ pub fn plan_stamps(
     })
 }
 
-/// `toml_edit` writes `\n` line breaks. A front matter whose line breaks are mostly CRLF
-/// keeps CRLF, so stamping changes only the stamped lines instead of every line ending.
-fn keep_line_endings(original: &str, edited: String) -> String {
-    if original.matches("\r\n").count() * 2 <= original.matches('\n').count() {
-        return edited;
+/// `toml_edit` re-emits untouched values byte for byte but writes `\n` line breaks. A line
+/// that differs from an original line only in its break keeps the original bytes, so a CRLF
+/// line, or a bare LF inside a multi-line string, is not rewritten. Only inserted or edited
+/// lines take the front matter's predominant line ending.
+fn keep_line_endings(original: &str, edited: &str) -> String {
+    use crate::migrate::Op;
+    // A line without its break, and whether it has one.
+    fn key(line: &str) -> (&str, bool) {
+        match line.strip_suffix('\n') {
+            Some(l) => (l.strip_suffix('\r').unwrap_or(l), true),
+            None => (line, false),
+        }
     }
-    edited.replace("\r\n", "\n").replace('\n', "\r\n")
+    let eol = if original.matches("\r\n").count() * 2 > original.matches('\n').count() {
+        "\r\n"
+    } else {
+        "\n"
+    };
+    let a: Vec<&str> = original.split_inclusive('\n').collect();
+    let b: Vec<(&str, bool)> = edited.split_inclusive('\n').map(key).collect();
+    let a_keys: Vec<(&str, bool)> = a.iter().map(|l| key(l)).collect();
+    let mut out = String::with_capacity(edited.len());
+    for op in crate::migrate::diff_ops(&a_keys, &b) {
+        match op {
+            Op::Equal(x, _) => out.push_str(a[x]),
+            Op::Insert(y) => {
+                out.push_str(b[y].0);
+                if b[y].1 {
+                    out.push_str(eol);
+                }
+            }
+            Op::Delete(_) => {}
+        }
+    }
+    out
 }
 
 fn put(table: &mut dyn TableLike, key: &str, mut value: Value) {
@@ -398,18 +426,29 @@ pub fn apply_stamps(kb_root: &Path, plan: &StampPlan) -> Result<usize> {
 #[cfg(test)]
 mod tests {
     use super::keep_line_endings;
+    use toml_edit::{DocumentMut, Value};
+
+    /// Insert `c = 3` with `toml_edit`, as stamping does, and restore the line endings.
+    fn stamp(original: &str) -> String {
+        let mut doc = original.parse::<DocumentMut>().unwrap();
+        doc.insert("c", toml_edit::value(Value::from(3)));
+        keep_line_endings(original, &doc.to_string())
+    }
 
     #[test]
     fn stamped_front_matter_keeps_its_predominant_line_ending() {
-        let edited = "a = 1\r\nb = 2\nc = 3\n".to_string();
+        assert_eq!(stamp("a = 1\r\nb = 2\r\n"), "a = 1\r\nb = 2\r\nc = 3\r\n");
+        assert_eq!(stamp("a = 1\nb = 2\n"), "a = 1\nb = 2\nc = 3\n");
+        // Unchanged lines keep their own break; only the inserted line takes the majority's.
         assert_eq!(
-            keep_line_endings("a = 1\r\nb = 2\r\n", edited.clone()),
-            "a = 1\r\nb = 2\r\nc = 3\r\n"
+            stamp("a = 1\r\nb = 2\nd = 4\n"),
+            "a = 1\r\nb = 2\nd = 4\nc = 3\n"
         );
-        assert_eq!(
-            keep_line_endings("a = 1\r\nb = 2\n", edited.clone()),
-            edited
-        );
-        assert_eq!(keep_line_endings("a = 1\nb = 2\n", edited.clone()), edited);
+        // A bare LF inside a multi-line string is part of the value and is not rewritten.
+        let original = "a = 1\r\ntext = \"\"\"\r\nPersist synthetic\nstate.\"\"\"\r\nb = 2\r\n";
+        let stamped = stamp(original);
+        assert_eq!(stamped, format!("{original}c = 3\r\n"));
+        let parsed = stamped.parse::<DocumentMut>().unwrap();
+        assert_eq!(parsed["text"].as_str(), Some("Persist synthetic\nstate."));
     }
 }

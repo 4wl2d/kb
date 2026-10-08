@@ -671,7 +671,11 @@ mod tests {
     #[test]
     fn glob_qualifiers_are_checked_as_written() {
         let mut data = sample().data;
-        data.modules[0].paths = vec!["Mobile:app/auth/**".into(), "app/a:b/**".into()];
+        data.modules[0].paths = vec![
+            "Mobile:app/auth/**".into(),
+            "app/a:b/**".into(),
+            "[a:b]/x.md".into(),
+        ];
         let d = Registry::new(data).validate();
         let got: Vec<_> = d
             .iter()

@@ -133,7 +133,8 @@ implicit timezone; commit ancestry is resolved by the host adapter, never by the
 Probe kinds: `commit-message`/`branch-name` with `pattern`; `forbidden-import` with nonempty
 `from`/`to` globs; `naming`/`banned-api` with nonempty `paths` and a regex `pattern`. Unknown
 fields, invalid regexes and unsafe globs are errors. A probe glob (`paths`, `from`, `to`)
-whose text before the first `:` contains no `/` is `repo:`-qualified, and that text must
+whose text before the first `:` contains no `/`, `[` or `{` is `repo:`-qualified (a `:`
+inside a class or brace group, as in `[a:b]/x.md`, is pattern text), and that text must
 name a registry repo exactly (`UNKNOWN_REPO`, message ``verify: `<glob>` names unknown repo
 `<repo>` ``). A typo or a case change such as `Mobile:app/**` would never match, so
 validation and `kb verify` fail instead of skipping the probe. A probe declaration is not
@@ -401,7 +402,8 @@ applicable obligation and never make a record mandatory.
   segments, backslashes and control characters are rejected (`SELECTOR_PATH_INVALID`). An
   unqualified glob matches in any repo; `repo:glob` only in that repo (`UNKNOWN_REPO` for an
   unknown qualifier). The qualifier is the text before the first `:` when it contains no
-  `/`, checked as written: `Mobile:app/**` names the unknown repo `Mobile`.
+  `/`, `[` or `{`, checked as written: `Mobile:app/**` names the unknown repo `Mobile`,
+  while `[a:b]/x.md` is unqualified.
 * `concepts` must exist in `registry/concepts.toml` (`UNKNOWN_CONCEPT`).
 * `intents` are `implement`, `refactor`, `debug`, `review`, `explain`.
 * `aliases` are matched against the normalized task text with the rules in

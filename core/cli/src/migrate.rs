@@ -876,7 +876,7 @@ pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Op {
+pub(crate) enum Op {
     Equal(usize, usize),
     Delete(usize),
     Insert(usize),
@@ -899,7 +899,7 @@ impl Op {
 
 /// Longest-common-subsequence edit script after trimming the common prefix and suffix.
 /// Very large middles fall back to delete-all/insert-all to bound memory.
-fn diff_ops(a: &[&str], b: &[&str]) -> Vec<Op> {
+pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
     let pre = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let suf = a[pre..]
         .iter()

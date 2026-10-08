@@ -76,13 +76,14 @@ pub fn split_repo(spec: &str) -> (Option<&str>, &str) {
     (None, spec)
 }
 
-/// The qualifier as written: the text before the first `:` when it contains no `/`.
+/// The qualifier as written: the text before the first `:` when it contains no `/`, `[` or
+/// `{` (a `:` inside a class or brace group, as in `[a:b]/x.md`, is part of the pattern).
 /// [`split_repo`] only recognizes registry-id-shaped qualifiers, so `Mobile:app/**` parses
 /// as a literal pattern that never matches; validation checks this text against the registry.
 pub fn written_qualifier(spec: &str) -> Option<&str> {
     spec.split_once(':')
         .map(|(r, _)| r)
-        .filter(|r| !r.contains('/'))
+        .filter(|r| !r.contains(['/', '[', '{']))
 }
 
 fn literal_prefix(p: &str) -> &str {
@@ -143,6 +144,22 @@ mod tests {
         assert_eq!(RepoGlob::parse("Mobile:app/**").unwrap().repo, None);
         assert_eq!(written_qualifier("docs/a:b.md"), None);
         assert_eq!(written_qualifier("app/**"), None);
+        // A `:` inside a class or brace group is pattern text: the glob stays unqualified.
+        for spec in ["[a:b]/x.md", "{a:b,c}/x.md", "x[:]y.md"] {
+            assert_eq!(written_qualifier(spec), None, "{spec}");
+            let g = RepoGlob::parse(spec).unwrap();
+            assert_eq!(g.repo, None, "{spec}");
+        }
+        assert!(
+            RepoGlob::parse("[a:b]/x.md")
+                .unwrap()
+                .matches(Some("mobile"), "b/x.md")
+        );
+        assert!(
+            RepoGlob::parse("{a:b,c}/x.md")
+                .unwrap()
+                .matches(None, "c/x.md")
+        );
     }
 
     #[test]

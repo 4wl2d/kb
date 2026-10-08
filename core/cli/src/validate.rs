@@ -18,10 +18,10 @@ use crate::corpus::{Corpus, is_record_path, load_corpus, parse_config};
 use crate::diag::{Diagnostic, Severity, normalize};
 use crate::error::{KbError, Result};
 use crate::glob::{RepoGlob, written_qualifier};
-use crate::model::ids::namespace_of;
+use crate::model::ids::{check_registry_id, namespace_of};
 use crate::model::registry::{
-    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, RegistryData, ReposFile,
-    parse_registry_file,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, RegistryData, Repo,
+    ReposFile, parse_registry_file,
 };
 use crate::model::routing::RoutingTestFile;
 use crate::model::{
@@ -1267,16 +1267,34 @@ fn check_profile_toml(path: &str, dest: &str, text: &str) -> Vec<Diagnostic> {
     if dest == "registry/change-types.toml" {
         return match registry(path, dest, text, |f: &ChangeTypesFile| f.schema) {
             // The change-type checks of `Registry::validate`. Repo qualifiers name the
-            // downstream's repos, so they are checked by `kb validate` there.
-            Ok(f) => Registry::new(RegistryData {
-                change_types: f.change_type,
-                ..RegistryData::default()
-            })
-            .validate()
-            .into_iter()
-            .filter(|d| d.code != "REGISTRY_UNKNOWN_REPO")
-            .map(|d| d.at_path(path))
-            .collect(),
+            // downstream's repos: an id-shaped one stands for a placeholder repo here and is
+            // checked by `kb validate` there; any other names no repo in any downstream.
+            Ok(f) => {
+                let repos = f
+                    .change_type
+                    .iter()
+                    .flat_map(|c| &c.paths)
+                    .filter_map(|p| written_qualifier(p))
+                    .filter(|r| check_registry_id(r).is_ok())
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .map(|id| Repo {
+                        id: id.to_string(),
+                        title: id.to_string(),
+                        remotes: Vec::new(),
+                        version_file: None,
+                    })
+                    .collect();
+                Registry::new(RegistryData {
+                    repos,
+                    change_types: f.change_type,
+                    ..RegistryData::default()
+                })
+                .validate()
+                .into_iter()
+                .map(|d| d.at_path(path))
+                .collect()
+            }
             Err(d) => vec![d],
         };
     }

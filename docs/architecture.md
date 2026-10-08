@@ -143,10 +143,11 @@ Statements and obligations may declare `verify` arrays. Probe kinds are `commit-
 and `branch-name` (pattern), `forbidden-import` (from/to path globs), `naming` and `banned-api`
 (paths plus pattern). Regexes are validated with a bounded Rust regex compiler. Probes are
 data, contain no executable command, and have no side effects during parsing or retrieval.
-A probe glob whose text before the first `:` contains no `/` is repo-qualified, and that
-text must be a registry repo id as written (`UNKNOWN_REPO`): an unknown or mistyped
-qualifier, including a case change such as `Mobile:`, would never match and silently skip
-a blocking probe, so it fails validation and `verify`.
+A probe glob whose text before the first `:` contains no `/`, `[` or `{` is repo-qualified
+(a `:` inside a class or brace group is pattern text), and that text must be a registry
+repo id as written (`UNKNOWN_REPO`): an unknown or mistyped qualifier, including a case
+change such as `Mobile:`, would never match and silently skip a blocking probe, so it
+fails validation and `verify`.
 
 ### 3.3 Scope (mandatory applicability)
 
