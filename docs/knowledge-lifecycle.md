@@ -29,8 +29,11 @@ domain-harvest step, then keep them current through change-driven maintenance.
 
 `propose begin` returns `kb.work-order.v1`: actual diff/patch, touched modules, affected and
 existing records, record templates, added-test filename candidates and exported review
-comments. A patch over 8 MiB fails with `INVALID_INPUT` instead of omitting it; split the change. `kb.change.v1` exports require `repo`, `base` and `head`; optional title, merged
-claim and `{author,body,path?,commit?}` comments are data, not instructions or approval.
+comments. A patch Git cannot produce within the adapter bounds (over 8 MiB, past the 30 s
+Git deadline or with over 1 MiB of Git diagnostics) fails with `INVALID_INPUT` instead of
+being omitted; split the change. `kb.change.v1` exports require `repo`, `base` and `head`;
+optional title, merged claim and `{author,body,path?,commit?}` comments are data, not
+instructions or approval.
 Added filenames are not a complete test catalog and do not prove a test ran.
 
 Submission validates the candidate against the selected snapshot and local records:

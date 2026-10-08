@@ -227,8 +227,10 @@ in [the CI guide](../core/templates/ci/README.md) before enabling these optional
 
 Host CI reads the pinned KB revision (`--snapshot pinned`) because `auto` returns
 `UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the normal state
-between merging knowledge and updating the pin. Freshness is still verified. The
-commit-msg hook also works in a host without a pin and selects its snapshot as follows.
+between merging knowledge and updating the pin. Freshness is still verified. The host CI
+templates therefore need a pin (a KB submodule gitlink or a `.kbw.toml` `pin`); a host that
+mounts a separate checkout without a pin changes `--snapshot` in its copy of the template.
+The commit-msg hook also works in a host without a pin and selects its snapshot as follows.
 
 When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
 declares `selection`, the hook passes `auto` and the engine applies that selection.

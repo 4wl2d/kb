@@ -26,6 +26,13 @@ the release workflow builds archives when an owner pushes a `v0.1.0` tag.
 - Tier A routing/history metrics and the separate Rust Tier B replay kit with frozen Git
   inputs, OS isolation, pinned native adapters, blinded judging, complete segment accounting
   and paired cluster/Holm/SESOI analysis.
+- Pre-merge audit hardening: repo qualifiers of verify-probe, selector and registry globs
+  must name registry repos as written (parser version 6); migration and stamping keep line
+  endings; discovered identifiers and over-limit patches never narrow obligations or fail
+  context; core-only receipt references are never reused; the commit-msg hook checks the
+  index and cleaned message Git commits and selects its snapshot from the host layout;
+  provider deadlines end nested commands; replay egress works under Seatbelt and the Linux
+  CI smoke grants bubblewrap user namespaces through a binary-scoped AppArmor profile.
 
 These changes are implementation work, not a tagged 0.2/0.3/0.4 release or a claim of
 better agent quality. ADR review, complete validation and preregistered empirical/release

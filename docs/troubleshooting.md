@@ -72,10 +72,11 @@ scope: each of those changes what the answer means, so say so when you do it.
   `HEAD` or end with an explicit `@REV`, for example
   `--anchor mobile:assets/icon@2x.png@HEAD`.
 * `context` no longer fails with `INVALID_INPUT` when a task names too many files or the
-  host patch exceeds 8 MiB; it reports discovery issues instead (see
+  host patch exceeds a Git adapter bound (8 MiB, the 30 s Git deadline or 1 MiB of Git
+  diagnostics); it reports discovery issues instead (see
   [context incomplete](#context_incomplete)). `propose begin` still fails closed when the
-  range's patch exceeds that limit, because the patch is the work order's primary input:
-  narrow the range.
+  range's patch exceeds one of those bounds, because the patch is the work order's primary
+  input: narrow the range.
 
 ## FRESHNESS_UNVERIFIED
 
@@ -169,13 +170,13 @@ Two different causes share this code; `details` tells them apart.
 
 Discovery from `--task` and from the host diff reports these entries in `issues`; they do
 not change the status by themselves and replace the former `INVALID_INPUT` errors for a
-task that names too many files and for a host patch over 8 MiB:
+task that names too many files and for a host patch over a Git adapter bound:
 
 | issue | meaning | fix |
 |---|---|---|
 | `IDENTIFIER_AMBIGUOUS` (info) | a filename or symbol named in the task matches more than 8 files and supplies no candidate paths | name the file with `--path` |
-| `INFERRED_PATHS_TRUNCATED` (warning) | the task named more files than discovery uses (the message gives the count) | name the files with `--path` |
-| `CHANGED_TEXT_SKIPPED` (info) | the host patch exceeds the 8 MiB lexical-analysis limit; changed-text change-type hints were skipped | pass `--change-type` for explicit categories |
+| `INFERRED_PATHS_TRUNCATED` (warning) | the task named more than 64 files (the message gives the count); only the first 64 by path are listed and ranked, and all of them still add their modules and features to the scope | name the files with `--path` |
+| `CHANGED_TEXT_SKIPPED` (info) | the host patch exceeded a Git adapter bound (8 MiB, the 30 s Git deadline or 1 MiB of Git diagnostics; the message names it); changed-text change-type hints were skipped | pass `--change-type` for explicit categories |
 | `TRACKED_NAMES_SKIPPED` (info) | tracked filenames that are not UTF-8 or not safe relative paths were not used for discovery | name what you change with `--path` or `--module` |
 
 ## CONTEXT_BUDGET_EXCEEDED

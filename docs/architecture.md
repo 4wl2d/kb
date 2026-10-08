@@ -328,8 +328,9 @@ Pipeline:
 2. **Scope resolution**: host repo, paths → modules/features, alias → concepts. Tracked
    filename/identifier matches can discover paths before an explicit path is known; such
    paths are candidates that never make an unknown module/feature scope known (identifiers
-   naming more than 8 files are skipped, at most 64 discovered paths are used, outside the
-   `--path` limit). `--changed` includes old/deleted paths and distinguishes an empty diff
+   naming more than 8 files are skipped; at most 64 discovered paths are listed and ranked,
+   all of them add their modules and features to an already known scope, and none count
+   against the `--path` limit). `--changed` includes old/deleted paths and distinguishes an empty diff
    from unknown scope. Explicit change types can prune inapplicable categories; inferred hints only
    add candidates and cannot silently exclude unknown categories. Unknown
    registry ids given explicitly → `UNKNOWN_SCOPE` error. A plain `--path` is made
