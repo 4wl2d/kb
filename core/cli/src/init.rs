@@ -5,7 +5,8 @@
 //! the project README. An existing `project/project.toml` means the project is already
 //! initialized. The plan also renders the skill bundle (`project/skill-config/generated/`)
 //! so that `kbw integrate --generate --check` passes right after init, and installs the
-//! downstream CI workflow `.github/workflows/kb-knowledge.yml`.
+//! downstream GitHub/GitLab KB CI and review templates: the workflow
+//! `.github/workflows/kb-knowledge.yml` and the files in `KB_REVIEW_FILES`.
 
 use std::collections::BTreeMap;
 use std::path::Path;

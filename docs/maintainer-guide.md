@@ -65,16 +65,22 @@ modules) and the integration suites in `core/cli/tests/`:
 | `update_production.rs` | production launcher/update worktree: synthetic 0 → 1 → 2 migration to `v2-expected`, validation and unchanged main checkout |
 | `schema_evolution.rs`, `retrieval_upgrade.rs` | schema-2 strictness, compatibility, tracked identifiers, change categories and historical slices |
 | `authoring_workflow.rs`, `knowledge_ci.rs` | validated drafts/capture and offline merged-change/CI glue |
-| `code_provider.rs`, `process_limits.rs` | immutable provider evidence, deleted symbols, uncertainty, bounded output and deadlines |
-| `delivery_efficiency.rs` | verified core/delta, one full skill, terse/outline and local usage |
+| `code_provider.rs`, `process_limits.rs` | immutable provider evidence, deleted symbols, uncertainty, bounded output and deadlines; a non-UTF-8 code unit is omitted with a limitation, a pinned response's `similar` candidates are not replayed into context, and validation reads files with a constant number of Git processes (counted through a `PATH` Git shim) |
+| `delivery_efficiency.rs` | verified core/delta (units a receipt held only as `core` references are never reused through `--since-receipt`; they are delivered in full unless current core proof covers them), one full skill, terse/outline and local usage |
 | `trust_workflow.rs`, `verify_workflow.rs` | stamps/drift/ledger/freshness and probes over real staged/committed inputs |
 | `evaluation.rs` | labeled routing metrics, chronological history, missingness and determinism |
 
-The optional provider crate has synthetic native-output tests. The replay crate adds pure
-accounting/statistics tests and a shallow-Git isolation test. Run its OS-dependent fixture
-explicitly with `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`; CI
-runs it separately on Seatbelt/bubblewrap. It calls no real model or public network and
-must not be mistaken for held-out quality acceptance.
+The optional provider crate has synthetic native-output tests and an end-to-end deadline
+test (`core/providers/tests/deadline.rs`): it drives the real `kb-code-provider` binary with
+a synthetic native tool and checks that the engine's deadline ends that tool and removes the
+provider's frozen checkout. The replay crate adds pure accounting/statistics tests and a
+shallow-Git isolation test. Run its OS-dependent fixtures explicitly with
+`cargo test -p kb-eval --locked --test replay_workflow -- --ignored`; CI runs them last, on
+Seatbelt/bubblewrap. The workflow fixture routes the synthetic coder and judge through the
+egress proxy (they send it only a `CONNECT` to an unapproved host); on macOS a second
+ignored test (`seatbelt_profile_loads_and_admits_only_the_proxy_port`) loads the generated
+Seatbelt profile. They call no real model or public network and must not be mistaken for
+held-out quality acceptance.
 
 Shared helpers are in `core/cli/tests/common/`. Rules for every test:
 
@@ -151,7 +157,7 @@ engine) and are compiled into the binary from `core/cli/src/versions.rs`.
 | `LAYOUT` | integer, code only (`core/cli/src/index/schema.rs`, recorded as meta key `layout`) | table changes within one `index_schema` (derived data only) | existing index rebuilt in place (`INDEX_REBUILT`); adding a new meta key has the same effect on older indexes (`<key> missing`) |
 | `skill_protocol` | integer | generated skills change the calls or interpretation agents rely on (not for wording) | `--skill-protocol` → `SKILL_OUTDATED` |
 | `manifest` | integer (`1`) | format of `core/release.toml` itself | `RUNTIME_INCOMPATIBLE` |
-| `PARSER_VERSION` | integer, code only (currently `5`) | parsing output for identical bytes changes, including diagnostic messages | cached parses are invalidated: the index is rebuilt in place (`INDEX_REBUILT`) |
+| `PARSER_VERSION` | integer, code only (currently `6`) | parsing output for identical bytes changes, including diagnostic messages | cached parses are invalidated: the index is rebuilt in place (`INDEX_REBUILT`) |
 | `rust_toolchain` | toolchain | toolchain upgrade (together with `rust-toolchain.toml`) | `KBW_TOOLCHAIN_MISMATCH` |
 
 Unit tests in `versions.rs` fail when `core/release.toml` and the compiled constants disagree
@@ -286,24 +292,31 @@ then skipped and a `v*` tag publishes nothing (see
 
 `.github/workflows/upstream-ci.yml` runs on every push and pull request with
 `contents: read` and no secrets, on `ubuntu-latest` (x86_64 Linux) and `macos-14` (arm64
-macOS):
+macOS). After a checkout without persisted credentials it runs:
 
 1. install the pinned toolchain (`rustup toolchain install`);
 2. `cargo fmt --all --check`;
 3. `cargo clippy --workspace --all-targets --locked -- -D warnings`;
 4. `cargo test --workspace --locked`;
-5. install the Linux replay isolation backend: bubblewrap, with its user namespaces enabled
-   (Linux only);
-6. the replay isolation smoke `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`
-   (Seatbelt on macOS, bubblewrap on Linux; synthetic, offline, no model credentials);
-7. `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` (Linux only);
-8. `./kbw --kbw-bootstrap`, `./kbw --kbw-runtime-info`, `./kbw version` (with
+5. `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` (Linux only);
+6. `./kbw --kbw-bootstrap`, `./kbw --kbw-runtime-info`, `./kbw version` (with
    `KBW_CARGO_TARGET_DIR` set to the workspace `target/`);
-9. `./kbw schema --check`;
-10. `./kbw validate --profile maintainer --templates`;
-11. Tier A routing on both corpora: `./kbw eval routing --profile maintainer --json` and
-    `./kbw eval routing --example synthetic-multirepo --json`;
-12. `cargo run -p kb-bench --release --locked -- smoke`.
+7. `./kbw schema --check`;
+8. `./kbw validate --profile maintainer --templates`;
+9. Tier A routing on both corpora: `./kbw eval routing --profile maintainer --json` and
+   `./kbw eval routing --example synthetic-multirepo --json`;
+10. `cargo run -p kb-bench --release --locked -- smoke`;
+11. install the Linux replay isolation backend (Linux only): bubblewrap, probed with
+    `bwrap --unshare-all`. When Ubuntu's AppArmor restriction
+    (`kernel.apparmor_restrict_unprivileged_userns = 1`) blocks the probe, a binary-scoped
+    AppArmor profile (`kb-eval-bwrap`) grants `userns` to `/usr/bin/bwrap` alone; the
+    host-wide setting is never lowered, and a backend that still cannot create its
+    namespaces fails the step;
+12. the replay isolation smoke `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`
+    (Seatbelt on macOS, bubblewrap on Linux; synthetic, offline, no model credentials).
+
+The replay steps run last, so a runner that cannot sandbox does not skip the checks before
+them.
 
 Making these checks required for merging is a repository setting. Downstream forks inherit
 this workflow; setting the repository variable `KB_ENGINE_CI` to `disabled` skips its job

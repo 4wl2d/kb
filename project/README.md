@@ -21,9 +21,9 @@ Useful options: `--remote <name>` and `--approved-ref <ref>` (trust boundary, de
 
 `init --apply` creates `project/project.toml`, `project/registry/`, `project/knowledge/`,
 `project/skill-config/` (including the rendered skill bundle), `project/routing-tests/`,
-`project/upstream.toml` and `.github/workflows/kb-knowledge.yml`, and replaces this README
-with the project README. Existing files are never overwritten. Then follow BOOTSTRAP.md to
-turn the empty structure into the project's knowledge base.
+`project/upstream.toml`, GitHub/GitLab KB CI and review templates (`.github/`, `.gitlab/`),
+and replaces this README with the project README. Existing files are never overwritten. Then
+follow BOOTSTRAP.md to turn the empty structure into the project's knowledge base.
 
 ## Try the synthetic example
 
