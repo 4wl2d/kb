@@ -132,9 +132,13 @@ implicit timezone; commit ancestry is resolved by the host adapter, never by the
 
 Probe kinds: `commit-message`/`branch-name` with `pattern`; `forbidden-import` with nonempty
 `from`/`to` globs; `naming`/`banned-api` with nonempty `paths` and a regex `pattern`. Unknown
-fields, invalid regexes and unsafe globs are errors. A probe declaration is not evidence
-that it ran. A synthetic probe on a rule of the example's `example.mobile.token-storage`
-policy:
+fields, invalid regexes and unsafe globs are errors. A probe glob (`paths`, `from`, `to`)
+whose text before the first `:` contains no `/` is `repo:`-qualified, and that text must
+name a registry repo exactly (`UNKNOWN_REPO`, message ``verify: `<glob>` names unknown repo
+`<repo>` ``). A typo or a case change such as `Mobile:app/**` would never match, so
+validation and `kb verify` fail instead of skipping the probe. A probe declaration is not
+evidence that it ran. A synthetic probe on a rule of the example's
+`example.mobile.token-storage` policy:
 
 ```toml
 [[rules]]
@@ -396,7 +400,8 @@ applicable obligation and never make a record mandatory.
   `[...]` a class. They are repo-relative and `/`-separated; absolute paths, `.`/`..`
   segments, backslashes and control characters are rejected (`SELECTOR_PATH_INVALID`). An
   unqualified glob matches in any repo; `repo:glob` only in that repo (`UNKNOWN_REPO` for an
-  unknown qualifier).
+  unknown qualifier). The qualifier is the text before the first `:` when it contains no
+  `/`, checked as written: `Mobile:app/**` names the unknown repo `Mobile`.
 * `concepts` must exist in `registry/concepts.toml` (`UNKNOWN_CONCEPT`).
 * `intents` are `implement`, `refactor`, `debug`, `review`, `explain`.
 * `aliases` are matched against the normalized task text with the rules in
@@ -527,6 +532,11 @@ symbol = "TokenStore"
 `doc` anchor paths. Schema validation records provenance without running anything.
 `anchors stamp` and `anchors check` separately inspect immutable Git bytes and optional
 definition spans; a matching stamp does not prove the statement's truth or a test run.
+`propose submit` verifies every anchor of the draft, so a submitted `change` anchor needs a
+`repo` and a `commit` that resolves in it (or a `path` that exists there); an external
+reference alone (`change = "!42"`) is not locally verifiable and the submission is refused.
+`anchors stamp` never rewrites or adds a `change` anchor's `commit`: one with a commit is
+stamped only `--at` that commit, and one without a `path` has no span to stamp.
 **A test anchor alone does not prove that the test exists or runs, and a valid schema does
 not prove that the text is true.** See [knowledge-lifecycle.md](knowledge-lifecycle.md).
 
@@ -613,6 +623,12 @@ links, cycles, lifecycle, overrides) and the `--base` checks. The complete list 
 ./kbw validate --templates      # also check core/templates (upstream check)
 ./kbw validate --stale 90 --on 2026-10-07  # explicit calendar reference for an audit
 ```
+
+`--templates` parses every project template as its destination file. Registry templates
+are parsed strictly (`REGISTRY_PARSE`) and must declare a `schema` a loaded corpus accepts
+(`UNSUPPORTED_SCHEMA_VERSION`); `registry/change-types.toml` must declare `schema = 2` and
+gets the change-type checks of `kb validate` (ids, duplicates, globs, aliases and symbols),
+except repo qualifiers, which name the downstream's repos and are checked there.
 
 With `--templates`, the text report says that the templates were checked, with their own
 counts, which are also included in the totals: compact `templates: checked (shipped templates
@@ -705,7 +721,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `DUPLICATE_ID` | the same id is defined in more than one file (reported for every file; context serves the first file by path) |
 | `OWNER_UNKNOWN` | the owner, or an `override_owners` entry, is not in `owners.toml` |
 | `OWNER_NOT_AUTHORIZED` | the owner has no authority over the record's scope |
-| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or consumers, the `repo:` qualifier of a `verify` probe glob, or the feature field does not exist |
+| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or consumers, the `repo:` qualifier of a `selectors.paths` or `verify` probe glob (`paths`, `from`, `to`; the text before the first `:` when it has no `/`, as written, so `Mobile:` is unknown), or the feature field does not exist |
 | `SCOPE_UNSATISFIABLE` | no task can match every scope dimension |
 | `CONTRACT_PARTY_OUT_OF_SCOPE` | a party's repo is outside the contract's scope, so the contract would not reach that party |
 | `CONTRACT_PARTY_MODULE_MISMATCH` | a party lists a module of another repo |
@@ -726,7 +742,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `REGISTRY_PARSE` | a registry file is not UTF-8 or fails the strict TOML parse |
 | `REGISTRY_ID_INVALID` | a registry id does not match the registry id pattern or exceeds 64 bytes |
 | `REGISTRY_DUPLICATE_ID` | an id repeats within one registry file |
-| `REGISTRY_UNKNOWN_REPO` | an owner, module, feature or `repo:` glob qualifier names an unknown repo |
+| `REGISTRY_UNKNOWN_REPO` | an owner, module, feature or `repo:` glob qualifier (as written, so `Mobile:` is unknown) names an unknown repo |
 | `REGISTRY_UNKNOWN_FEATURE` | a module lists an unknown feature |
 | `REGISTRY_GLOB_INVALID` | a module, feature, concept or change-type glob is invalid |
 | `REGISTRY_PATH_INVALID` | a repo `version_file` is not a safe relative path |

@@ -298,14 +298,19 @@ override_owners = ["arch", "ghost-team"]
 #[test]
 fn verify_probe_globs_must_name_registered_repos() {
     let kb = Kb::new();
-    let rules = r#"[[rules]]
+    // A qualifier is checked as written: `Mobile` is not id-shaped, so the glob would
+    // otherwise be read as a literal pattern that never matches.
+    let rules = r#"[selectors]
+paths = ["Mobile:app/**", "docs/a:b.md"]
+
+[[rules]]
 id = "no-print"
 level = "must-not"
 text = "Print to standard output."
 
 [[rules.verify]]
 kind = "banned-api"
-paths = ["mobil:app/**", "mobile:app/**", "app/**"]
+paths = ["mobil:app/**", "mobile:app/**", "app/**", "Mobile:app/**", "app/x:y/**"]
 pattern = "println"
 
 [[rules.verify]]
@@ -337,6 +342,8 @@ to = ["bakend:src/db/**"]
     assert_eq!(
         messages,
         [
+            "UNKNOWN_REPO selectors.paths: `Mobile:app/**` names unknown repo `Mobile`",
+            "UNKNOWN_REPO verify: `Mobile:app/**` names unknown repo `Mobile`",
             "UNKNOWN_REPO verify: `bakend:src/db/**` names unknown repo `bakend`",
             "UNKNOWN_REPO verify: `mobil:app/**` names unknown repo `mobil`",
         ]
@@ -1272,21 +1279,84 @@ fn change_types_template_is_parsed_strictly_and_must_declare_schema_two() {
     common::write(&root.join(rel), &shipped);
     let d = validate_templates(&root).unwrap();
     assert!(d.is_empty(), "{d:#?}");
-    for (text, code) in [
+    let entry = |id: &str, extra: &str| {
+        format!("[[change_type]]\nid = \"{id}\"\ntitle = \"Synthetic\"\n{extra}\n")
+    };
+    for (text, codes) in [
         (
-            "schema = 2\n[[change_type]]\nid = \"retry\"\ntitle = \"Retries\"\nalias = [\"retry\"]\n",
-            "REGISTRY_PARSE",
+            "schema = 2\n[[change_type]]\nid = \"retry\"\ntitle = \"Retries\"\nalias = [\"retry\"]\n"
+                .to_string(),
+            &["REGISTRY_PARSE"][..],
         ),
-        ("schema = 7\n", "UNSUPPORTED_SCHEMA_VERSION"),
-        ("schema = 1\n", "UNSUPPORTED_SCHEMA_VERSION"),
+        ("schema = 7\n".to_string(), &["UNSUPPORTED_SCHEMA_VERSION"]),
+        ("schema = 1\n".to_string(), &["UNSUPPORTED_SCHEMA_VERSION"]),
+        // The change-type checks a downstream `kb validate` applies to the copied file.
+        (
+            format!("schema = 2\n{}", entry("Bad Id", "paths = [\"../../etc/**\"]")),
+            &[
+                "CHANGE_TYPE_INVALID",
+                "REGISTRY_GLOB_INVALID",
+                "REGISTRY_ID_INVALID",
+            ],
+        ),
+        (
+            format!(
+                "schema = 2\n{}{}",
+                entry("retry", "aliases = [\"!!!\"]"),
+                entry("retry", "symbols = [\"Retry\"]")
+            ),
+            &["REGISTRY_ALIAS_INVALID", "REGISTRY_DUPLICATE_ID"],
+        ),
+        // Repo qualifiers name the downstream's repos and are checked there.
+        (
+            format!(
+                "schema = 2\n{}",
+                entry("retry", "paths = [\"mobile:app/**\"]")
+            ),
+            &[],
+        ),
     ] {
-        common::write(&root.join(rel), text);
+        common::write(&root.join(rel), &text);
+        let d = validate_templates(&root).unwrap();
+        let mut got: Vec<_> = d
+            .iter()
+            .map(|x| (x.code.as_str(), x.path.as_deref().unwrap_or_default()))
+            .collect();
+        got.sort();
+        let want: Vec<_> = codes.iter().map(|c| (*c, rel)).collect();
+        assert_eq!(got, want, "{text}: {d:#?}");
+    }
+}
+
+#[test]
+fn registry_templates_must_declare_a_supported_schema() {
+    let sb = common::Sandbox::new();
+    let root = template_root(&sb);
+    let dir = "core/templates/project/registry";
+    for file in [
+        "owners.toml",
+        "repos.toml.tmpl",
+        "modules.toml",
+        "features.toml",
+        "concepts.toml",
+    ] {
+        let rel = format!("{dir}/{file}");
+        common::write(&root.join(&rel), "schema = 2\n");
+        assert!(validate_templates(&root).unwrap().is_empty(), "{rel}");
+        // A loaded corpus refuses this file (`UNSUPPORTED_SCHEMA_VERSION`), so must the
+        // template check.
+        common::write(&root.join(&rel), "schema = 7\n");
         let d = validate_templates(&root).unwrap();
         let got: Vec<_> = d
             .iter()
             .map(|x| (x.code.as_str(), x.path.as_deref().unwrap_or_default()))
             .collect();
-        assert_eq!(got, [(code, rel)], "{text}: {d:#?}");
+        assert_eq!(
+            got,
+            [("UNSUPPORTED_SCHEMA_VERSION", rel.as_str())],
+            "{d:#?}"
+        );
+        common::write(&root.join(&rel), "schema = 1\n");
     }
 }
 

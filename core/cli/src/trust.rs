@@ -329,7 +329,12 @@ pub fn plan_stamps(
         if let Some(date) = options.review_by {
             put(doc.as_table_mut(), "review_by", Value::from(date));
         }
-        let after = format!("{}{}{}", &text[..start], doc, &text[end..]);
+        let after = format!(
+            "{}{}{}",
+            &text[..start],
+            keep_line_endings(front, doc.to_string()),
+            &text[end..]
+        );
         crate::parse::parse_record(&entry.path, after.as_bytes()).map_err(|d| {
             KbError::new(ErrorCode::ValidationFailed, "stamped record is invalid")
                 .with_diagnostics(d)
@@ -350,6 +355,15 @@ pub fn plan_stamps(
         skipped,
         note: "Metadata only; no status is accepted. verified_at/review_by are caller-reported review metadata, never inferred from an anchor or a test command. Without a unique provider definition, symbol anchors conservatively stamp the whole file.",
     })
+}
+
+/// `toml_edit` writes `\n` line breaks. A front matter whose line breaks are mostly CRLF
+/// keeps CRLF, so stamping changes only the stamped lines instead of every line ending.
+fn keep_line_endings(original: &str, edited: String) -> String {
+    if original.matches("\r\n").count() * 2 <= original.matches('\n').count() {
+        return edited;
+    }
+    edited.replace("\r\n", "\n").replace('\n', "\r\n")
 }
 
 fn put(table: &mut dyn TableLike, key: &str, mut value: Value) {
@@ -379,4 +393,23 @@ pub fn apply_stamps(kb_root: &Path, plan: &StampPlan) -> Result<usize> {
         }
     }
     Ok(written)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::keep_line_endings;
+
+    #[test]
+    fn stamped_front_matter_keeps_its_predominant_line_ending() {
+        let edited = "a = 1\r\nb = 2\nc = 3\n".to_string();
+        assert_eq!(
+            keep_line_endings("a = 1\r\nb = 2\r\n", edited.clone()),
+            "a = 1\r\nb = 2\r\nc = 3\r\n"
+        );
+        assert_eq!(
+            keep_line_endings("a = 1\r\nb = 2\n", edited.clone()),
+            edited
+        );
+        assert_eq!(keep_line_endings("a = 1\nb = 2\n", edited.clone()), edited);
+    }
 }

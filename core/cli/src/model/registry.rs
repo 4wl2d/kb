@@ -7,7 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::diag::Diagnostic;
-use crate::glob::RepoGlob;
+use crate::glob::{RepoGlob, written_qualifier};
 use crate::model::ids::{MAX_REGISTRY_ID, REGISTRY_ID_PATTERN, check_registry_id};
 use crate::normalize::AliasPattern;
 
@@ -420,9 +420,10 @@ impl Registry {
         let glob_check = |d: &mut Vec<Diagnostic>, file: &str, owner: &str, specs: &[String]| {
             for s in specs {
                 match RepoGlob::parse(s) {
-                    Ok(g) => {
-                        if let Some(r) = &g.repo
-                            && !repo_ids.contains(r.as_str())
+                    // Checked as written: a qualifier that is not id-shaped never matches.
+                    Ok(_) => {
+                        if let Some(r) = written_qualifier(s)
+                            && !repo_ids.contains(r)
                         {
                             d.push(
                                 Diagnostic::error(
@@ -665,5 +666,23 @@ mod tests {
             "ui-composition"
         );
         assert!(r.validate().is_empty());
+    }
+
+    #[test]
+    fn glob_qualifiers_are_checked_as_written() {
+        let mut data = sample().data;
+        data.modules[0].paths = vec!["Mobile:app/auth/**".into(), "app/a:b/**".into()];
+        let d = Registry::new(data).validate();
+        let got: Vec<_> = d
+            .iter()
+            .map(|x| (x.code.as_str(), &x.message[..]))
+            .collect();
+        assert_eq!(
+            got,
+            [(
+                "REGISTRY_UNKNOWN_REPO",
+                "`mobile.auth` glob `Mobile:app/auth/**` names unknown repo `Mobile`"
+            )]
+        );
     }
 }

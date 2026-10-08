@@ -455,19 +455,21 @@ fn probe_glob_of_an_unregistered_repo_fails_validation_instead_of_skipping() {
     write(&w.host.join("app/auth/New.kt"), "legacyCall()\n");
     w.policy(&BANNED.replace("\"app/**/*.kt\"", "\"mobile:app/**/*.kt\""));
     w.run(&[], 40);
-    // A one-character typo in the repo qualifier must not disarm the must-not guard.
-    w.policy(&BANNED.replace("\"app/**/*.kt\"", "\"mobil:app/**/*.kt\""));
-    let failed = w.run(&[], 40);
-    assert_eq!(failed["error"]["code"], "VALIDATION_FAILED", "{failed}");
-    assert!(
-        failed["error"]["diagnostics"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["code"] == "UNKNOWN_REPO"
-                && d["message"] == "verify: `mobil:app/**/*.kt` names unknown repo `mobil`"),
-        "{failed}"
-    );
+    // A typo in the repo qualifier, including its case, must not disarm the must-not guard.
+    for repo in ["mobil", "Mobile"] {
+        w.policy(&BANNED.replace("\"app/**/*.kt\"", &format!("\"{repo}:app/**/*.kt\"")));
+        let failed = w.run(&[], 40);
+        assert_eq!(failed["error"]["code"], "VALIDATION_FAILED", "{failed}");
+        let message = format!("verify: `{repo}:app/**/*.kt` names unknown repo `{repo}`");
+        assert!(
+            failed["error"]["diagnostics"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["code"] == "UNKNOWN_REPO" && d["message"] == message.as_str()),
+            "{failed}"
+        );
+    }
 }
 
 #[cfg(unix)]

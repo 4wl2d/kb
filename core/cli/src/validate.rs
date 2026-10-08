@@ -17,10 +17,10 @@ use serde::Serialize;
 use crate::corpus::{Corpus, is_record_path, load_corpus, parse_config};
 use crate::diag::{Diagnostic, Severity, normalize};
 use crate::error::{KbError, Result};
-use crate::glob::RepoGlob;
+use crate::glob::{RepoGlob, written_qualifier};
 use crate::model::ids::namespace_of;
 use crate::model::registry::{
-    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, RegistryData, ReposFile,
     parse_registry_file,
 };
 use crate::model::routing::RoutingTestFile;
@@ -252,15 +252,16 @@ fn check_registry_refs(registry: &Registry, r: &MetaInput, out: &mut Vec<Diagnos
             );
         }
     }
-    // Invalid globs are reported by the parser; only the repo qualifier is checked here. A
-    // probe glob of an unknown repo never matches, which would silently skip the probe.
+    // Invalid globs are reported by the parser; only the repo qualifier is checked here, as
+    // written. A glob of an unknown repo, or one whose qualifier is not id-shaped (`Mobile:`
+    // is read as part of a literal pattern), never matches: it would silently skip a probe.
     for (field, globs) in [
         ("selectors.paths", &m.selectors.paths),
         ("verify", &m.probe_globs),
     ] {
         for p in globs {
-            if let Ok(g) = RepoGlob::parse(p)
-                && let Some(repo) = &g.repo
+            if RepoGlob::parse(p).is_ok()
+                && let Some(repo) = written_qualifier(p)
                 && registry.repo(repo).is_none()
             {
                 unknown(
@@ -1221,9 +1222,7 @@ fn check_project_templates(source: &WorkingTreeSource, out: &mut Vec<Diagnostic>
         if is_tmpl && text.contains("{{") {
             continue;
         }
-        if let Some(d) = check_profile_toml(&path, dest, text) {
-            out.push(d);
-        }
+        out.extend(check_profile_toml(&path, dest, text));
         if dest.starts_with("knowledge/") && is_record_path(dest) {
             match parse_record(&path, &bytes) {
                 Ok(parsed) => out.extend(lint_records(&[(path.clone(), &parsed)])),
@@ -1235,44 +1234,68 @@ fn check_project_templates(source: &WorkingTreeSource, out: &mut Vec<Diagnostic>
 }
 
 /// Strictly parse one plain TOML profile file (or template) by its profile-relative path.
-fn check_profile_toml(path: &str, dest: &str, text: &str) -> Option<Diagnostic> {
+fn check_profile_toml(path: &str, dest: &str, text: &str) -> Vec<Diagnostic> {
     fn typed<T: serde::de::DeserializeOwned>(path: &str, text: &str) -> Option<Diagnostic> {
         toml::from_str::<T>(text)
             .err()
             .map(|e| Diagnostic::error("TEMPLATE_INVALID", e.to_string()).at_path(path))
     }
-    fn registry<T: serde::de::DeserializeOwned>(path: &str, text: &str) -> Option<Diagnostic> {
-        parse_registry_file::<T>(path, text).err()
+    // The declared schema must be one a loaded corpus accepts (`corpus::load_registry`);
+    // change types exist only in schema 2.
+    fn registry<T: serde::de::DeserializeOwned>(
+        path: &str,
+        dest: &str,
+        text: &str,
+        schema: fn(&T) -> u32,
+    ) -> Result<T, Diagnostic> {
+        let file = parse_registry_file::<T>(path, text)?;
+        let v = schema(&file);
+        if crate::versions::supports_document_schema(v)
+            && (dest != "registry/change-types.toml" || v == 2)
+        {
+            return Ok(file);
+        }
+        Err(Diagnostic::error(
+            "UNSUPPORTED_SCHEMA_VERSION",
+            format!("registry file schema {v} is not supported"),
+        )
+        .at_path(path))
     }
     if !dest.ends_with(".toml") {
-        return None;
+        return Vec::new();
+    }
+    if dest == "registry/change-types.toml" {
+        return match registry(path, dest, text, |f: &ChangeTypesFile| f.schema) {
+            // The change-type checks of `Registry::validate`. Repo qualifiers name the
+            // downstream's repos, so they are checked by `kb validate` there.
+            Ok(f) => Registry::new(RegistryData {
+                change_types: f.change_type,
+                ..RegistryData::default()
+            })
+            .validate()
+            .into_iter()
+            .filter(|d| d.code != "REGISTRY_UNKNOWN_REPO")
+            .map(|d| d.at_path(path))
+            .collect(),
+            Err(d) => vec![d],
+        };
     }
     match dest {
         "project.toml" => parse_config(path, text.as_bytes())
             .err()
             .map(|e: KbError| Diagnostic::error(e.code.as_str(), e.message).at_path(path)),
-        "registry/owners.toml" => registry::<OwnersFile>(path, text),
-        "registry/repos.toml" => registry::<ReposFile>(path, text),
-        "registry/modules.toml" => registry::<ModulesFile>(path, text),
-        "registry/features.toml" => registry::<FeaturesFile>(path, text),
-        "registry/concepts.toml" => registry::<ConceptsFile>(path, text),
-        // Change types exist only in schema 2, as for a loaded corpus.
-        "registry/change-types.toml" => match parse_registry_file::<ChangeTypesFile>(path, text) {
-            Ok(f) if f.schema != 2 => Some(
-                Diagnostic::error(
-                    "UNSUPPORTED_SCHEMA_VERSION",
-                    format!("registry file schema {} is not supported", f.schema),
-                )
-                .at_path(path),
-            ),
-            Ok(_) => None,
-            Err(d) => Some(d),
-        },
+        "registry/owners.toml" => registry(path, dest, text, |f: &OwnersFile| f.schema).err(),
+        "registry/repos.toml" => registry(path, dest, text, |f: &ReposFile| f.schema).err(),
+        "registry/modules.toml" => registry(path, dest, text, |f: &ModulesFile| f.schema).err(),
+        "registry/features.toml" => registry(path, dest, text, |f: &FeaturesFile| f.schema).err(),
+        "registry/concepts.toml" => registry(path, dest, text, |f: &ConceptsFile| f.schema).err(),
         "skill-config/skill.toml" => typed::<SkillConfig>(path, text),
         "upstream.toml" => typed::<UpstreamConfig>(path, text),
         d if d.starts_with("routing-tests/") => typed::<RoutingTestFile>(path, text),
         _ => typed::<toml::Table>(path, text),
     }
+    .into_iter()
+    .collect()
 }
 
 fn check_examples(kb_root: &Path, out: &mut Vec<Diagnostic>) -> Result<()> {

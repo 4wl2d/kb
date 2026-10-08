@@ -163,6 +163,31 @@ fn stamp_is_previewable_idempotent_and_preserves_status_comments_body_and_dirty_
 }
 
 #[test]
+fn stamping_a_crlf_record_only_inserts_crlf_lines() {
+    let w = World::new();
+    let path = w.policy("persist");
+    let before = fs::read_to_string(&path).unwrap().replace('\n', "\r\n");
+    write(&path, &before);
+    let preview = w.run(&["anchors", "stamp", "--id", "acme.policy.evidence"], 0);
+    let diff = preview["result"]["plan"]["changes"][0]["diff"]
+        .as_str()
+        .unwrap();
+    // Every existing line, terminator included, is context; stamping only adds lines.
+    assert!(diff.lines().skip(2).all(|l| !l.starts_with('-')), "{diff}");
+    assert!(diff.lines().any(|l| l.starts_with("+commit = ")), "{diff}");
+    assert_eq!(w.stamp()["result"]["written"], 1);
+    let after = fs::read_to_string(&path).unwrap();
+    assert!(!after.replace("\r\n", "").contains('\n'), "{after:?}");
+    assert!(after.ends_with("+++\r\n\r\n## Evidence\r\n\r\nKeep this author-written body.\r\n"));
+    let record = kb::parse::parse_record("record", after.as_bytes())
+        .unwrap()
+        .record;
+    assert_eq!(record.common().verified_at, Some("2026-01-01"));
+    assert!(record.common().anchors[0].stamp.is_some());
+    assert_eq!(w.stamp()["result"]["written"], 0);
+}
+
+#[test]
 fn upper_case_stamp_commit_at_its_own_revision_is_a_broken_stamp_not_drift() {
     let w = World::new();
     let path = w.policy("persist");

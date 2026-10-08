@@ -54,8 +54,12 @@ Safety guarantees of `--apply`:
    fsync, rename). Any transform or verification failure fails with `MIGRATION_FAILED`
    (exit 52) listing every failing file, and **nothing is written**. A file modified on
    disk between planning and writing also aborts before the first write;
-4. TOML is edited with `toml_edit`, so comments, key order and formatting survive; record
-   bodies after the closing `+++` line are byte-identical;
+4. `v1-to-v2` replaces only the bytes of each `schema` value, so line endings (CRLF),
+   comments and layout survive byte for byte; the synthetic `v0-to-v1` step edits TOML with
+   `toml_edit`, which keeps comments and key order. Record bodies after the closing `+++`
+   line are byte-identical. The dry-run diff compares lines with their terminators, so a
+   line-ending change shows as a changed line and a missing final newline is marked
+   `\ No newline at end of file`;
 5. re-applying is a no-op (`written` is empty).
 
 Migration is local and deterministic; it never touches Git. Review the diff and commit it

@@ -76,6 +76,15 @@ pub fn split_repo(spec: &str) -> (Option<&str>, &str) {
     (None, spec)
 }
 
+/// The qualifier as written: the text before the first `:` when it contains no `/`.
+/// [`split_repo`] only recognizes registry-id-shaped qualifiers, so `Mobile:app/**` parses
+/// as a literal pattern that never matches; validation checks this text against the registry.
+pub fn written_qualifier(spec: &str) -> Option<&str> {
+    spec.split_once(':')
+        .map(|(r, _)| r)
+        .filter(|r| !r.contains('/'))
+}
+
 fn literal_prefix(p: &str) -> &str {
     let end = p.find(['*', '?', '[', '{']).unwrap_or(p.len());
     &p[..end]
@@ -129,6 +138,11 @@ mod tests {
         assert!(!q.matches(Some("mobile"), "src/a/b.rs"));
         assert!(RepoGlob::parse("../x").is_err());
         assert!(RepoGlob::parse("/x").is_err());
+        assert_eq!(written_qualifier("backend:src/**"), Some("backend"));
+        assert_eq!(written_qualifier("Mobile:app/**"), Some("Mobile"));
+        assert_eq!(RepoGlob::parse("Mobile:app/**").unwrap().repo, None);
+        assert_eq!(written_qualifier("docs/a:b.md"), None);
+        assert_eq!(written_qualifier("app/**"), None);
     }
 
     #[test]
