@@ -1,4 +1,69 @@
-# Verification report
+# Verification
+
+## Current upgrade workspace (2026-10-07)
+
+These results cover the uncommitted `feature/upstream-knowledge-upgrade` workspace based
+on `1ffbeef05d7f408bd23399445e0ce341a428b3c5`. They are local implementation evidence,
+not a published release or proof of better model outcomes. The engine version remains
+0.1.0 unreleased; document/index/skill contracts are 2, CLI protocol is 1 and parser
+version is 5. The source launcher was rebuilt for the current engine inputs.
+
+| Check | Observed result |
+|---|---|
+| `cargo fmt --all --check` | Exit 0 |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Exit 0, no warnings |
+| `cargo test --workspace --locked --no-fail-fast` | Exit 0; 407 passed, zero failed, one OS-dependent test ignored |
+| `cargo test -p kb-eval --locked --test replay_workflow -- --ignored` | Exit 0; the separate macOS Seatbelt synthetic replay test passed |
+| `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` | Exit 0 |
+| `./kbw --kbw-bootstrap` | Exit 0; source runtime built and activated |
+| `./kbw schema --check` | Exit 0; 23 generated schemas in sync |
+| `./kbw validate --profile maintainer --templates` | Exit 0; 20 records, zero errors/warnings, templates checked, 3/3 routing cases |
+| `./kbw eval routing --example synthetic-multirepo --json` | Exit 0; 7/7 cases |
+| Tier A with `--context-format terse` | Exit 0; synthetic 7/7 and maintainer 3/3 |
+| `cargo run -p kb-bench --release --locked -- smoke` | Exit 0; 300-record synthetic smoke checks passed |
+| YAML parsing and `git diff --check` | Ten workflow/template YAML files parse; no whitespace errors |
+
+The tests include real launcher initialization and update, schema 0 → 1 → 2 migrations,
+old-format context goldens, draft validation/deduplication, temporal routing, provider
+commit/hash checks, uncertain/deleted dependents, delivery reuse, stale anchors, declarative
+probes, append-only local usage and offline CI exports. Synthetic regressions cover terse
+size reduction without dropping obligations, immutable replay objects, usage accounting,
+paired cohorts, multiplicity, equivalence and missing evidence. Source tests are not proof
+of physical-device behavior, real agent compliance or remote service integration.
+
+Installed ast-index 3.54.0 and CodeGraph 1.6.1 also indexed frozen synthetic Git trees;
+repeated adapter responses were byte-identical. Native replay clients passed isolated
+`--version` startup: Codex 0.153.4, Claude Code 2.1.274, Cursor
+2026.08.11-e8db854 and Grok 1.0.46. No model credentials or billable jobs were used in
+these checks. The replay fixture uses a synthetic executable, including its judge.
+
+Raw local logs are retained under the ignored `.cache/upstream-upgrade/` directory:
+`final-workspace-tests-5.log`, `final-fmt-5.log`, `final-clippy-5.log`,
+`final-replay-isolation-7.log`, `final-shellcheck-1.log`, `final-schema-check-2.log`,
+`final-maintainer-validate-2.log`, `final-routing-*.json` and `final-yaml-1.log`.
+Earlier failed and superseded logs are preserved; they do not override the named final
+results. The benchmark smoke is a sanity check without a comparable performance baseline.
+
+An additional offline runtime probe used an immutable historical Android checkout and
+the exact cached Gradle 9.5.0 distribution (its archive digest matched the host wrapper).
+JDK 25 startup passed in Seatbelt, but Gradle failed before project configuration with
+`FileLockContentionHandler` / `SocketException: Operation not permitted`, including with
+`--offline --no-daemon`. Both copies were rejected by qualification; no model or hidden
+product test ran. The default macOS profile therefore does not yet provide a usable
+Android replay worker. This probe is deliberately ineligible as a scored task.
+
+Still unverified: Linux/bubblewrap execution, remote GitHub/GitLab jobs, live client
+authentication/transport, real harness loading/consultation, a working isolated Android
+build/test setup and all preregistered held-out model acceptance gates. No new release
+has been tagged or published. The proposed ADRs and draft maintainer records still need
+review. [Upgrade tracking](upstream-upgrade.md) and [evaluation](evaluation.md) describe the
+remaining requirements; a green local suite does not close them.
+
+## Historical verification baseline (0.1.0)
+
+The measurements below belong to the earlier 0.1.0 baseline. They are retained as prior
+evidence, not as validation of the current upgrade branch. Current local results are
+above; release and empirical acceptance remain separate gates.
 
 What was run to check this version, with the observed results. Only checks that were
 actually executed are listed; platforms and services that were not exercised are named

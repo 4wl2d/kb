@@ -40,6 +40,11 @@ fn subset(a: &[String], b: &[String]) -> bool {
 
 /// `a ⊆ b`: every task to which `a` applies is also one to which `b` applies.
 pub fn subsumes(b: &Scope, a: &Scope, registry: &Registry) -> bool {
+    if !b.change_types.is_empty()
+        && (a.change_types.is_empty() || !subset(&a.change_types, &b.change_types))
+    {
+        return false;
+    }
     if b.product {
         return true;
     }
@@ -68,6 +73,12 @@ pub fn subsumes(b: &Scope, a: &Scope, registry: &Registry) -> bool {
 /// Could some task be in both scopes? Conservative: returns true unless a dimension
 /// constrained by both is provably disjoint.
 pub fn overlap(a: &Scope, b: &Scope, registry: &Registry) -> bool {
+    if !a.change_types.is_empty()
+        && !b.change_types.is_empty()
+        && !a.change_types.iter().any(|t| b.change_types.contains(t))
+    {
+        return false;
+    }
     if a.product || b.product {
         return true;
     }
@@ -129,6 +140,7 @@ mod tests {
             repos: repos.iter().map(|x| x.to_string()).collect(),
             modules: modules.iter().map(|x| x.to_string()).collect(),
             features: features.iter().map(|x| x.to_string()).collect(),
+            change_types: vec![],
         }
     }
 

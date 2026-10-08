@@ -1,0 +1,5 @@
+{"columns":["name","qualified_name","kind","line","signature","path"],"count":3,"rows":[
+  {"name":"run","qualified_name":null,"kind":"function","line":1,"signature":"pub fn run()","path":"src/lib.rs"},
+  {"name":"save","qualified_name":null,"kind":"function","line":1,"signature":"pub fn save()","path":"src/a.rs"},
+  {"name":"save","qualified_name":null,"kind":"function","line":1,"signature":"pub fn save()","path":"src/b.rs"}
+]}

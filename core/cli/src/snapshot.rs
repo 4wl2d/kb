@@ -192,6 +192,20 @@ pub fn resolve(
         .field(PARSER_VERSION.to_string())
         .field(overlay.as_ref().map(|o| o.digest.as_str()).unwrap_or(""));
 
+    let mut prefixes = loc.content_prefixes(&config);
+    prefixes.push(MANIFEST_PATH.to_string());
+    let (mut entries, mut issues) = source.list(&prefixes)?;
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    issues.sort_by(|a, b| (&a.path, a.code).cmp(&(&b.path, b.code)));
+    let mut digest = FieldHasher::new();
+    digest.field("kb-snapshot-content/1");
+    for entry in entries {
+        digest.field(entry.path).field(entry.content_id);
+    }
+    for issue in issues {
+        digest.field("issue").field(issue.path).field(issue.code);
+    }
+    digest.field(overlay.as_ref().map(|o| o.digest.as_str()).unwrap_or(""));
     let info = SnapshotInfo {
         profile: loc.profile.as_str().to_string(),
         remote: src.remote.clone(),
@@ -206,6 +220,7 @@ pub fn resolve(
         overlay: overlay.as_ref().map(Overlay::info),
         engine_version: ENGINE_VERSION.to_string(),
         key: h.finish_hex(),
+        content_digest: Some(digest.finish_hex()),
     };
     Ok(ResolvedSnapshot {
         info,

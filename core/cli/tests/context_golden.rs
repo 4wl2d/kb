@@ -70,6 +70,7 @@ fn snapshot() -> SnapshotInfo {
         overlay: None,
         engine_version: kb::versions::ENGINE_VERSION.into(),
         key: "sha256:2222222222222222222222222222222222222222222222222222222222222222".into(),
+        content_digest: None,
     }
 }
 

@@ -2,7 +2,7 @@
 # Record template: gap (missing knowledge, ambiguity or contradiction). An accepted gap is
 # delivered as mandatory context so that agents ask instead of guessing.
 # PLACEHOLDER TEXT: replace every value.
-schema = 1
+schema = 2
 id = "example.template.gap"
 kind = "gap"
 title = "Placeholder: what is unknown"

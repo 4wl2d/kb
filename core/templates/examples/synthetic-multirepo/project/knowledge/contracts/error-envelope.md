@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.contract.error-envelope"
 kind = "contract"
 title = "Common error envelope for all public APIs"

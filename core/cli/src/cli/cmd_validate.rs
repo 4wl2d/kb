@@ -35,6 +35,19 @@ use crate::validate::{
 use crate::versions::{ENGINE_VERSION, INDEX_SCHEMA, PARSER_VERSION};
 
 pub fn run(ctx: &Ctx, args: &ValidateArgs) -> Result<CommandOutput> {
+    run_with_context_format(ctx, args, Format::Compact)
+}
+
+pub(super) fn run_with_context_format(
+    ctx: &Ctx,
+    args: &ValidateArgs,
+    context_format: Format,
+) -> Result<CommandOutput> {
+    if args.stale.is_some_and(|days| days > 365_000) {
+        return Err(KbError::invalid_input(
+            "--stale must be at most 365000 days",
+        ));
+    }
     let loc = ctx.location()?;
     let (source, explicit): (Box<dyn SourceTree>, Option<SnapshotInfo>) =
         match ctx.global.snapshot.as_deref() {
@@ -65,9 +78,40 @@ pub fn run(ctx: &Ctx, args: &ValidateArgs) -> Result<CommandOutput> {
         Err(e) => return Err(e),
     };
 
+    let dated = args.stale.is_some()
+        || args.on.is_some()
+        || corpus.as_ref().is_some_and(|c| {
+            c.records().any(|(_, p)| {
+                p.record.status() == crate::model::Status::Accepted
+                    && crate::freshness::has_dates(&p.record)
+            })
+        });
+    let reference_date = if dated {
+        let host = session::detect_host(ctx)?;
+        let root = host
+            .as_ref()
+            .map(|h| h.root.as_path())
+            .unwrap_or(&ctx.env.kb_root);
+        let revision = host
+            .as_ref()
+            .and_then(|h| h.head.as_deref())
+            .or_else(|| explicit.as_ref().and_then(|s| s.revision.as_deref()))
+            .unwrap_or("HEAD");
+        crate::host::facts::reference_date(root, revision, args.on.as_deref())?
+    } else {
+        None
+    };
+
     let (report, routing_report) = match &corpus {
         Some(corpus) => {
             let mut report = validate_corpus(corpus);
+            for (entry, parsed) in corpus.records() {
+                report.extend(
+                    crate::freshness::warnings(&parsed.record, reference_date.as_ref(), args.stale)
+                        .into_iter()
+                        .map(|d| d.at_path(&entry.path)),
+                );
+            }
             // The routing view sees exactly the snapshot diagnostics the index would store.
             let view_diagnostics = report.diagnostics.clone();
             let mut routing_report = None;
@@ -78,7 +122,12 @@ pub fn run(ctx: &Ctx, args: &ValidateArgs) -> Result<CommandOutput> {
                     .clone()
                     .unwrap_or_else(|| working_tree_info(&loc, corpus));
                 let view = MemoryView::from_corpus(corpus, view_diagnostics);
-                routing_report = Some(routing::run_cases(&view, &cases, &TaskEnv::new(info)));
+                routing_report = Some(routing::run_cases_in_format(
+                    &view,
+                    &cases,
+                    &TaskEnv::new(info),
+                    context_format,
+                ));
             }
             if let Some(rev) = &args.base {
                 report.extend(base_diagnostics(ctx, &loc, corpus, rev)?);
@@ -119,7 +168,7 @@ pub fn run(ctx: &Ctx, args: &ValidateArgs) -> Result<CommandOutput> {
         None
     };
 
-    let result = json!({
+    let mut result = json!({
         "source": match &explicit {
             Some(info) => serde_json::to_value(info)?,
             None => json!({ "selection": "working-tree", "freshness": "unverified" }),
@@ -130,7 +179,16 @@ pub fn run(ctx: &Ctx, args: &ValidateArgs) -> Result<CommandOutput> {
         "validation": report,
         "routing": routing_report.as_ref().map(routing::report_to_json),
     });
-    let text = render(ctx.format, &report, templates, routing_report.as_ref());
+    if dated {
+        result["freshness"] = json!({"reference":reference_date,"max_age_days":args.stale});
+    }
+    let mut text = render(ctx.format, &report, templates, routing_report.as_ref());
+    if let Some(date) = &reference_date {
+        text.push_str(&format!(
+            "freshness reference: {} ({})\n",
+            date.date, date.source
+        ));
+    }
     let mut out = CommandOutput::new(result, text);
     if !report.is_ok(args.strict) {
         let strict = if args.strict && report.errors == 0 {
@@ -234,7 +292,7 @@ fn base_diagnostics(
 }
 
 /// Provenance of a working-tree validation (never approved, freshness not checked).
-fn working_tree_info(loc: &ProfileLocation, corpus: &Corpus) -> SnapshotInfo {
+pub(super) fn working_tree_info(loc: &ProfileLocation, corpus: &Corpus) -> SnapshotInfo {
     let mut h = FieldHasher::new();
     h.field("kb-validate/working-tree")
         .field(loc.profile.as_str())
@@ -259,5 +317,6 @@ fn working_tree_info(loc: &ProfileLocation, corpus: &Corpus) -> SnapshotInfo {
         overlay: None,
         engine_version: ENGINE_VERSION.to_string(),
         key: h.finish_hex(),
+        content_digest: None,
     }
 }

@@ -1,0 +1,8 @@
+{"nodes":[
+  {"id":"file:src/lib.rs","kind":"file","name":"lib.rs","qualified_name":"src/lib.rs","file_path":"src/lib.rs","start_line":1,"end_line":4,"signature":null},
+  {"id":"run","kind":"function","name":"run","qualified_name":"run","file_path":"src/lib.rs","start_line":1,"end_line":3,"signature":"()"},
+  {"id":"save","kind":"function","name":"save","qualified_name":"save","file_path":"src/store.rs","start_line":1,"end_line":1,"signature":"()"}
+],"edges":[
+  {"source":"run","target":"save","kind":"calls","line":2,"metadata":"{\"confidence\":0.9,\"resolvedBy\":\"import\"}"},
+  {"source":"file:src/lib.rs","target":"save","kind":"references","line":2,"metadata":null}
+],"unresolved":1,"failed_files":0}

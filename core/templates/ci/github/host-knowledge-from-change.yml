@@ -1,0 +1,133 @@
+# Copy into the HOST .github/workflows. Enable only after configuring the variables,
+# read token, bounded agent wrapper and protected knowledge-publish environment below.
+name: knowledge-from-merged-change
+on:
+  pull_request:
+    types: [closed]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: kb-accrual-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+env:
+  # Required vars: KB_REPOSITORY (owner/repo), KB_PIN (full reviewed KB SHA),
+  # KB_HOST_REPO_ID (registry id), KB_TARGET_BRANCH (e.g. main).
+  KB_HOST_REPO_ID: ${{ vars.KB_HOST_REPO_ID }}
+  KB_PIN: ${{ vars.KB_PIN }}
+  PR_NUMBER: ${{ github.event.pull_request.number }}
+jobs:
+  draft:
+    if: github.event.pull_request.merged == true && vars.KB_KNOWLEDGE_ACCRUAL == 'enabled'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: knowledge-draft
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: host
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.KB_REPOSITORY }}
+          ref: ${{ vars.KB_PIN }}
+          token: ${{ secrets.KB_READ_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: kb-source
+      - name: Verify the reviewed engine pin and bootstrap
+        working-directory: kb-source
+        run: |
+          test "$(git rev-parse HEAD)" = "$KB_PIN"
+          rustup toolchain install
+          ./kbw --kbw-bootstrap
+      - name: Export merged MR and all published review comments
+        working-directory: host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          sh ../kb-source/core/templates/ci/export-merged-change.sh github "$KB_HOST_REPO_ID" "$PR_NUMBER" "$RUNNER_TEMP/change"
+          ../kb-source/kbw propose begin --host "$PWD" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$RUNNER_TEMP/change/export.json" --json > "$RUNNER_TEMP/work-order.json"
+      - name: Team configured agent produces drafts only
+        env:
+          KB_AGENT_KEY: ${{ secrets.KB_AGENT_KEY }}
+        run: |
+          mkdir "$RUNNER_TEMP/drafts"
+          printf '%s\n' '{"protocol":"kb.draft-output.v1"}' > "$RUNNER_TEMP/drafts/manifest.json"
+          test -x kb-source/project/ci/draft-agent
+          kb-source/project/ci/draft-agent "$RUNNER_TEMP/work-order.json" "$RUNNER_TEMP/drafts"
+      - name: Preserve raw inputs and work order
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: knowledge-inputs
+          path: |
+            ${{ runner.temp }}/change/
+            ${{ runner.temp }}/work-order.json
+          if-no-files-found: error
+      - name: Carry draft data into a fresh publishing job
+        uses: actions/upload-artifact@v7
+        with:
+          name: knowledge-drafts
+          path: ${{ runner.temp }}/drafts/
+          if-no-files-found: error
+  publish:
+    needs: draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: knowledge-publish
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          path: host
+      - uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.KB_REPOSITORY }}
+          ref: ${{ vars.KB_PIN }}
+          token: ${{ secrets.KB_PUBLISH_TOKEN }}
+          persist-credentials: false
+          fetch-depth: 0
+          path: kb-source
+      - uses: actions/download-artifact@v8
+        with:
+          name: knowledge-drafts
+          path: ${{ runner.temp }}/drafts/
+      - name: Fetch reviewed source objects for anchor validation
+        working-directory: host
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git
+          git fetch --no-tags origin "refs/pull/$PR_NUMBER/head"
+      - name: Validate and stage only engine-approved draft paths
+        working-directory: kb-source
+        run: |
+          test "$(git rev-parse HEAD)" = "$KB_PIN"
+          rustup toolchain install
+          ./kbw --kbw-bootstrap
+          sh core/templates/ci/submit-drafts.sh "$RUNNER_TEMP/drafts" "$GITHUB_WORKSPACE/host" "$KB_HOST_REPO_ID" "$RUNNER_TEMP/submission"
+          cp core/templates/mr/kb_review.md "$RUNNER_TEMP/knowledge-mr.md"
+      - name: Publish a draft for human review
+        working-directory: kb-source
+        env:
+          GH_TOKEN: ${{ secrets.KB_PUBLISH_TOKEN }}
+          KB_PUBLISH_APPROVED: "1"
+          KB_TARGET_BRANCH: ${{ vars.KB_TARGET_BRANCH }}
+          HOST_PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh auth setup-git
+          printf '\nHost change: %s\n' "$HOST_PR_URL" >> "$RUNNER_TEMP/knowledge-mr.md"
+          sh core/templates/ci/publish-drafts.sh github "feature/kb-$KB_HOST_REPO_ID-pr-$PR_NUMBER" "$KB_TARGET_BRANCH" "$RUNNER_TEMP/knowledge-mr.md"
+      - name: Preserve submission evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: knowledge-submission
+          path: ${{ runner.temp }}/submission/
+          if-no-files-found: error

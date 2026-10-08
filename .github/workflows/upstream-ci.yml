@@ -63,6 +63,15 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
 
+      - name: Install the Linux replay isolation backend
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bubblewrap
+
+      - name: Replay isolation smoke (synthetic, offline, no model credentials)
+        run: cargo test -p kb-eval --locked --test replay_workflow -- --ignored
+
       - name: Shellcheck the launcher
         if: runner.os == 'Linux'
         run: |
@@ -71,7 +80,7 @@ jobs:
             sudo apt-get install -y shellcheck
           fi
           shellcheck --version
-          shellcheck kbw
+          shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
 
       - name: Launcher source bootstrap
         run: |
@@ -84,6 +93,11 @@ jobs:
 
       - name: Validate templates and the maintainer profile
         run: ./kbw validate --profile maintainer --templates
+
+      - name: Tier A routing on maintainer and synthetic corpora
+        run: |
+          ./kbw eval routing --profile maintainer --json
+          ./kbw eval routing --example synthetic-multirepo --json
 
       - name: Benchmark smoke run
         # A small, fast run of the benchmark harness; it reports measurements but has no

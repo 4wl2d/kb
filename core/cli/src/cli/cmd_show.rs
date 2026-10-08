@@ -7,10 +7,15 @@ use super::Ctx;
 use super::args::ShowArgs;
 use super::session::{self, Options, Session, with_snapshot, with_snapshot_line};
 use crate::context::show;
-use crate::error::Result;
+use crate::error::{KbError, Result};
 use crate::output::{CommandOutput, Format};
 
 pub fn run(ctx: &Ctx, args: &ShowArgs) -> Result<CommandOutput> {
+    if args.sections && args.id.contains('#') {
+        return Err(KbError::invalid_input(
+            "--sections cannot be combined with id#section",
+        ));
+    }
     let host = session::detect_host(ctx)?;
     let mut s = Session::open(ctx, host, Options::reading(ctx, args.include_proposals))?;
     let result = s.with_view(|view| {
@@ -22,6 +27,10 @@ pub fn run(ctx: &Ctx, args: &ShowArgs) -> Result<CommandOutput> {
             args.include_proposals,
         )
     })?;
+    if args.sections {
+        let text = show::render_sections(&result);
+        return Ok(s.finish(CommandOutput::new(with_snapshot(serde_json::json!({"id":result.id,"status":result.record.record.status(),"path":result.path,"sections":result.record.sections}), &s.info), with_snapshot_line(text, &s.info, ctx.format))));
+    }
     let text = show::render(&result, ctx.format);
     let out = if args.raw {
         // Raw stdout stays the authoritative bytes; unverified or unapproved content is

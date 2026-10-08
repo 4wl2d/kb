@@ -12,7 +12,9 @@ Normative contract: [architecture.md §5](architecture.md#5-context-assembly),
 [format.md](format.md); snapshot selection and freshness in
 [snapshots-and-trust.md](snapshots-and-trust.md).
 
-All output below was captured from the synthetic example
+Long output excerpts below were captured from the schema-1 synthetic baseline; their
+historical hashes, counts and skill-protocol headers are illustrative, not current-run
+claims. The options and behavior described here include schema/skill protocol 2. The baseline used
 (`kb init --example synthetic-multirepo --apply`, committed and published to a local bare
 repository used as `origin`). The local origin path is shown as `<kb-origin.git>`.
 
@@ -26,7 +28,7 @@ repository used as `origin`). The local origin path is shown as `<kb-origin.git>
 
 | Option | Meaning |
 |---|---|
-| `--intent <i>` | required: `implement`, `refactor`, `debug`, `review`, `explain` |
+| `--intent <i>` | required: `implement`, `refactor`, `debug`, `diagnose`, `review`, `explain` |
 | `--task <text>` | free text in any script, at most 8 KiB; used for concepts, aliases, id mentions and full-text search |
 | `--repo <id>` | registry repo (repeatable); default: the detected host repo |
 | `--path <p>` | host-relative file or directory, or `repo:path` (repeatable, at most 512) |
@@ -36,9 +38,16 @@ repository used as `origin`). The local origin path is shown as `<kb-origin.git>
 | `--max-supplementary <n>` | cap on ranked supplementary records; default `[context] max_supplementary` (12), at most 200 |
 | `--sections none\|mandatory\|all` | add optional Markdown sections as separate units (default `none`) |
 | `--include-proposals` | add local, unreviewed knowledge changes as a labeled overlay |
+| `--changed`, `--base`, `--head`, `--working-tree` | use actual host diff paths, including old/deleted paths; no-base default is local changes since HEAD |
+| `--change-type <id>` | explicit category (repeatable); only known explicit categories can exclude mismatched obligations |
+| `--as-of <date\|revision>` | filter all lookups at a historical host point; incompatible with proposal overlays |
+| `--with-code`, `--provider`, `--provider-arg`, `--provider-file` | opt-in commit-bound static code evidence; shared provider deadline/bounds apply |
+| `--since-receipt <id>` | reference unchanged content from an explicitly retained, verified local receipt |
+| `--core-receipt <id> --core-source <file>` | reuse matching installed always-on rules with verified bundle/lock/file evidence |
+| `--stale <days> --on <date>` | dated freshness warnings; absent `--on` uses a selected commit date, not today's clock |
 | `--explain` | append the explain part (reasons, scores, exclusions, anchors); not counted in the budget |
 
-Global options that matter here: `--format compact|human|json` (`--json`), `--offline`,
+Global options that matter here: `--format compact|terse|human|json` (`--json`), `--offline`,
 `--snapshot`, `--host`, `--quiet`, `--skill-protocol`. Explicit registry ids that do not exist
 fail with `UNKNOWN_SCOPE` (exit 15):
 
@@ -71,6 +80,44 @@ never the clock, so identical logical inputs and snapshot give byte-identical re
 appear only in the envelope `meta`.
 
 ## Task scope resolution
+
+### Early discovery and changed scope
+
+```sh
+.kb/kbw context --intent diagnose --task "Refresh retries leave checkout pending"
+.kb/kbw context --intent implement --path app/auth/TokenRefresher.kt
+.kb/kbw context --intent review --changed --base origin/main --working-tree
+```
+
+Tracked filenames and unambiguous identifier spelling can discover paths before the caller
+knows them. No source parser is embedded in the engine. Diagnose also consults feature/gap
+aliases, but remains partial with `DIAGNOSE_SCOPE_PROVISIONAL` until explicit paths, modules
+or a real diff establish scope. Discovery is not a substitute for a scoped pre-edit query.
+
+An explicit empty diff is known-empty; old/deleted/renamed paths retain their applicability.
+`change-types.toml` aliases/path/symbol hints can add candidates. Such lexical hints cannot
+prune unknown categories. Explicit `--change-type` supplies that knowledge; exclusions are
+reported in `pruned_change_types` and required dependencies remain reachable.
+
+### Historical context
+
+```sh
+.kb/kbw context --intent review --repo mobile --path app/auth/TokenRefresher.kt \
+  --snapshot FROZEN_KB_SHA --as-of HOST_BASE_SHA --offline
+```
+
+`introduced` is inclusive and `retired` exclusive. Date bounds use the Gregorian calendar;
+commit bounds use ancestry in the selected host. Revision queries also resolve a UTC date;
+date queries resolve the last first-parent host commit before the end of that day.
+Undated accepted knowledge is withheld and reported as `AS_OF_UNDATED`. Dependencies
+outside the slice stay missing. Ranking statistics, aliases, ids and source filenames all
+use the same slice, so future corpus entries cannot change past lexical order.
+
+This filters author-declared validity; it does not reconstruct older text, registries or
+review status. Replay must independently freeze the KB, host and generated/provider inputs.
+See [ADR 0012](adr/0012-temporal-context.md) and [evaluation.md](evaluation.md).
+
+### Scope dimensions
 
 Every task dimension is either *known* (a set, possibly empty) or *unknown*.
 
@@ -429,6 +476,24 @@ does not prove that the reader understood or followed it. Request context again 
 compaction, in a new session, after a hand-off to another agent, and whenever the scope, the
 contracts involved or the snapshot change.
 
+Normal CLI responses additionally carry `receipt.protocol = kb.receipt.v2`,
+`snapshot.content_digest` and `units[].content_sha256`. Content identity covers sorted
+source identities, diagnostics and proposal overlay independently of cache location.
+Working-tree and Git sources deliberately use distinct identity domains.
+
+`--since-receipt ID` verifies the saved complete response and each unit hash for the same
+KB/host/profile. `--core-receipt ID --core-source FILE` additionally checks the actual
+managed instruction file, installation lock and current accepted always-on core. Core
+reuse is unavailable with `--as-of`. Neither mechanism infers a receipt from a session id.
+Applicability and dependency closure are recomputed first; eligible unchanged units retain
+their ids/tier/hash and become `delivery` references. New or changed units are delivered in
+full. Missing, corrupt or mismatched proof fails; re-run without reuse instead of silently
+omitting obligations. Reuse assumes the caller actually retains that content in this task.
+
+Every context call also appends private local delivery metadata, not task/source text, for
+`usage report`. Select this task's receipts when joining the final diff; see
+[knowledge-lifecycle.md](knowledge-lifecycle.md#local-delivery-observations).
+
 ## Explain
 
 `--explain` appends, after the counted payload and marked as not counted:
@@ -458,6 +523,26 @@ anchors:
 ```
 
 ## Output formats
+
+### Terse, outline and code evidence
+
+`--format terse` renders compact typed values under tier/id labels and defers Markdown
+bodies. Statements, conditions, exceptions and settings remain intact; `--explain` is
+incompatible with terse. Use `show ID --sections` for all deferred bodies. Budgeting measures
+the selected renderer, so its receipt and measured cost differ from other formats.
+
+`outline --intent ...` uses the same scope inputs and returns an inventory of ids, kinds,
+mandatory flags, reasons and estimated sizes. It has a hard ceiling of 2000 estimated
+tokens in addition to the requested budget. Optional inventory may be omitted and counted;
+mandatory ids cause an explicit budget failure if they cannot fit. It never supplies a
+delivery receipt and cannot replace `context` before editing.
+
+`context --with-code` requires a provider or pinned response file. Validated symbols,
+reference/consumer facts and precedent candidates are optional code units after KB
+supplementary records, sharing the same budget. They are labeled observed/provider, never
+accepted knowledge. The response retains tool/version, full commit, digest, completeness
+and limitations. Name-based static edges are not runtime reachability. See
+[reference adapters](../core/providers/README.md).
 
 ### Compact (default, for agents)
 
@@ -544,7 +629,9 @@ stdout carries only the `kb.cli.v1` envelope; progress and diagnostics go to std
 `result` object has these members: `protocol`, `engine_version`, `skill_protocol`, `intent`,
 `request`, `snapshot`, `freshness`, `host`, `scope`, `completeness`, `status_reasons`,
 `effective_settings`, `undetermined`, `ambiguities`, `issues`, `diagnostics`, `notes`,
-`units`, `budget`, `receipt` (and `explain` with `--explain`). Excerpt:
+`units`, `budget`, `receipt` (and `explain` with `--explain`). Optional additions are `code`,
+`delivery`, `freshness_reference`, `pruned_change_types` and `request.as_of`.
+Historical schema-1 excerpt:
 
 ```json
 {

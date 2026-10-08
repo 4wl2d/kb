@@ -34,6 +34,27 @@ pub fn run(ctx: &Ctx, args: &IntegrateArgs) -> Result<CommandOutput> {
     }
     let host = resolve_host_root(&ctx.env.kb_root, &ctx.env.cwd, ctx.global.host.as_deref())?;
     let plan = plan_install(&ctx.env.kb_root, &loc, &host, args.force)?;
+    if args.probe {
+        let value = json!({
+            "protocol":"kb.harness-probe.v1", "installation_verified":plan.is_clean(), "runtime_load_verified":false,
+            "skill_protocol":plan.manifest.skill_protocol, "harnesses":plan.manifest.harnesses,
+            "skill_paths":crate::integrate::generate::layout(&plan.manifest.harnesses).skill_dirs,
+            "core_receipt":plan.manifest.core.as_ref().map(|c| &c.digest), "core_source":plan.manifest.core_source,
+            "changes":plan.changes, "warnings":plan.warnings,
+            "challenge":"In a new trusted session in this host, before using tools, report the kb skill protocol, loaded instruction source and always-on core receipt (or no core). Then run the task-start diagnose command from those instructions. Preserve the harness version, raw response and tool-call log.",
+            "acceptance":"A matching installation is not runtime-load proof. The reported marker and observed diagnose call must match this installation. Repeat for each enabled harness and after harness updates."
+        });
+        let text = serde_json::to_string_pretty(&value)? + "\n";
+        let out = CommandOutput::new(value, text);
+        return Ok(if plan.is_clean() {
+            out
+        } else {
+            out.with_failure(KbError::new(
+                ErrorCode::DriftDetected,
+                "harness installation probe found drift",
+            ))
+        });
+    }
     install_output(ctx, mode, plan)
 }
 

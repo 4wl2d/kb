@@ -34,6 +34,8 @@ pub struct RoutingCase {
     pub features: Vec<String>,
     #[serde(default)]
     pub concepts: Vec<String>,
+    #[serde(default)]
+    pub change_types: Vec<String>,
     /// `repo=version` host versions.
     #[serde(default)]
     pub host_versions: Vec<String>,
@@ -59,4 +61,25 @@ pub struct RoutingCase {
     /// Expect CONTEXT_BUDGET_EXCEEDED.
     #[serde(default)]
     pub expect_budget_exceeded: bool,
+    /// Expected relative order of distinct record ids in the delivered context.
+    #[serde(default)]
+    pub expect_order: Vec<String>,
+    /// Ceiling for the complete compact response, using the engine's token estimator.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u64>,
+    /// Human-labeled relevant records; unlabeled cases have no recall estimate.
+    #[serde(default)]
+    pub relevant: Vec<String>,
+    /// Top-k cutoff over distinct record ids, in delivery order (default 10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recall_k: Option<usize>,
+    /// Minimum recall@k, as an integer percentage. Requires `relevant` labels.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_recall_percent: Option<u8>,
+    /// Human-labeled mandatory false positives. This is not inferred from missing labels.
+    #[serde(default)]
+    pub not_applicable: Vec<String>,
+    /// All delivered mandatory records were adjudicated for applicability.
+    #[serde(default)]
+    pub applicability_reviewed: bool,
 }

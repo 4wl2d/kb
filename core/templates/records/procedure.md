@@ -1,10 +1,10 @@
 +++
 # Record template: procedure. Procedures are data: kb shows them and never executes them.
 # PLACEHOLDER TEXT: replace every value.
-schema = 1
+schema = 2
 id = "example.template.procedure"
 kind = "procedure"
-title = "Placeholder: how to perform an operational task"
+title = "Placeholder: checklist for a migration change"
 status = "draft"
 owner = "team-backend"
 preconditions = ["Placeholder: what has to be true before starting."]
@@ -12,6 +12,7 @@ expected = ["Placeholder: the observable result when the procedure succeeded."] 
 
 [scope]
 modules = ["backend.api"]
+change_types = ["migration"]
 
 [selectors]
 intents = ["implement", "debug"]

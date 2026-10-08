@@ -417,19 +417,29 @@
       "anyOf": [
         {
           "enum": [
+            "anchors",
+            "capture",
             "context",
+            "coverage",
             "doctor",
+            "drift",
+            "eval",
             "impact",
             "index",
             "init",
             "integrate",
+            "ledger",
             "migrate",
+            "outline",
+            "propose",
             "schema",
             "search",
             "show",
             "sync",
             "update",
+            "usage",
             "validate",
+            "verify",
             "version"
           ],
           "type": "string"

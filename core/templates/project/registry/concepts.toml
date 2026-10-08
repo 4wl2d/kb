@@ -3,7 +3,7 @@
 # matches the last token by prefix. There is no stemming: list variants or use `*`.
 # Aliases shared by several concepts are reported as ambiguities unless task paths match a
 # concept's `paths` hints.
-schema = 1
+schema = 2
 
 # [[concept]]
 # id = "auth-token"

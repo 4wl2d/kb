@@ -5,7 +5,7 @@ strict TOML front matter between `+++` lines. This guide covers the fields, the 
 kinds, scope and selectors, links, policies and overrides, registries, and every diagnostic
 that `kb validate` can report.
 
-The normative contract is [architecture.md §3–§4](architecture.md#3-record-format-document-schema-1);
+The normative contract is [architecture.md §3–§4](architecture.md#3-record-format-document-schemas-1-and-2);
 the design decision is [ADR 0002](adr/0002-record-format.md). How records are selected for a
 task is described in [context.md](context.md); where they are read from and why they can be
 trusted is in [snapshots-and-trust.md](snapshots-and-trust.md).
@@ -36,7 +36,7 @@ Rules for files under a knowledge root:
 
 ```text
 +++                      <- first line, exactly `+++` (a UTF-8 BOM and CRLF are tolerated)
-schema = 1               <- TOML front matter: typed, normative content
+schema = 2               <- TOML front matter: typed, normative content
 ...
 +++                      <- closing line
 Optional Markdown body.  <- non-normative explanation, split into sections at `## ` headings
@@ -72,7 +72,7 @@ is set to the same line, so compact output prints `path:line` and human output
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `schema` | integer | yes | must be `1`; another integer is `UNSUPPORTED_SCHEMA_VERSION` (see `kb migrate`) |
+| `schema` | integer | yes | `1` or `2`; use `2` for new fields, migrate existing records with `kb migrate` |
 | `id` | string | yes | `<namespace>.<segment>(.<segment>)*`, see [Identifiers](#identifiers) |
 | `kind` | string | yes | `policy`, `feature`, `invariant`, `contract`, `decision`, `procedure`, `reference`, `gap` |
 | `title` | string | yes | one non-blank line, 1–200 characters |
@@ -105,6 +105,37 @@ removed or reused; retire a record with `status = "deprecated"` or supersede it
 (checked with `kb validate --base <rev>`).
 
 ## Kinds
+
+### Schema 2 additions
+
+Schema 1 remains readable with its original fields and defaults. Schema 2 adds optional
+structured domain knowledge; migration only updates declarations and preserves content.
+The examples below that use schema 1 remain valid. Versioned editor schemas are shipped as
+`core/schemas/record.v1.schema.json` and `record.v2.schema.json`.
+
+| Field | Record kind | Meaning |
+|---|---|---|
+| `introduced`, `retired` | all | `YYYY-MM-DD` or host commit id; start inclusive, end exclusive; both bounds use the same kind |
+| `verified_at`, `review_by` | all | real calendar dates, with the review deadline at or after verification |
+| `scope.change_types` | all | change categories such as migration or retry |
+| `delivery` | policy, invariant | scoped (default) or always; always needs unconditional product scope |
+| `states`, `transitions`, `clocks`, `data_sources`, `scenarios` | feature | subsystem model; transition endpoints must be declared states |
+| `scenarios`, `consumers` | contract | test cases and `{repo,path,symbol?}` consumers, using registered repos |
+| `terms` | reference | `{term,meaning,source}` glossary; normalized terms must be unique |
+| `verify` | statement, obligation | declarative probes; never a shell command |
+| `anchors.stamp` | anchor | `{commit,start_line,end_line,sha256}` over a Git source span |
+
+A scenario has `id`, `given` and `expect` strings. A transition has `id`, `from`, `to` and
+`when`. Feature states use the same `{id,text}` item format as behaviors. Freshness and
+validity are distinct: verification does not introduce or retire knowledge. Dates have no
+implicit timezone; commit ancestry is resolved by the host adapter, never by the parser.
+
+Probe kinds: `commit-message`/`branch-name` with `pattern`; `forbidden-import` with nonempty
+`from`/`to` globs; `naming`/`banned-api` with nonempty `paths` and a regex `pattern`. Unknown
+fields, invalid regexes and unsafe globs are errors. A probe declaration is not evidence
+that it ran. See the record templates for synthetic authoring examples.
+
+### Original kind fields
 
 Normative content is typed and atomic. A **statement** is
 `{ id, level, text, conditions = [..], exceptions = [{ id, text }] }` with `level` one of
@@ -480,9 +511,11 @@ symbol = "TokenStore"
 `path` must be a safe relative path (`ANCHOR_PATH_INVALID`), `commit` 7–64 hex characters
 (`ANCHOR_COMMIT_INVALID`), `repo` a registry repo (`UNKNOWN_REPO`). Anchors are listed in the
 `--explain` receipt, and `kb impact` matches changed host files against `source`, `test` and
-`doc` anchor paths. They record where knowledge came from; kb never runs or verifies what they
-point to. **A test anchor does not prove that the test exists or runs, and a valid schema does
-not prove that the text is true.**
+`doc` anchor paths. Schema validation records provenance without running anything.
+`anchors stamp` and `anchors check` separately inspect immutable Git bytes and optional
+definition spans; a matching stamp does not prove the statement's truth or a test run.
+**A test anchor alone does not prove that the test exists or runs, and a valid schema does
+not prove that the text is true.** See [knowledge-lifecycle.md](knowledge-lifecycle.md).
 
 ## Body sections
 
@@ -500,7 +533,8 @@ must not hide there: a body line (outside code blocks) containing the uppercase 
 
 ## Registries
 
-Each registry file has `schema = 1` and an array of tables. Unknown fields are errors.
+Existing registries read `schema = 1` or `2`; new projects use `2`. Each has an array of
+tables and rejects unknown fields. `change-types.toml` is a schema-2 addition.
 
 | File | Entry | Fields |
 |---|---|---|
@@ -509,6 +543,7 @@ Each registry file has `schema = 1` and an array of tables. Unknown fields are e
 | `modules.toml` | `[[module]]` | `id`, `repo`, `title`, `paths = [..]`, `features = [..]` |
 | `features.toml` | `[[feature]]` | `id`, `title`, `repos = [..]`, `paths = [..]` |
 | `concepts.toml` | `[[concept]]` | `id`, `title`, `aliases = [..]`, `paths = [..]` |
+| `change-types.toml` | `[[change_type]]` | `id`, `title`, aliases and optional path/symbol hints for change-category discovery |
 
 * Owner authority: an owner with non-empty `repos` may own only records whose implied repos
   lie within them; product-wide records need an owner with `product = true`
@@ -541,9 +576,11 @@ is an implicit alias. An alias shared by several concepts produces an
 
 `core/schemas/*.schema.json` (draft 2020-12) are generated from the Rust model and
 drift-checked (`kb schema --check`, exit 42 `DRIFT_DETECTED` on drift; `kb schema --write`
-regenerates). `record.v1.schema.json` describes the front matter; the others describe
+regenerates). `record.v1.schema.json` and `record.v2.schema.json` describe the respective
+front-matter vocabularies; the others describe
 `project.toml`, the registries, routing fixtures, `skill.toml`, `.kbw.toml`, `upstream.toml`,
-`core/release.toml` and the `kb.cli.v1` envelope.
+`core/release.toml`, the `kb.cli.v1` envelope and `kb.code.v1` provider requests/responses.
+Routing fixtures, host bindings and skill configuration retain their independent schema 1.
 
 A schema-valid document can still be rejected by `kb validate`. Runtime-only rules include
 uniqueness of local ids inside arrays of tables, section slugs, self links and override self
@@ -561,6 +598,7 @@ links, cycles, lifecycle, overrides) and the `--base` checks. The complete list 
 ./kbw validate --base <rev>     # also check that ids at <rev> still exist with the same kind
 ./kbw validate --no-routing     # skip routing fixtures
 ./kbw validate --templates      # also check core/templates (upstream check)
+./kbw validate --stale 90 --on 2026-10-07  # explicit calendar reference for an audit
 ```
 
 With `--templates`, the text report says that the templates were checked, with their own
@@ -568,8 +606,9 @@ counts, which are also included in the totals: compact `templates: checked (ship
 and examples): 0 error(s), 0 warning(s)`, human `Shipped templates and examples were validated
 (--templates): 0 error(s), 0 warning(s)`; JSON has `result.templates = true`.
 
-`kb validate` reads the KB working tree without Git or network access unless `--snapshot`
-selects another snapshot. It exits 40 (`VALIDATION_FAILED`) when there are errors (or
+`kb validate` reads the KB working tree without network access unless `--snapshot`
+selects another snapshot; Git can supply a deterministic freshness reference. Explicit
+`--on` is required when an audit means today's calendar age. It exits 40 (`VALIDATION_FAILED`) when there are errors (or
 warnings with `--strict`), else 41 (`ROUTING_TESTS_FAILED`) when a routing case fails.
 Diagnostics are sorted by severity, path, record, line, code and message. Compact output:
 

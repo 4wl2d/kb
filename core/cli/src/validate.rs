@@ -235,6 +235,14 @@ fn check_registry_refs(registry: &Registry, r: &MetaInput, out: &mut Vec<Diagnos
             );
         }
     }
+    for x in &m.scope.change_types {
+        if registry.change_type(x).is_none() {
+            unknown(
+                "UNKNOWN_CHANGE_TYPE",
+                format!("scope.change_types: unknown change type `{x}`"),
+            );
+        }
+    }
     for x in &m.selectors.concepts {
         if registry.concept(x).is_none() {
             unknown(
@@ -272,6 +280,14 @@ fn check_registry_refs(registry: &Registry, r: &MetaInput, out: &mut Vec<Diagnos
             unknown(
                 "UNKNOWN_REPO",
                 format!("anchors[{i}].repo: unknown repo `{repo}`"),
+            );
+        }
+    }
+    for consumer in &m.consumers {
+        if registry.repo(&consumer.repo).is_none() {
+            unknown(
+                "UNKNOWN_REPO",
+                format!("consumer: unknown repo `{}`", consumer.repo),
             );
         }
     }
@@ -1024,7 +1040,7 @@ pub fn render_report(report: &ValidationReport, format: Format) -> String {
             s.push('\n');
             s
         }
-        Format::Compact => {
+        Format::Compact | Format::Terse => {
             let mut s = format!(
                 "validate {}: records: {}, files: {}, errors: {}, warnings: {}\n",
                 report.profile, report.records, report.files, report.errors, report.warnings

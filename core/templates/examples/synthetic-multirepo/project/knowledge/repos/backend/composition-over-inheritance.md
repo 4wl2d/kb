@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.backend.composition-over-inheritance"
 kind = "policy"
 title = "Domain services prefer composition over inheritance"

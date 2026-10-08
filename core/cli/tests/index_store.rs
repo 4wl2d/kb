@@ -871,7 +871,12 @@ fn foreign_and_outdated_databases_are_replaced() {
     let ix = fx.open();
     let rec = ix.recovery().unwrap();
     assert_eq!(rec.kind, RecoveryKind::Outdated);
-    assert!(rec.reason.contains("index_schema 0 -> 1"), "{}", rec.reason);
+    assert!(
+        rec.reason
+            .contains(&format!("index_schema 0 -> {}", kb::versions::INDEX_SCHEMA)),
+        "{}",
+        rec.reason
+    );
     assert!(rec.moved_to.is_none());
     assert!(!ix.has_snapshot("k").unwrap());
     drop(ix);

@@ -2,7 +2,7 @@
 
 Typed, verifiable engineering knowledge for coding agents and people.
 
-kb is a small Rust CLI, run through the project launcher `./kbw`, that assembles
+kb is a Rust CLI, run through the project launcher `./kbw`, that assembles
 **task-scoped, freshness-checked context** from a knowledge base kept in Git: the policies,
 invariants, contracts and known gaps that apply to the code you are about to change, their
 required dependencies, and a small ranked set of background records. It returns the
@@ -28,12 +28,16 @@ kb is:
 * **Local and reproducible.** An embedded SQLite FTS5 index under `.cache/` is a rebuildable
   cache; the source of truth is Git-tracked text. Each checkout runs its own engine through
   `kbw`.
-* **Agent integration by text.** A generated skill and managed instruction blocks for Claude
-  Code, Codex and Cursor tell agents to call the CLI.
+* **Evidence-backed domain knowledge.** Schema 2 adds subsystem states/scenarios, contract
+  consumers, glossary, validity and source stamps; authoring commands prepare drafts and
+  keep acceptance in human review.
+* **Agent integration by text.** One generated skill and native instruction targets serve
+  Claude Code, Codex, Cursor, Grok Build, GitHub Copilot and Junie. Verified core/receipt
+  reuse and terse output reduce repeated delivery without dropping obligations.
 
 kb is not:
 
-* an MCP server, daemon, web UI, telemetry collector or plugin system;
+* an MCP server, daemon, web UI, telemetry uploader or plugin system;
 * an AI: no LLM calls at runtime, no embeddings, no vector database. The CLI creates and
   validates structure and serves context; deciding what the knowledge is remains work for
   people or an external coding agent ([BOOTSTRAP.md](BOOTSTRAP.md));
@@ -41,6 +45,12 @@ kb is not:
   rather than understanding or compliance, and typing does not remove natural-language
   prompt injection. Trust comes from review into the approved ref ([SECURITY.md](SECURITY.md));
 * a global tool: there is no `kb` on `PATH` to install or keep in sync.
+
+Optional [code adapters](core/providers/README.md) supply commit-bound static facts outside
+the engine, and the separate [replay kit](core/eval/README.md) runs explicitly authorized
+evaluations. Local delivery observations contain ids/scopes/costs, not task text, and are
+never uploaded by the engine. These tools and passing tests do not prove a quality gain;
+held-out acceptance and release gates are tracked in [the upgrade record](docs/upstream-upgrade.md).
 
 ## Distribution model
 
@@ -72,6 +82,7 @@ Details: [docs/downstream.md](docs/downstream.md) and [ADR 0001](docs/adr/0001-d
 | `core/skills/` | canonical skill instructions and references |
 | `core/maintainer-knowledge/` | opt-in knowledge about kb itself (`--profile maintainer`) |
 | `core/tests/`, `core/benchmarks/` | shared test fixtures; corpus generator and measurements |
+| `core/providers/`, `core/eval/` | optional static code adapters; isolated replay and paired analysis |
 | `core/release.toml` | bootstrap and compatibility manifest (versions, toolchain, engine-owned paths) |
 | `project/` | project-owned knowledge (created by `kbw init` in a downstream) |
 | `docs/` | user guides, the [architecture](docs/architecture.md) contract, [ADRs](docs/adr/) and [prompts](docs/prompts/); index: [docs/README.md](docs/README.md) |
@@ -99,6 +110,8 @@ do not. Normal commands never build: without a runtime they fail with
 implicit builds with `KBW_AUTO_BOOTSTRAP=1`). The fingerprint is compiled into the binary:
 `./kbw version` ends with `build <fingerprint>` and `./kbw --json version` reports it as
 `build_fingerprint`.
+
+Historical schema-1 baseline excerpt (current counts and receipts change with the corpus):
 
 ```text
 $ ./kbw validate --profile maintainer --templates
@@ -214,11 +227,18 @@ that change files are dry-runs unless given `--apply`.
 
 | command | what it does | example |
 |---|---|---|
-| `init` | Create `project/` and the KB CI workflow from templates, or the synthetic example; never overwrites existing files (only the upstream placeholder `project/README.md` is replaced) | `./kbw init --name "<Product>" --namespace <ns> --apply` |
+| `init` | Create schema-2 project/domain scaffolding, GitHub/GitLab KB CI and review templates, or the synthetic example; preserve existing files | `./kbw init --name "<Product>" --namespace <ns> --apply` |
 | `doctor` | Check environment, configuration, runtime, approved source, host binding and pin, engine compatibility of the approved tip and the pin, index, skill, bundle, engine divergence (`--online` also fetches; not with `--offline`) | `.kb/kbw doctor --online` |
 | `validate` | Records, links, policies, registries and routing fixtures (`--strict`, `--base <rev>`, `--no-routing`, `--templates`) | `./kbw validate --base origin/main` |
 | `index` | Build or update the derived index of the selected snapshot without contacting the remote (`--rebuild`, `--gc`) | `./kbw index --rebuild` |
 | `context` | Task-scoped context: `--intent` (required), `--task`, repeatable `--repo`, `--path`, `--module`, `--feature`, `--concept`, `--host-version`; `--budget`, `--budget-unit tokens-est\|bytes`, `--sections none\|mandatory\|all`, `--max-supplementary`, `--include-proposals`, `--explain` | `.kb/kbw context --intent implement --task "..." --path src/x.kt` |
+| `context` additions | Path-free `diagnose`, `--changed --base`, `--change-type`, historical `--as-of`, explicit receipt/core reuse, `--with-code` | `.kb/kbw context --intent review --changed --base origin/main --format terse` |
+| `outline` | Bounded inventory; request context before editing | `.kb/kbw outline --intent diagnose --task "..."` |
+| `coverage`, `propose`, `capture` | Prioritize domain gaps, prepare work orders and validate/apply drafts; never accept them | `.kb/kbw propose begin --from-change BASE..HEAD --json` |
+| `anchors`, `drift`, `ledger` | Stamp/check Git evidence, owner review queues, freshness and seeded audits | `.kb/kbw anchors check --strict --json` |
+| `verify` | Declared regex/glob/static-import probes; unknown evidence remains unknown | `.kb/kbw verify --diff BASE --head HEAD --json` |
+| `usage report` | Private delivery metadata joined to a task's final diff | `.kb/kbw usage report --diff BASE --receipt ID --json` |
+| `eval routing`, `eval history` | Ordered/budgeted routing metrics and labeled historical coverage | `./kbw eval routing --example synthetic-multirepo --json` |
 | `search` | Ranked search; not a substitute for `context` (`--kind`, `--limit`, `--include-proposals`); like `show` and `impact`, its text output starts with a snapshot provenance line (revision, selection, freshness, approval, approved tip, pin) | `./kbw search "идемпотентность"` |
 | `show` | A record, or one section (`--section` or `id#section`); `--raw` prints only the file bytes (the provenance line then goes to stderr when the content is unverified or not approved) | `./kbw show example.contract.payment-intent` |
 | `sync` | Fetch the approved ref into the isolated mirror; report the tip, the local checkout and the host pin; changes nothing else | `.kb/kbw sync` |
@@ -233,7 +253,7 @@ that change files are dry-runs unless given `--apply`.
 | `version` | Engine and contract versions and the build fingerprint | `./kbw version` |
 
 Global options: `--root`, `--config`, `--profile project|maintainer`,
-`--format compact|human|json` (`--json`), `--offline`, `--snapshot
+`--format compact|terse|human|json` (`--json`), `--offline`, `--snapshot
 auto|latest|pinned|working-tree|<revision>`, `--host`, `--quiet`, `--skill-protocol <n>`.
 Unknown arguments are rejected.
 
@@ -286,6 +306,8 @@ Start at the documentation index, [docs/README.md](docs/README.md). The main ent
 | [docs/prompts/adaptation.md](docs/prompts/adaptation.md), [docs/prompts/maintenance.md](docs/prompts/maintenance.md) | ready-to-paste agent prompts |
 | [docs/format.md](docs/format.md) | writing records: kinds, scope, selectors, links, policies, registries, diagnostics |
 | [docs/context.md](docs/context.md) | what `context` returns and why: selection, ranking, budgets, completeness, receipts |
+| [docs/knowledge-lifecycle.md](docs/knowledge-lifecycle.md) | domain drafts, provenance, drift, freshness, declarative checks and local usage |
+| [docs/evaluation.md](docs/evaluation.md), [core/eval/README.md](core/eval/README.md) | routing/history evidence and the optional isolated replay kit |
 | [docs/snapshots-and-trust.md](docs/snapshots-and-trust.md) | freshness, snapshot selection, host detection, caches, trust model |
 | [docs/protocol.md](docs/protocol.md), [docs/troubleshooting.md](docs/troubleshooting.md) | JSON protocol and error codes; what to do for each error |
 | [docs/architecture.md](docs/architecture.md), [docs/adr/](docs/adr/) | the normative engineering contract and design decisions |

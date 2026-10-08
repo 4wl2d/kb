@@ -127,6 +127,32 @@ impl Git {
         Ok(o.stdout)
     }
 
+    /// Read bounded command output for potentially large patches and history exports.
+    pub fn run_bytes_limited(&self, args: &[&str], max_bytes: usize) -> Result<Vec<u8>> {
+        let mut command = self.command(&[]);
+        command.args(args);
+        let output = crate::process::capture(
+            &mut command,
+            &[],
+            crate::process::Limits {
+                timeout: std::time::Duration::from_secs(30),
+                stdout: max_bytes,
+                stderr: 1024 * 1024,
+            },
+        )?;
+        if output.exit_code != 0 {
+            return Err(git_failure(
+                args,
+                &GitOutput {
+                    code: output.exit_code,
+                    stdout: output.stdout,
+                    stderr: redact(&String::from_utf8_lossy(&output.stderr)),
+                },
+            ));
+        }
+        Ok(output.stdout)
+    }
+
     /// Run a network operation (fetch/ls-remote) under an explicit transport policy.
     pub fn run_network(&self, args: &[&str], allowed_protocols: &[String]) -> Result<GitOutput> {
         let cfg = transport_policy(allowed_protocols)?;

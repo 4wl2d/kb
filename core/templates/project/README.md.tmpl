@@ -1,18 +1,19 @@
 # {{name}}: engineering knowledge base
 
 This directory holds the project-owned knowledge of **{{name}}** (record id namespace
-`{{namespace}}`). Everything outside `project/` (and the downstream CI workflow
-`.github/workflows/kb-knowledge.yml`) is the shared kb engine and is updated from upstream
-with `./kbw update`, not edited here.
+`{{namespace}}`). Engine-owned paths are listed in `core/release.toml` and updated from
+upstream with `./kbw update`. Init also installs downstream-owned GitHub/GitLab CI and
+review templates; configure those for the team's hosts and review process.
 
 ## Layout
 
 | path | content |
 |---|---|
 | `project.toml` | profile config: namespace, approved source (`{{remote}}` / `{{approved_ref}}`), knowledge roots, context budget |
-| `registry/` | owners, repositories, modules, features and concepts (multilingual aliases) |
+| `registry/` | owners, repositories, modules, features, concepts and change types |
 | `knowledge/<group>/*.md` | typed records (`+++` TOML front matter + optional Markdown); groups are for people only |
 | `routing-tests/*.toml` | golden context requests checked by `./kbw validate` |
+| `ci/` | pinned host mappings for source-evidence CI; team agent wrapper if enabled |
 | `skill-config/skill.toml` | settings of the generated agent skill; `generated/` is rendered from it |
 | `upstream.toml` | upstream base used by `./kbw update divergence` and `./kbw update prepare` |
 
@@ -22,6 +23,7 @@ Record templates for all kinds are in `core/templates/records/`.
 
 ```sh
 ./kbw validate                          # records, links, policies, registries, routing tests
+./kbw eval routing                      # order, recall and response-size metrics
 ./kbw context --intent implement --task "..." --repo <repo> --path <repo>:<path>
 ./kbw show <record-id>                  # full record; --section <id> for one section
 ./kbw integrate --generate --apply      # after editing skill-config/skill.toml

@@ -1,5 +1,5 @@
 +++
-schema = 2
+schema = 99
 id = "acme.bad.schema"
 kind = "reference"
 title = "Future schema"

@@ -1,7 +1,7 @@
 # Modules: parts of a repository selected by repo-relative path globs
 # (`*` within a segment, `**` across segments). A task path maps to the modules whose globs
 # match it; `features` lists registry features the module implements.
-schema = 1
+schema = 2
 
 # [[module]]
 # id = "mobile.auth"

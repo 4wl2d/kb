@@ -62,7 +62,19 @@ modules) and the integration suites in `core/cli/tests/`:
 | `cli_commands.rs` | `context`, `search`, `show`, `index`, `validate`, `impact`, `doctor` end to end: KB pushed to a local bare origin, host mounting it as a submodule; also usage and protocol errors in JSON mode, the snapshot line of text output, absolute `--path` values through a symlinked host directory, the `doctor` checks `source`, `host-pin` and `snapshot-engine`, and that reading commands leave the checkouts untouched |
 | `launcher.rs` | the real `kbw` script: fingerprint definition, warm path, invalidation, toolchain mismatch, the build fingerprint compiled into source builds, a relative `KBW_CARGO_TARGET_DIR`, packaging (including rebuilding a runtime that does not report its fingerprint), artifact installation, reinstalling with the runtime resolvable at every step, rejection of invalid archives with the active runtime kept (fake runtimes and a fake `cargo`), running under `dash`, one real source bootstrap, shellcheck |
 | `e2e_workflow.rs` | the specification's end-to-end scenario (unix only): synthetic upstream → downstream init → multi-repository context → proposal → approved-origin update → pin refresh → upstream-format update, through `kbw` |
-| `update_production.rs` | `kb update prepare` through the production path (unix only): the real `kbw` of the target engine bootstraps it inside the update worktree, migrates the synthetic legacy (schema 0) project to the `v1-expected` fixture byte for byte and validates it, leaving the main checkout untouched |
+| `update_production.rs` | production launcher/update worktree: synthetic 0 → 1 → 2 migration to `v2-expected`, validation and unchanged main checkout |
+| `schema_evolution.rs`, `retrieval_upgrade.rs` | schema-2 strictness, compatibility, tracked identifiers, change categories and historical slices |
+| `authoring_workflow.rs`, `knowledge_ci.rs` | validated drafts/capture and offline merged-change/CI glue |
+| `code_provider.rs`, `process_limits.rs` | immutable provider evidence, deleted symbols, uncertainty, bounded output and deadlines |
+| `delivery_efficiency.rs` | verified core/delta, one full skill, terse/outline and local usage |
+| `trust_workflow.rs`, `verify_workflow.rs` | stamps/drift/ledger/freshness and probes over real staged/committed inputs |
+| `evaluation.rs` | labeled routing metrics, chronological history, missingness and determinism |
+
+The optional provider crate has synthetic native-output tests. The replay crate adds pure
+accounting/statistics tests and a shallow-Git isolation test. Run its OS-dependent fixture
+explicitly with `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`; CI
+runs it separately on Seatbelt/bubblewrap. It calls no real model or public network and
+must not be mistaken for held-out quality acceptance.
 
 Shared helpers are in `core/cli/tests/common/`. Rules for every test:
 
@@ -132,13 +144,13 @@ engine) and are compiled into the binary from `core/cli/src/versions.rs`.
 | version | kind | bump when | effect of a mismatch |
 |---|---|---|---|
 | `engine_version` | semver; equals `core/cli/Cargo.toml` `version` | every release | snapshot → `UPDATE_REQUIRED`; runtime vs checkout → `RUNTIME_INCOMPATIBLE`; release tag must be `v<engine_version>` |
-| `document_schema` | integer | incompatible change of records, registries or `project.toml` (with a migration) | files with another schema → `UNSUPPORTED_SCHEMA_VERSION`; snapshot → `UPDATE_REQUIRED` |
+| `document_schema` | integer (currently `2`, reads `1`/`2`) | format changes of records, registries or `project.toml` (with a migration) | unreadable file schema → `UNSUPPORTED_SCHEMA_VERSION`; snapshot contract mismatch → `UPDATE_REQUIRED` |
 | `protocol` | integer (`kb.cli.v<n>`) | an envelope field is removed or changes meaning; codes and exit codes stay stable within a version | snapshot → `UPDATE_REQUIRED` |
 | `index_schema` | integer | incompatible change of the SQLite layout | existing index rebuilt in place (`INDEX_REBUILT`); snapshot → `UPDATE_REQUIRED` |
 | `LAYOUT` | integer, code only (`core/cli/src/index/schema.rs`, recorded as meta key `layout`) | table changes within one `index_schema` (derived data only) | existing index rebuilt in place (`INDEX_REBUILT`); adding a new meta key has the same effect on older indexes (`<key> missing`) |
 | `skill_protocol` | integer | generated skills change the calls or interpretation agents rely on (not for wording) | `--skill-protocol` → `SKILL_OUTDATED` |
 | `manifest` | integer (`1`) | format of `core/release.toml` itself | `RUNTIME_INCOMPATIBLE` |
-| `PARSER_VERSION` | integer, code only (currently `2`) | parsing output for identical bytes changes, including diagnostic messages | cached parses are invalidated: the index is rebuilt in place (`INDEX_REBUILT`, for example `parser_version 1 -> 2`) |
+| `PARSER_VERSION` | integer, code only (currently `5`) | parsing output for identical bytes changes, including diagnostic messages | cached parses are invalidated: the index is rebuilt in place (`INDEX_REBUILT`) |
 | `rust_toolchain` | toolchain | toolchain upgrade (together with `rust-toolchain.toml`) | `KBW_TOOLCHAIN_MISMATCH` |
 
 Unit tests in `versions.rs` fail when `core/release.toml` and the compiled constants disagree

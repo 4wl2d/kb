@@ -1,0 +1,49 @@
+# Trigger from the team's post-merge webhook with KB_MR_IID and a protected target ref.
+# Prerequisites: pinned CI image with Rust, Git, jq and glab; read-only Git credential
+# helper for KB_REPO_URL; KB_PIN (full SHA); KB_HOST_REPO_ID; KB_TARGET_BRANCH.
+# Scope KB_AGENT_KEY to knowledge-draft, KB_PUBLISH_TOKEN to knowledge-publish.
+# Configure protected environments and variable access before enabling.
+.kb-accrual:
+  stage: .post
+  image: $KB_KNOWLEDGE_CI_IMAGE
+  variables:
+    GIT_DEPTH: "0"
+  rules:
+    - if: '$KB_KNOWLEDGE_ACCRUAL == "enabled" && $KB_MR_IID && $CI_COMMIT_REF_PROTECTED == "true"'
+  before_script:
+    - git clone --no-checkout "$KB_REPO_URL" kb-source
+    - git -C kb-source checkout --detach "$KB_PIN"
+    - test "$(git -C kb-source rev-parse HEAD)" = "$KB_PIN"
+    - (cd kb-source && rustup toolchain install && ./kbw --kbw-bootstrap)
+kb-knowledge-draft:
+  extends: .kb-accrual
+  environment: knowledge-draft
+  timeout: 30m
+  script:
+    - sh kb-source/core/templates/ci/export-merged-change.sh gitlab "$KB_HOST_REPO_ID" "$KB_MR_IID" change-inputs
+    - kb-source/kbw propose begin --host "$CI_PROJECT_DIR" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$CI_PROJECT_DIR/change-inputs/export.json" --json > work-order.json
+    - mkdir draft-output
+    - 'printf ''%s\n'' ''{"protocol":"kb.draft-output.v1"}'' > draft-output/manifest.json'
+    - test -x kb-source/project/ci/draft-agent
+    - env -u GITLAB_TOKEN -u CI_JOB_TOKEN -u KB_PUBLISH_TOKEN kb-source/project/ci/draft-agent "$CI_PROJECT_DIR/work-order.json" "$CI_PROJECT_DIR/draft-output"
+  artifacts:
+    when: always
+    paths: [change-inputs/, work-order.json, draft-output/]
+kb-knowledge-publish:
+  extends: .kb-accrual
+  environment: knowledge-publish
+  needs:
+    - job: kb-knowledge-draft
+      artifacts: true
+  timeout: 20m
+  script:
+    - git fetch --no-tags origin "refs/merge-requests/$KB_MR_IID/head"
+    # The Git helper for this job must authorize KB branch pushes only; no agent runs here.
+    - cd kb-source
+    - sh core/templates/ci/submit-drafts.sh "$CI_PROJECT_DIR/draft-output" "$CI_PROJECT_DIR" "$KB_HOST_REPO_ID" "$CI_PROJECT_DIR/submission"
+    - cp core/templates/mr/kb_review.md "$CI_PROJECT_DIR/knowledge-mr.md"
+    - 'printf ''\nHost change: %s/-/merge_requests/%s\n'' "$CI_PROJECT_URL" "$KB_MR_IID" >> "$CI_PROJECT_DIR/knowledge-mr.md"'
+    - KB_PUBLISH_APPROVED=1 GITLAB_TOKEN="$KB_PUBLISH_TOKEN" sh core/templates/ci/publish-drafts.sh gitlab "feature/kb-$KB_HOST_REPO_ID-mr-$KB_MR_IID" "$KB_TARGET_BRANCH" "$CI_PROJECT_DIR/knowledge-mr.md"
+  artifacts:
+    when: always
+    paths: [submission/, knowledge-mr.md]

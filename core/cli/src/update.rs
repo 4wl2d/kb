@@ -1697,7 +1697,8 @@ mod tests {
         assert!(s.unsupported.is_empty() && s.migration_required);
         let s = schema_support(&BTreeSet::from([7]), &m);
         assert_eq!(s.unsupported, vec![7]);
-        assert!(!schema_support(&BTreeSet::from([1]), &m).migration_required);
+        assert!(schema_support(&BTreeSet::from([1]), &m).migration_required);
+        assert!(!schema_support(&BTreeSet::from([m.document_schema]), &m).migration_required);
     }
 
     #[test]

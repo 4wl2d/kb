@@ -222,7 +222,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -339,7 +339,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -462,7 +462,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -586,7 +586,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -676,7 +676,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -1014,7 +1014,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -1119,7 +1119,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
@@ -1207,7 +1207,7 @@
         },
         "schema": {
           "const": 1,
-          "description": "Document schema version (must be 1).",
+          "description": "Document schema version. New optional fields require schema 2.",
           "format": "uint32",
           "minimum": 0,
           "type": "integer"

@@ -2,6 +2,16 @@
 
 <!-- What changes and why. -->
 
+## Knowledge learned
+
+Decisions and reasons; platform/integration quirks; failure/recovery scenarios; canonical
+tests and precedents. Link the draft knowledge and name the reviewer for claims supported
+by a merged fix/regression test or explicit review decision. Generation never accepts it.
+
+Optional human labels in the kb-impact block: `applicable = ["project.area.record"]`,
+`not_applicable = [...]`, `applicability_reviewed = true` (only after reviewing every
+mandatory id). `eval history` reports unlabeled precision as unknown.
+
 ## Knowledge base impact
 
 Fill in the machine-readable block below; CI (`kbw impact --check`) verifies that it is

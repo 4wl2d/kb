@@ -142,6 +142,33 @@ pub fn host_diff(
     working_tree: bool,
     kb_submodule_path: Option<&str>,
 ) -> Result<HostDiff> {
+    host_diff_inner(
+        host_root,
+        base,
+        head,
+        working_tree,
+        false,
+        kb_submodule_path,
+    )
+}
+
+/// The staged index is a separate target from both the work tree and HEAD.
+pub fn staged_diff(
+    host_root: &Path,
+    base: &str,
+    kb_submodule_path: Option<&str>,
+) -> Result<HostDiff> {
+    host_diff_inner(host_root, base, None, true, true, kb_submodule_path)
+}
+
+fn host_diff_inner(
+    host_root: &Path,
+    base: &str,
+    head: Option<&str>,
+    working_tree: bool,
+    staged: bool,
+    kb_submodule_path: Option<&str>,
+) -> Result<HostDiff> {
     check_revision_arg(base)?;
     if let Some(h) = head {
         check_revision_arg(h)?;
@@ -184,6 +211,9 @@ pub fn host_diff(
         "--ignore-submodules=dirty",
         merge_base.as_str(),
     ];
+    if staged {
+        args.insert(1, "--cached");
+    }
     if !working_tree {
         args.push(head_oid.as_str());
     }
@@ -201,7 +231,7 @@ pub fn host_diff(
         let file = entry.into_changed_file();
         files.insert(file.path.clone(), file);
     }
-    if working_tree {
+    if working_tree && !staged {
         for path in untracked_files(&git)? {
             match files.get_mut(&path) {
                 // Removed from the index but still present in the work tree.
@@ -235,6 +265,42 @@ fn resolve(git: &Git, rev: &str, what: &str) -> Result<String> {
         KbError::invalid_input(format!(
             "{what} revision `{rev}` does not name a commit in the host repository"
         ))
+    })
+}
+
+/// An unborn repository has an empty-tree baseline. Used by first-commit verification;
+/// unlike ordinary impact, there is no invented commit or merge-base object.
+pub fn initial_diff(root: &Path, staged: bool, kb_path: Option<&str>) -> Result<HostDiff> {
+    let git = Git::new(root);
+    let mut paths: BTreeSet<_> = crate::host::facts::tracked_files(root, None)?
+        .into_iter()
+        .collect();
+    if !staged {
+        paths.extend(untracked_files(&git)?);
+        let deleted = git.run_bytes(&["ls-files", "--deleted", "-z", "--"])?;
+        for path in deleted.split(|b| *b == 0).filter(|p| !p.is_empty()) {
+            paths.remove(
+                std::str::from_utf8(path)
+                    .map_err(|_| KbError::invalid_input("non-UTF-8 deleted path"))?,
+            );
+        }
+    }
+    let files = paths
+        .into_iter()
+        .filter(|p| kb_path.is_none_or(|kb| p != kb && !p.starts_with(&format!("{kb}/"))))
+        .map(|path| ChangedFile {
+            path,
+            old_path: None,
+            status: ChangeStatus::Added,
+        })
+        .collect();
+    Ok(HostDiff {
+        base: "empty-tree".into(),
+        merge_base: "empty-tree".into(),
+        head: None,
+        kb_submodule: kb_path.map(str::to_string),
+        files,
+        kb_pointer: None,
     })
 }
 
@@ -416,6 +482,7 @@ pub enum Relation {
     /// A contract party covers the file's whole repo (no modules listed). Reported as
     /// affected knowledge, but not counted as coverage of the changed area.
     ContractRepoParty,
+    ContractConsumer,
     /// A feature record documents a feature of the file.
     FeatureRecord,
 }
@@ -431,6 +498,7 @@ impl Relation {
             Relation::FeatureScope => "feature-scope",
             Relation::ContractParty => "contract-party",
             Relation::ContractRepoParty => "contract-repo-party",
+            Relation::ContractConsumer => "contract-consumer",
             Relation::FeatureRecord => "feature-record",
         }
     }
@@ -697,6 +765,7 @@ struct LinkIndex<'a> {
     party_modules: BTreeMap<&'a str, Vec<(usize, &'a str)>>,
     /// Contract parties without modules: repo → (meta index, party id).
     party_repos: BTreeMap<&'a str, Vec<(usize, &'a str)>>,
+    consumers: BTreeMap<(&'a str, &'a str), Vec<usize>>,
     feature_records: BTreeMap<&'a str, Vec<usize>>,
 }
 
@@ -714,6 +783,7 @@ impl<'a> LinkIndex<'a> {
             scope_features: BTreeMap::new(),
             party_modules: BTreeMap::new(),
             party_repos: BTreeMap::new(),
+            consumers: BTreeMap::new(),
             feature_records: BTreeMap::new(),
         };
         for (i, entry) in ix.metas.iter().enumerate() {
@@ -761,6 +831,12 @@ impl<'a> LinkIndex<'a> {
                         .or_default()
                         .push((i, party.id.as_str()));
                 }
+            }
+            for consumer in &meta.consumers {
+                ix.consumers
+                    .entry((&consumer.repo, consumer.path.trim_end_matches('/')))
+                    .or_default()
+                    .push(i);
             }
             if meta.kind == Kind::Feature
                 && let Some(f) = &meta.feature
@@ -815,6 +891,14 @@ impl<'a> LinkIndex<'a> {
             if let Some(repo) = repo {
                 let dirs = prefixes.iter().map(|p| p.trim_end_matches('/'));
                 for anchored in dirs.filter(|d| !d.is_empty()).chain([path]) {
+                    for &i in self.consumers.get(&(repo, anchored)).into_iter().flatten() {
+                        out.push((
+                            i,
+                            Relation::ContractConsumer,
+                            anchored.to_string(),
+                            Some(path.to_string()),
+                        ));
+                    }
                     for &(i, kind) in self.anchors_at(repo, anchored) {
                         if let Some(relation) = Relation::of_anchor(kind) {
                             out.push((i, relation, anchored.to_string(), Some(path.to_string())));
@@ -933,6 +1017,13 @@ pub struct ImpactStatement {
     pub kb_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub change_id: Option<String>,
+    /// Optional human evaluation labels; omission never means "no applicable knowledge".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub applicable: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub not_applicable: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub applicability_reviewed: Option<bool>,
 }
 
 /// Find and parse the single `<!-- kb-impact:v1 ... -->` block in an MR description.
@@ -986,6 +1077,19 @@ fn parse_statement_body(body: &str) -> std::result::Result<ImpactStatement, Stri
     let mut s: ImpactStatement = toml::from_str(body)
         .map_err(|e| format!("invalid `{STATEMENT_TAG}` block: {}", e.message().trim()))?;
     s.reason = s.reason.trim().to_string();
+    for ids in [&s.applicable, &s.not_applicable] {
+        if ids.len() > 10000 || ids.iter().collect::<BTreeSet<_>>().len() != ids.len() {
+            return Err("evaluation labels must contain at most 10000 distinct record ids".into());
+        }
+        for id in ids {
+            crate::model::ids::check_record_id(id)?;
+        }
+    }
+    if s.applicable.iter().any(|id| s.not_applicable.contains(id)) {
+        return Err("applicable and not_applicable labels contradict each other".into());
+    }
+    s.applicable.sort();
+    s.not_applicable.sort();
     if s.reason.is_empty() {
         return Err("`reason` must not be empty".into());
     }
@@ -1139,7 +1243,7 @@ pub fn render(report: &ImpactReport, verdict: Option<&Verdict>, format: Format) 
             s.push('\n');
             s
         }
-        Format::Compact => render_compact(report, verdict),
+        Format::Compact | Format::Terse => render_compact(report, verdict),
         Format::Human => render_human(report, verdict),
     }
 }

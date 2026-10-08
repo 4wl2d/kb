@@ -11,6 +11,7 @@ describes engine `0.1.0`, CLI protocol `1`. Symptom-oriented fixes are in
 | format | select with | stdout | stderr |
 |---|---|---|---|
 | `compact` (default) | nothing, or `--format compact` | dense text for agents | progress, diagnostics, errors |
+| `terse` | `--format terse` | minimal tiered context; typed obligations retained, bodies deferred | same |
 | `human` | `--format human` | verbose text for people | same |
 | `json` | `--json` or `--format json` | exactly one `kb.cli.v1` document | same |
 
@@ -172,11 +173,11 @@ attached only when the command produced a result.
 
 ## Per-command results
 
-Top-level `result` members as printed by engine 0.1.0 (captured by running each command with
-`--json` against the synthetic example; `update prepare` and `update abandon` from their
-report types). Members listed as "+ `snapshot`" carry the snapshot provenance object
+Top-level `result` members of the current unreleased engine. Baseline examples above retain
+their captured historical counts/hashes; additions below are defined by the current command
+report types and integration tests. Members listed as "+ `snapshot`" carry provenance
 (`profile`, `remote`, `source`, `approved_ref`, `selection`, `freshness`, `revision`,
-`latest_approved`, `approved`, `pin`, `overlay`, `engine_version`, `key`).
+`latest_approved`, `approved`, `pin`, `overlay`, `engine_version`, `key`, `content_digest`).
 
 | command | `result` members | result-carrying failures; notes |
 |---|---|---|
@@ -197,6 +198,34 @@ report types). Members listed as "+ `snapshot`" carry the snapshot provenance ob
 | `update abandon` | `mode` (`dry-run`/`apply`), `branch`, `commit`, `worktree`, `dirty` (number of `git status` entries of the worktree, `null` when its directory is missing), `commits_not_in_head` | dry-run unless `--apply`; hard: `NOT_FOUND`, `INVALID_INPUT` (not a `kb-update/*` branch, worktree outside `.cache/update/` or locked), `CONFLICT` with `--apply` when the worktree has uncommitted, untracked or conflicted files (`details` `{branch, worktree, dirty}`; `--apply --force` discards them), `USAGE` for `--force` without `--apply` |
 | `schema` | `dir`, `schemas[]`, `in_sync`, `drift[]`; with `--write`: `dir`, `schemas[]`, `changes[]` | `DRIFT_DETECTED` only with `--check` |
 | `version` | `engine_version`, `document_schema`, `protocol`, `index_schema`, `skill_protocol`, `parser_version`, `build_fingerprint` | needs no KB root; `build_fingerprint` is `unknown` for builds made outside `kbw` |
+
+Additive command contracts (CLI envelope/error meanings remain `kb.cli.v1`):
+
+| command | result and interpretation | failure boundary |
+|---|---|---|
+| `outline` | `kb.outline.v1`: completeness/reasons, snapshot content digest, unit inventory, omitted optional count and budget; no delivery receipt | mandatory inventory over the requested/2000-token ceiling is `CONTEXT_BUDGET_EXCEEDED` |
+| `coverage` | `coverage`, `history`, optional provider `code` + `snapshot` | unknown host/repo is invalid input; absent provider is explicit churn-only evidence |
+| `propose begin` | `kb.work-order.v1`: repo, diff, patch, modules, impact, existing records, templates, review comments, test candidates, consumer candidates and provider metadata + `snapshot` | malformed export or mismatched host identity is rejected; exported merged/approval text is only a claim |
+| `propose submit`, `capture` | `mode`, `written`, `draft` plan with id/path/status/diff/anchors/duplicates and optional consumer evidence + `snapshot` | only drafts; invalid evidence, exact duplicate or dirty destination prevents writing |
+| `anchors stamp` | `mode`, `source=working-tree`, `written`, stamp `plan` | explicit ids only; no selected-snapshot mutation or automatic review dates |
+| `anchors check` | `anchors`, `strict`, `unstamped` + `snapshot` | changed/missing evidence: `DRIFT_DETECTED`; unverifiable/required unstamped evidence: `CONTEXT_INCOMPLETE` |
+| `drift` | owner-grouped `drift` + `snapshot` | `--check` reports drift/unverifiable evidence as failure |
+| `ledger` | statement support/freshness and seeded draft audit in `ledger` + `snapshot` | `--check` fails stale/unverifiable accepted evidence; drafts are never accepted |
+| `verify` | `verification`: input digest, mode/diff/branch, declared probes, concrete evidence, counts, explicit applicability and optional provider provenance + `snapshot` | blocking failure: `VALIDATION_FAILED`; blocking unknown evidence: `CONTEXT_INCOMPLETE` |
+| `usage report` | `usage`, final `diff`, selected/missing receipts and selection description + `snapshot` | missing receipts or invalid preserved log lines: `CONTEXT_INCOMPLETE` |
+| `eval routing` | normal profile uses validation/routing report; `--example` returns example, validation and routing | validation/routing errors retain 40/41; absent labels are unknown |
+| `eval history` | `history` + `snapshot`: per-change delivery/labels/drift and temporal limitations | `--check` fails incomplete context or unavailable labels/temporal evidence |
+
+Context additionally emits optional `code`, `delivery`, `freshness_reference` and
+`pruned_change_types`; `request.as_of` records the resolved historical point. Normal CLI
+receipts use `kb.receipt.v2` and per-unit `content_sha256`; reused units carry a `delivery`
+reference. Verify these fields before omitting previously delivered text. Code units have
+`kind=code`, `status=observed`, `origin=provider` and no accepted record identity. See
+[context.md](context.md) for reuse, historical completeness and budget semantics.
+`show --sections`, `impact --deep` and `integrate --probe` extend their existing commands;
+the probe explicitly reports `runtime_load_verified=false` until an external harness run
+is observed. `kb.code.v1` and the optional replay kit's `kb.eval.*.v1` are separate protocols,
+not changes to the engine envelope.
 
 ## Error codes
 
@@ -252,6 +281,8 @@ describe how the snapshot was obtained, not the knowledge; routing fixtures igno
 | `NOT_APPROVED` | partial | yes | the selected revision is not reachable from the approved tip |
 | `APPROVAL_UNKNOWN` | partial | yes | whether the selected revision is approved could not be determined |
 | `REPO_UNKNOWN` | partial | no | no `--repo` and the host repository was not identified |
+| `DIAGNOSE_SCOPE_PROVISIONAL` | partial | no | path-free diagnosis has no explicit path/module/diff scope |
+| `AS_OF_UNDATED` | partial | no | accepted records lack a verifiable introduction boundary for the requested slice |
 | `UNDETERMINED_OBLIGATIONS` | partial | no | obligations may apply but a scope dimension is unknown (see `undetermined[]`) |
 | `DEPENDENCY_VERSION_UNDETERMINED` | partial | no | a `requires` target has a version constraint for a repo whose version is unknown |
 | `SETTING_CONFLICT` | conflict | no | the most specific applicable overrides of one policy setting (none strictly more specific) disagree |
@@ -328,11 +359,11 @@ honors `KB_CACHE_DIR` (default `<kb root>/.cache`).
 |---|---|---|
 | CLI protocol | `protocol = 1` in `core/release.toml`; `PROTOCOL`/`PROTOCOL_ID` in `core/cli/src/versions.rs`; the envelope's `"kb.cli.v1"` | this envelope, the error codes and exit codes |
 | envelope schema | `core/schemas/cli-envelope.v1.schema.json` (`$id` `kb:schema/cli-envelope/v1`, JSON Schema draft 2020-12) | the envelope and the `error` object; `result` is command-specific and not constrained by it |
-| skill protocol | `skill_protocol = 1`; checked with `--skill-protocol <n>` | the calls and interpretation generated skills rely on |
+| skill protocol | `skill_protocol = 2`; checked with `--skill-protocol <n>` | scoped diagnosis, verified reuse and evidence/draft workflow |
 | engine | `engine_version` (semver) | the release |
 
-* `kb version` reports all of them plus the build fingerprint (`kb 0.1.0 (document schema 1,
-  protocol 1, index schema 1, skill protocol 1) build <fingerprint>`); `kbw --json version`
+* `kb version` reports all of them plus the build fingerprint (`kb 0.1.0 (document schema 2,
+  protocol 1, index schema 2, skill protocol 2) build <fingerprint>`); `kbw --json version`
   adds `parser_version` and `build_fingerprint` (`unknown` for a build made outside `kbw`).
 * The maintainer contract `kb.contract.cli-protocol` (in `core/maintainer-knowledge/`)
   requires increasing `protocol` when an envelope field is removed or changes meaning, and

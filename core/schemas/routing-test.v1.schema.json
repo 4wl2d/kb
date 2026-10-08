@@ -14,13 +14,19 @@
         "refactor",
         "debug",
         "review",
-        "explain"
+        "explain",
+        "diagnose"
       ],
       "type": "string"
     },
     "RoutingCase": {
       "additionalProperties": false,
       "properties": {
+        "applicability_reviewed": {
+          "default": false,
+          "description": "All delivered mandatory records were adjudicated for applicability.",
+          "type": "boolean"
+        },
         "budget": {
           "format": "uint64",
           "minimum": 0,
@@ -38,6 +44,13 @@
               "type": "null"
             }
           ]
+        },
+        "change_types": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
         "concepts": {
           "default": [],
@@ -70,6 +83,14 @@
         "expect_mandatory": {
           "default": [],
           "description": "Ids that must be in the mandatory tier.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expect_order": {
+          "default": [],
+          "description": "Expected relative order of distinct record ids in the delivered context.",
           "items": {
             "type": "string"
           },
@@ -108,6 +129,25 @@
         "intent": {
           "$ref": "#/$defs/Intent"
         },
+        "max_tokens": {
+          "description": "Ceiling for the complete compact response, using the engine's token estimator.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_recall_percent": {
+          "description": "Minimum recall@k, as an integer percentage. Requires `relevant` labels.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "modules": {
           "default": [],
           "items": {
@@ -118,8 +158,33 @@
         "name": {
           "type": "string"
         },
+        "not_applicable": {
+          "default": [],
+          "description": "Human-labeled mandatory false positives. This is not inferred from missing labels.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "paths": {
           "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "recall_k": {
+          "description": "Top-k cutoff over distinct record ids, in delivery order (default 10).",
+          "format": "uint",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "relevant": {
+          "default": [],
+          "description": "Human-labeled relevant records; unlabeled cases have no recall estimate.",
           "items": {
             "type": "string"
           },

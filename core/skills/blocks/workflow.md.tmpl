@@ -1,0 +1,23 @@
+## Engineering knowledge base (kb)
+
+Use the {{project_name}} KB at `{{kb_path}}` and the workflow in `{{agents_skill_path}}`.
+Any core below is valid only while its receipt matches the selected snapshot. If that
+proof fails, use full current context and repair the integration before reusing the core.
+{{core_lines}}
+At task start:
+
+    {{kb_path}}/kbw context --intent diagnose --task "<task>" --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
+
+Path-free diagnosis is provisional. Before the first edit, request `--intent implement`
+with the actual `--path` values (or `--changed --base <target>` for review). Apply all
+mandatory knowledge; resolve missing scope and conflicts. Before finishing, run
+`{{kb_path}}/kbw impact --changed --base <target>{{snapshot_arg}}` and applicable `verify`
+probes. Capture learned decisions, gaps, quirks or scenarios with evidence as drafts.
+Acceptance requires review and merge into the approved ref.
+
+`--format terse` keeps the same typed obligations. Use `show --sections` for bodies.
+Use `--since-receipt <id>` only while that receipt's content is still in this session.
+After compaction, hand-off or a new session request full context. Only use a core receipt
+after reading its source above; stale or missing installation evidence must be repaired.
+
+Managed by `{{kb_path}}/kbw integrate`; edit the KB and regenerate instead of this block.

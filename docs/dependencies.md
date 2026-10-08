@@ -16,6 +16,8 @@ cargo metadata --format-version 1 --locked | jq '.packages[] | {name, version, l
 |---|---|
 | clap | command-line parsing (rejects unknown arguments) |
 | globset | path globs for selectors and registries |
+| regex | bounded declarative verification patterns |
+| libc (Unix) | terminate only the owned subprocess group on a deadline/output failure |
 | rusqlite (feature `bundled`) | embedded SQLite with FTS5 for the derived index |
 | schemars | JSON Schema generation from the Rust model |
 | semver | version applicability of records |
@@ -30,6 +32,9 @@ public domain (https://www.sqlite.org/copyright.html).
 Development-only dependencies (not shipped in release archives): `tempfile`, `proptest`,
 `jsonschema` (schema conformance tests). `core/benchmarks` depends only on `kb`, `serde`
 and `serde_json`.
+Optional `core/providers` and `core/eval` are separate executables, not engine dependencies.
+They reuse workspace crates; the replay transport/sandbox controller uses Rust's standard
+library rather than adding a network framework to `kb`.
 
 ## Complete runtime dependency graph (normal + build dependencies of `kb`)
 
@@ -71,6 +76,7 @@ and `serde_json`.
 | quote | 1.0.47 | MIT OR Apache-2.0 |
 | ref-cast | 1.0.27 | MIT OR Apache-2.0 |
 | ref-cast-impl | 1.0.27 | MIT OR Apache-2.0 |
+| regex | 1.13.1 | MIT OR Apache-2.0 |
 | regex-automata | 0.4.18 | MIT OR Apache-2.0 |
 | regex-syntax | 0.8.11 | MIT OR Apache-2.0 |
 | rusqlite | 0.40.2 | MIT |

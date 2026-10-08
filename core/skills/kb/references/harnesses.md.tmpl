@@ -1,58 +1,73 @@
 # Harness integration
 
-`kbw integrate --generate` renders one canonical skill from `core/skills/` and
-`project/skill-config/skill.toml`; `{{kb_path}}/kbw integrate --apply` installs it into the
-host repository. The same `SKILL.md` (front matter `name: kb` plus `description`) is valid
-for all three harnesses.
+The bundle is generated in the KB with `integrate --generate`, reviewed, then installed
+in the host with `integrate --apply`. Skill protocol {{skill_protocol}} uses one full
+`SKILL.md` at `{{agents_skill_path}}`. Every harness gets a native instruction target
+pointing to the same workflow; it need not discover that directory automatically.
 
-| harness | skill location in the host | instruction file | documentation |
-|---|---|---|---|
-| Claude Code | `.claude/skills/kb/SKILL.md` | `CLAUDE.md` | https://code.claude.com/docs/en/skills |
-| Codex | `.agents/skills/kb/SKILL.md` | `AGENTS.md` | https://developers.openai.com/codex/skills (now served at https://developers.openai.com/codex/build-skills) |
-| Cursor | `.agents/skills/kb/SKILL.md`, or `.claude/skills/kb/SKILL.md` when Claude Code is enabled | `AGENTS.md` | https://cursor.com/docs/skills |
+| Harness | Instruction target |
+|---|---|
+| Codex | `AGENTS.md`; an existing `AGENTS.override.md` gets a pointer |
+| Claude Code | `CLAUDE.md`; mixed installations retain `/kb` through a short command alias |
+| Cursor | `.cursor/rules/kb.mdc`, with `alwaysApply: true` |
+| Grok Build | `AGENTS.md` |
+| GitHub Copilot | `.github/copilot-instructions.md` |
+| Junie | `AGENTS.md`; an existing `.junie/AGENTS.md` gets a pointer |
 
-Discovery facts from that documentation (checked 2026-09-27; re-check when a harness
-changes):
+The primary file is `{{core_source}}`. Other targets contain a short reference instead
+of another full workflow or core. Exactly one physical skill directory is selected:
+`.agents/skills/kb` when Codex or Cursor is enabled, otherwise `.claude/skills/kb`
+for Claude, `.grok/skills/kb` for Grok, or `.kbw/skills/kb` for instruction-only
+targets. Claude's mixed-installation command alias is `.claude/commands/kb.md`; it
+forwards to the canonical workflow and preserves the existing slash command.
 
-- **Claude Code** loads project skills from `.claude/skills/<name>/SKILL.md` in the start
-  directory and every parent up to the repository root. All front matter fields are
-  optional (`description` is recommended; `name` defaults to the directory name; unknown
-  fields are ignored). Supporting files referenced from `SKILL.md` are read only when
-  needed. Edits to `SKILL.md` are picked up during a session.
-- **Codex** scans `.agents/skills` in every directory from the current working directory up
-  to the repository root. `SKILL.md` must include `name` and `description`; an optional
-  `agents/openai.yaml` adds UI metadata and invocation policy (kb does not generate one).
-  Codex reads `AGENTS.md` instructions from the repository root down to the working
-  directory.
-- **Cursor** reads `.agents/skills` and `.cursor/skills`, and for compatibility also
-  `.claude/skills` and `.codex/skills`. `name` is required, must use lowercase letters,
-  digits and hyphens, and must match the folder name; `description` is required. Cursor
-  reads `AGENTS.md` in the project root and in subdirectories.
+## Installation and recovery
 
-## Avoiding duplicate skills
+Managed Markdown blocks preserve all surrounding user content. Standalone generated files
+and the lock at `.kbw/integration.lock` carry exact hashes. An edited managed file or
+block is a conflict. Obsolete managed copies are removed only if their locked content
+still matches; modified copies remain conflicts. No symlink is followed for a write.
 
-- claude + cursor: only `.claude/skills/kb/` is installed; Cursor reads it for
-  compatibility, so no `.agents/skills/kb/` copy is made.
-- cursor alone, or codex (with or without cursor): `.agents/skills/kb/` is installed.
-- claude + codex (+ cursor): both directories are installed because Claude Code and Codex
-  each read only their own. Cursor then discovers two identical `kb` skills; how it
-  deduplicates them is not documented. If that matters for your team, enable only the
-  harnesses you use in `project/skill-config/skill.toml` (for example drop `claude` for a
-  Codex + Cursor team, or drop `codex` for a Claude Code + Cursor team).
+kb caps a generated skill at 16 KiB, a Copilot instruction file at 4000 bytes, a Cursor
+rule at 8000 bytes and other managed instruction files at 16 KiB. These conservative kb
+budgets do not represent a vendor's total prompt allowance. Always-on core is capped at
+600 estimated tokens; overflowing rules, conditions and exceptions are never truncated.
+Shorten the core or leave records scoped.
 
-## Managed blocks and the lock
+Generate and install again after knowledge or workflow changes. A core receipt is checked
+against the selected snapshot, the bundle, the host lock, the actual instruction bytes
+and the mounted launcher path. Read the source before passing it to context. Historical
+replay must use frozen instructions and full context, not a current core.
 
-`AGENTS.md` and `CLAUDE.md` are changed only between the lines
-`<!-- kb:begin kb-instructions -->` and `<!-- kb:end kb-instructions -->`; every other byte
-is preserved, and the file is created if missing. `.kbw/integration.lock` in the host
-records the hashes kb installed. A generated file or block edited by hand is reported as
-`CONFLICT` and is never overwritten silently (`--apply --force` overwrites it explicitly).
-`{{kb_path}}/kbw integrate --check` fails with `DRIFT_DETECTED` when the host differs from
-the committed bundle.
+## Load probes
 
-## Limits
+`{{kb_path}}/kbw integrate --probe` checks the installed files and emits a challenge.
+It explicitly leaves runtime loading unverified. Run the challenge in a fresh, trusted
+session of each enabled harness; preserve the exact harness version, response and tool
+calls. The marker must be reported before tools and the initial diagnose call must occur.
+Do not include the expected marker in the challenge prompt. After updates, repeat this
+probe before treating delivery as verified. Installation tests alone do not establish
+model consultation, compliance or task quality.
 
-Instruction files and skills are text: they make the protocol available to an agent, but
-they do not guarantee that it is followed. kb relies on no undocumented harness hooks.
-Updating a skill file does not update instructions already loaded by a running agent; a
-`SKILL_OUTDATED` error tells the agent to re-read the skill or start a new session.
+For nested workspaces, inspect overriding instructions and the actual launch directory.
+Personal/global skills, user settings, trust decisions and vendor loading limits remain
+outside the generated bundle. The probe must reflect the real host configuration.
+
+## Official loading contracts
+
+Checked 2026-10-06. Recheck when upgrading a harness.
+
+- [Codex AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md)
+  describes override precedence and the instruction byte limit.
+  [Codex customization](https://learn.chatgpt.com/docs/customization/overview#skills)
+  describes repository skills in `.agents/skills`.
+- [Claude skills](https://code.claude.com/docs/en/skills) documents
+  `.claude/skills` and the backward-compatible `.claude/commands` format.
+- [Cursor rules](https://cursor.com/docs/rules) documents `.mdc` and `alwaysApply`;
+  [Cursor skills](https://cursor.com/docs/skills) documents compatibility skill roots.
+- [Grok skills and compatibility](https://docs.x.ai/build/features/skills-plugins-marketplaces)
+  documents `.grok/skills`, Claude compatibility and `AGENTS.md`.
+- [Copilot instructions](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions)
+  documents repository instructions and the session's `/instructions` view.
+- [Junie guidelines](https://junie.jetbrains.com/docs/guidelines-and-memory.html)
+  documents `.junie/AGENTS.md` taking precedence over root guidance.

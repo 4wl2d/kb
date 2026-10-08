@@ -1,6 +1,6 @@
 +++
 # Record template: decision. PLACEHOLDER TEXT: replace every value.
-schema = 1
+schema = 2
 id = "example.template.decision"
 kind = "decision"
 title = "Placeholder: the decision in one line"

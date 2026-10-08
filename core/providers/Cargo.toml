@@ -1,0 +1,17 @@
+[package]
+name = "kb-code-provider"
+version = "0.1.0"
+description = "Commit-bound reference adapters for kb.code.v1"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+kb = { path = "../cli" }
+clap.workspace = true
+rusqlite.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true

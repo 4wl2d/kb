@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.decision.integer-money"
 kind = "decision"
 title = "Monetary amounts are integer minor units"

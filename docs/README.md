@@ -15,6 +15,9 @@ All documentation of the kb engine. When a guide and the code disagree,
 | call kb from a program or agent (`--json`) | [protocol.md](protocol.md) |
 | fix an error | [troubleshooting.md](troubleshooting.md) |
 | keep knowledge current during everyday coding work | [prompts/maintenance.md](prompts/maintenance.md) |
+| produce domain drafts and check provenance, freshness or declared rules | [knowledge-lifecycle.md](knowledge-lifecycle.md) |
+| measure retrieval or compare agent outcomes | [evaluation.md](evaluation.md), [replay kit](../core/eval/README.md) |
+| attach optional static code facts | [reference providers](../core/providers/README.md) |
 | change the engine, test, release | [maintainer-guide.md](maintainer-guide.md), [AGENTS.md](../AGENTS.md), [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ## Reference
@@ -23,7 +26,7 @@ All documentation of the kb engine. When a guide and the code disagree,
 |---|---|
 | [architecture.md](architecture.md) | normative engineering contract: layout, record format, registries, context assembly, freshness and snapshots, index, CLI, launcher, integrations |
 | [adr/](adr/) | architecture decision records (below) |
-| [format.md](format.md) | record format (document schema 1), the eight kinds, scope, selectors, links, policies and overrides, registries, diagnostic catalogue |
+| [format.md](format.md) | record schemas 1/2, the eight kinds, domain fields, scope, selectors, links, policies and overrides, registries, diagnostic catalogue |
 | [context.md](context.md) | context assembly: scope resolution, mandatory selection, `requires` closure, ranking, ambiguity, proposals, budgets, completeness, receipts, explain, output formats, `search` and `show` |
 | [snapshots-and-trust.md](snapshots-and-trust.md) | per-call freshness, `--snapshot` selection, host detection, engine compatibility, mirror and cache layout, proposal overlay, index behavior, offline work, trust model |
 | [downstream.md](downstream.md) | downstream setup, submodule binding, host integration, CI/MR templates, linked merge requests, sync versus upgrade, coordinated upgrades, recovery, administrator settings |
@@ -35,6 +38,10 @@ All documentation of the kb engine. When a guide and the code disagree,
 | [dependencies.md](dependencies.md) | runtime dependencies and their licenses, and how to regenerate the list |
 | [benchmarks.md](benchmarks.md) | benchmark report: environment, method and measured results of `kb-bench` |
 | [verification.md](verification.md) | verification report: the exact commands run and their actual results |
+| [knowledge-lifecycle.md](knowledge-lifecycle.md) | coverage, change work orders, drafts, stamps, drift, ledger, probes and local usage |
+| [evaluation.md](evaluation.md) | Tier A routing/history and Tier B acceptance boundaries |
+| [optional-extensions.md](optional-extensions.md) | evidence gates for MCP, agent hooks, embeddings and other optional work |
+| [upstream-upgrade.md](upstream-upgrade.md) | implementation checkpoints and outstanding validation/empirical/release gates |
 
 ## Architecture decision records
 
@@ -49,6 +56,12 @@ All documentation of the kb engine. When a guide and the code disagree,
 | [0007](adr/0007-budgets-and-receipts.md) | whole-unit packing with byte and estimated-token budgets |
 | [0008](adr/0008-integrations.md) | generated skills and managed instruction blocks |
 | [0009](adr/0009-synthetic-legacy-schema.md) | synthetic legacy schema 0 exercises the migration machinery |
+| [0010](adr/0010-schema-2.md) | additive schema 2 and lossless adjacent migration (proposed) |
+| [0011](adr/0011-code-provider.md) | separate commit-bound static provider protocol (proposed) |
+| [0012](adr/0012-temporal-context.md) | explicit temporal slices and frozen replay inputs (proposed) |
+| [0013](adr/0013-delivery-reuse.md) | verified always-on core, receipt deltas and one full skill (proposed) |
+| [0014](adr/0014-knowledge-production.md) | deterministic work orders, draft production and evidence ladder (proposed) |
+| [0015](adr/0015-declarative-verification.md) | bounded probes, source evidence and freshness limits (proposed) |
 
 ## Next to the code
 

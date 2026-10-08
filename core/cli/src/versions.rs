@@ -7,13 +7,18 @@ use crate::error::{ErrorCode, KbError, Result};
 
 pub const ENGINE_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const MANIFEST_VERSION: u32 = 1;
-pub const DOCUMENT_SCHEMA: u32 = 1;
+pub const DOCUMENT_SCHEMA: u32 = 2;
+pub const OLDEST_READABLE_DOCUMENT_SCHEMA: u32 = 1;
 pub const PROTOCOL: u32 = 1;
 pub const PROTOCOL_ID: &str = "kb.cli.v1";
-pub const INDEX_SCHEMA: u32 = 1;
-pub const SKILL_PROTOCOL: u32 = 1;
+pub const INDEX_SCHEMA: u32 = 2;
+pub const SKILL_PROTOCOL: u32 = 2;
 /// Bumped whenever parsing output for identical bytes changes (invalidates parse caches).
-pub const PARSER_VERSION: u32 = 2;
+pub const PARSER_VERSION: u32 = 5;
+
+pub fn supports_document_schema(version: u32) -> bool {
+    (OLDEST_READABLE_DOCUMENT_SCHEMA..=DOCUMENT_SCHEMA).contains(&version)
+}
 
 /// Engine fingerprint the launcher passed to this build (`KBW_BUILD_FINGERPRINT`, set by
 /// `kbw` for source builds), or "unknown" for a build made outside the launcher. As an

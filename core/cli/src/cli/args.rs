@@ -64,10 +64,23 @@ pub enum ProfileArg {
 pub enum FormatArg {
     /// Compact text for agents (default)
     Compact,
+    /// Minimal tiered context; preserves every typed obligation and defers Markdown bodies
+    Terse,
     /// Verbose text for people
     Human,
     /// Versioned JSON protocol (kb.cli.v1)
     Json,
+}
+
+impl From<FormatArg> for crate::output::Format {
+    fn from(value: FormatArg) -> Self {
+        match value {
+            FormatArg::Compact => Self::Compact,
+            FormatArg::Terse => Self::Terse,
+            FormatArg::Human => Self::Human,
+            FormatArg::Json => Self::Json,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -77,6 +90,7 @@ pub enum IntentArg {
     Debug,
     Review,
     Explain,
+    Diagnose,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -97,6 +111,9 @@ pub enum HarnessArg {
     Claude,
     Codex,
     Cursor,
+    Grok,
+    Copilot,
+    Junie,
 }
 
 #[derive(Debug, Subcommand)]
@@ -107,10 +124,34 @@ pub enum Command {
     Doctor(DoctorArgs),
     /// Validate records, references, policies, schemas and routing fixtures
     Validate(ValidateArgs),
+    /// Deterministic routing and retrospective change-scope evaluation
+    #[command(subcommand)]
+    Eval(EvalCommand),
     /// Build or update the derived index
     Index(IndexArgs),
     /// Assemble task-scoped context
     Context(ContextArgs),
+    /// Inventory of context ids, reasons and token costs, capped at 2000 estimated tokens
+    Outline(ContextArgs),
+    /// Rank host modules needing domain knowledge using tracked files and Git history
+    Coverage(CoverageArgs),
+    /// Create a change work order or validate/submit a knowledge draft
+    #[command(subcommand)]
+    Propose(ProposeCommand),
+    /// Capture a reported decision, gap, quirk or scenario as a draft
+    Capture(CaptureArgs),
+    /// Stamp or check Git-backed provenance anchors
+    #[command(subcommand)]
+    Anchors(AnchorsCommand),
+    /// Queue changed or unverifiable anchored knowledge by owner
+    Drift(DriftArgs),
+    /// Report support for normative statements and sample drafts for human audit
+    Ledger(LedgerArgs),
+    /// Evaluate declared commit/branch/import/naming/API probes against a host diff
+    Verify(VerifyArgs),
+    /// Inspect private local context-delivery observations
+    #[command(subcommand)]
+    Usage(UsageCommand),
     /// Search records (not a substitute for `context`)
     Search(SearchArgs),
     /// Show a record or one of its sections
@@ -172,6 +213,12 @@ pub struct DoctorArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct ValidateArgs {
+    /// Warn when accepted verification is older than this many days at --on (or HEAD date)
+    #[arg(long)]
+    pub stale: Option<u32>,
+    /// Calendar reference YYYY-MM-DD; defaults to the host/KB commit date, never the clock
+    #[arg(long)]
+    pub on: Option<String>,
     /// Skip routing fixtures
     #[arg(long)]
     pub no_routing: bool,
@@ -196,8 +243,368 @@ pub struct IndexArgs {
     pub gc: bool,
 }
 
+#[derive(Debug, Clone, Subcommand)]
+pub enum EvalCommand {
+    /// Run routing fixtures with recall, applicability and response-size metrics
+    Routing(EvalRoutingArgs),
+    /// Evaluate first-parent host changes, including squashed merge commits
+    History(EvalHistoryArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EvalRoutingArgs {
+    #[arg(long)]
+    pub strict: bool,
+    /// Evaluate a shipped synthetic example instead of the selected profile
+    #[arg(long)]
+    pub example: Option<String>,
+    /// Renderer measured inside each context case; independent of the report's --format
+    #[arg(long, value_enum, default_value = "compact")]
+    pub context_format: FormatArg,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EvalHistoryArgs {
+    /// Inclusive end, exclusive start: BASE..HEAD (a linear first-parent history)
+    #[arg(long)]
+    pub range: String,
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    /// Optional kb.history-labels.v1 JSON export of merged MR descriptions by commit
+    #[arg(long)]
+    pub labels: Option<String>,
+    /// Filter records at each change's first parent; requires historical validity metadata
+    #[arg(long)]
+    pub as_of: bool,
+    /// Reject longer ranges instead of silently sampling them
+    #[arg(long, default_value_t = 200)]
+    pub max_changes: usize,
+    /// Fail when context or historical inputs are incomplete
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Clone, Default, Args)]
+pub struct HostRootsArgs {
+    /// Registry identity of --host (otherwise detected from the host binding/remotes)
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Additional host repository checkout, REPO=DIR (repeatable)
+    #[arg(long = "repo-root")]
+    pub repo_roots: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Args)]
+pub struct KnowledgeScopeArgs {
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    /// Record ids (default accepted records; repeatable)
+    #[arg(long = "id")]
+    pub ids: Vec<String>,
+    #[arg(long)]
+    pub include_drafts: bool,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum AnchorsCommand {
+    /// Plan source stamps for explicit records; preserve content, status and comments
+    Stamp(AnchorStampArgs),
+    /// Check declared anchors against immutable Git objects
+    Check(AnchorCheckArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AnchorStampArgs {
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    #[arg(long = "id", required = true)]
+    pub ids: Vec<String>,
+    /// Host revision; --host remains the checkout directory
+    #[arg(long, default_value = "HEAD")]
+    pub at: String,
+    /// Explicitly reported human review date; never inferred from byte checks
+    #[arg(long)]
+    pub verified_at: Option<String>,
+    #[arg(long)]
+    pub review_by: Option<String>,
+    #[arg(long)]
+    pub apply: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct AnchorCheckArgs {
+    #[command(flatten)]
+    pub scope: KnowledgeScopeArgs,
+    #[arg(long, default_value = "HEAD")]
+    pub at: String,
+    /// Also require anchors on every selected record and stamps on every path anchor
+    #[arg(long)]
+    pub strict: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DriftArgs {
+    #[command(flatten)]
+    pub scope: KnowledgeScopeArgs,
+    /// Baseline host revision/date, or each record's own verified evidence
+    #[arg(long, default_value = "verified")]
+    pub since: String,
+    #[arg(long, default_value = "HEAD")]
+    pub at: String,
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct LedgerArgs {
+    #[command(flatten)]
+    pub scope: KnowledgeScopeArgs,
+    /// Host revision to inspect; --snapshot independently selects the KB revision
+    #[arg(long, default_value = "HEAD")]
+    pub at: String,
+    #[arg(long)]
+    pub on: Option<String>,
+    #[arg(long)]
+    pub stale: Option<u32>,
+    /// Number of draft records to select reproducibly for a human audit
+    #[arg(long, default_value_t = 10)]
+    pub sample: usize,
+    #[arg(long, default_value = "0")]
+    pub seed: String,
+    /// Fail when accepted statements are stale or unverifiable
+    #[arg(long)]
+    pub check: bool,
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ProbeKindArg {
+    CommitMessage,
+    BranchName,
+    ForbiddenImport,
+    Naming,
+    BannedApi,
+}
+
+impl ProbeKindArg {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::CommitMessage => "commit-message",
+            Self::BranchName => "branch-name",
+            Self::ForbiddenImport => "forbidden-import",
+            Self::Naming => "naming",
+            Self::BannedApi => "banned-api",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct VerifyArgs {
+    #[arg(long, default_value = "HEAD")]
+    pub diff: String,
+    /// Verify a committed target (required for import graphs); default is the work tree
+    #[arg(long, conflicts_with = "staged")]
+    pub head: Option<String>,
+    /// Verify the staged index, not unstaged edits (commit-msg hook)
+    #[arg(long)]
+    pub staged: bool,
+    #[arg(long)]
+    pub repo: Option<String>,
+    #[arg(long = "id")]
+    pub ids: Vec<String>,
+    /// Pending message file supplied by a commit-msg hook; treated only as text
+    #[arg(long)]
+    pub commit_message: Option<PathBuf>,
+    /// Actual source branch supplied by CI when checking a detached commit
+    #[arg(long)]
+    pub branch: Option<String>,
+    #[arg(long, value_enum)]
+    pub only: Vec<ProbeKindArg>,
+    /// Assert this record#statement's conditions hold and no exception applies
+    #[arg(long)]
+    pub applicable: Vec<String>,
+    #[arg(long = "change-type")]
+    pub change_types: Vec<String>,
+    #[arg(long = "host-version")]
+    pub host_versions: Vec<String>,
+    /// Make advisory-level probe failures and unavailable evidence blocking too
+    #[arg(long)]
+    pub strict: bool,
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum UsageCommand {
+    Report(UsageReportArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct UsageReportArgs {
+    #[arg(long, default_value = "HEAD")]
+    pub diff: String,
+    /// Committed final target; otherwise include current work-tree changes
+    #[arg(long)]
+    pub head: Option<String>,
+    #[arg(long)]
+    pub repo: Option<String>,
+    /// Restrict to these receipts; default is all local calls for this KB/host/profile
+    #[arg(long = "receipt")]
+    pub receipts: Vec<String>,
+    #[arg(long = "change-type")]
+    pub change_types: Vec<String>,
+    #[arg(long = "host-version")]
+    pub host_versions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CodeProviderArgs {
+    /// One-shot kb.code.v1 provider program (never invoked through a shell)
+    #[arg(long, conflicts_with = "provider_files")]
+    pub provider: Option<PathBuf>,
+    #[arg(
+        long = "provider-arg",
+        requires = "provider",
+        allow_hyphen_values = true
+    )]
+    pub provider_args: Vec<String>,
+    /// Pinned provider JSON response (repeat for base/head commits)
+    #[arg(long = "provider-file", conflicts_with = "provider")]
+    pub provider_files: Vec<PathBuf>,
+    #[arg(long, default_value_t = 30)]
+    pub provider_timeout: u64,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CoverageArgs {
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    /// History window relative to the host HEAD date, or an ISO start date
+    #[arg(long, default_value = "180d")]
+    pub since: String,
+    /// Maximum ranked modules to return
+    #[arg(long, default_value_t = 20)]
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ProposeCommand {
+    /// Emit a work order from a Git revision range or an exported MR JSON file
+    Begin(ProposeBeginArgs),
+    /// Validate a draft and preview its proposal-overlay write (requires --apply to write)
+    Submit(ProposeSubmitArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProposeBeginArgs {
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    /// BASE..HEAD or a kb.change.v1 JSON export path
+    #[arg(long, value_name = "RANGE|JSON")]
+    pub from_change: String,
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ProposeSubmitArgs {
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    /// Add provider-derived consumer candidates to a contract draft (review still required)
+    #[arg(long)]
+    pub fill_consumers: bool,
+    pub file: PathBuf,
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    /// Write the validated draft; accepted status is always rejected
+    #[arg(long)]
+    pub apply: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum CaptureKind {
+    Decision,
+    Gap,
+    Quirk,
+    Scenario,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CaptureArgs {
+    #[arg(value_enum)]
+    pub kind: CaptureKind,
+    #[arg(long)]
+    pub title: String,
+    /// Caller-supplied observation or decision (not inferred by the engine)
+    #[arg(long)]
+    pub text: String,
+    /// Stable record id (default: deterministic id from the capture content)
+    #[arg(long)]
+    pub id: Option<String>,
+    /// Registry owner (can be omitted only with a single registered owner)
+    #[arg(long)]
+    pub owner: Option<String>,
+    #[command(flatten)]
+    pub hosts: HostRootsArgs,
+    #[arg(long = "module")]
+    pub modules: Vec<String>,
+    #[arg(long = "feature")]
+    pub features: Vec<String>,
+    #[arg(long = "change-type")]
+    pub change_types: Vec<String>,
+    /// Explicit product-wide scope
+    #[arg(long)]
+    pub product: bool,
+    /// Source provenance, REPO:PATH[@REV][#SYMBOL] (repeatable; default REV is HEAD)
+    #[arg(long = "anchor")]
+    pub anchors: Vec<String>,
+    /// Test-source provenance, using the same syntax as --anchor
+    #[arg(long = "test-anchor")]
+    pub test_anchors: Vec<String>,
+    /// Command reported by the caller; recorded verbatim and never executed
+    #[arg(long = "test")]
+    pub tests: Vec<String>,
+    /// Why the decision was chosen (repeatable; required for decisions)
+    #[arg(long = "reason")]
+    pub reasons: Vec<String>,
+    /// Prior situation for a decision, or scenario preconditions
+    #[arg(long)]
+    pub given: Option<String>,
+    /// Expected scenario outcome (required for scenarios)
+    #[arg(long)]
+    pub expect: Option<String>,
+    /// Explicit validity evidence, date or host commit
+    #[arg(long)]
+    pub introduced: Option<String>,
+    #[arg(long)]
+    pub apply: bool,
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct ContextArgs {
+    /// Warn when accepted verification is older than this many days at --on (or host HEAD date)
+    #[arg(long)]
+    pub stale: Option<u32>,
+    /// Explicit calendar reference YYYY-MM-DD for review deadlines and age checks
+    #[arg(long)]
+    pub on: Option<String>,
+    /// Reuse unchanged units from this explicitly supplied receipt in the same session
+    #[arg(long, value_name = "ID")]
+    pub since_receipt: Option<String>,
+    /// A loaded managed core block's receipt; verified against this snapshot and host
+    #[arg(long, value_name = "ID", requires = "core_source")]
+    pub core_receipt: Option<String>,
+    /// Host-relative instruction file from which the core receipt was loaded
+    #[arg(long, value_name = "FILE", requires = "core_receipt")]
+    pub core_source: Option<String>,
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    /// Add optional, budgeted code evidence from an explicit provider
+    #[arg(long)]
+    pub with_code: bool,
     /// Task intent
     #[arg(long, value_enum)]
     pub intent: IntentArg,
@@ -219,6 +626,29 @@ pub struct ContextArgs {
     /// Registry concept id (repeatable)
     #[arg(long = "concept")]
     pub concepts: Vec<String>,
+    /// Explicit change category (repeatable); unknown categories never silently prune rules
+    #[arg(long = "change-type")]
+    pub change_types: Vec<String>,
+    /// Scope context to a host diff (default without --base: local changes since HEAD)
+    #[arg(long)]
+    pub changed: bool,
+    /// Diff base; uses the merge-base with the selected head
+    #[arg(long, requires = "changed", value_name = "REV")]
+    pub base: Option<String>,
+    /// Diff head (default HEAD)
+    #[arg(
+        long,
+        requires = "changed",
+        conflicts_with = "working_tree",
+        value_name = "REV"
+    )]
+    pub head: Option<String>,
+    /// Include staged, unstaged and untracked files in --changed
+    #[arg(long, requires = "changed")]
+    pub working_tree: bool,
+    /// Withhold records not valid at this ISO date or host revision
+    #[arg(long, value_name = "REV|DATE", conflicts_with = "include_proposals")]
+    pub as_of: Option<String>,
     /// Numeric budget
     #[arg(long)]
     pub budget: Option<u64>,
@@ -259,6 +689,9 @@ pub struct SearchArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct ShowArgs {
+    /// Show all deferred Markdown sections without repeating the typed record
+    #[arg(long, conflicts_with_all = ["section", "raw"])]
+    pub sections: bool,
     /// Record id, optionally `id#section`
     pub id: String,
     /// Section id
@@ -277,6 +710,16 @@ pub struct SyncArgs {}
 
 #[derive(Debug, Clone, Args)]
 pub struct ImpactArgs {
+    #[command(flatten)]
+    pub code: CodeProviderArgs,
+    #[arg(long)]
+    pub deep: bool,
+    /// Incoming code-reference depth for --deep
+    #[arg(long, default_value_t = 2)]
+    pub depth: u32,
+    /// Explicit registry identity of the host
+    #[arg(long)]
+    pub repo: Option<String>,
     /// Base revision in the host repository (diff uses the merge-base with head)
     #[arg(long, value_name = "REV")]
     pub base: Option<String>,
@@ -284,7 +727,7 @@ pub struct ImpactArgs {
     #[arg(long, value_name = "REV")]
     pub head: Option<String>,
     /// Include staged, unstaged and untracked local changes
-    #[arg(long)]
+    #[arg(long, alias = "changed")]
     pub working_tree: bool,
     /// File containing the MR description with a `kb-impact` block
     #[arg(long, value_name = "FILE")]
@@ -296,6 +739,9 @@ pub struct ImpactArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct IntegrateArgs {
+    /// Verify installed files and emit a challenge for a separate real harness load probe
+    #[arg(long, conflicts_with_all = ["generate", "apply", "check", "force"])]
+    pub probe: bool,
     /// Render the KB-level skill bundle into project/skill-config/generated
     #[arg(long)]
     pub generate: bool,

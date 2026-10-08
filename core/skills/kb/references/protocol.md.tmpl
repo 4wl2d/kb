@@ -3,6 +3,7 @@
 ## Formats
 
 - default `--format compact`: dense text for agents;
+- `--format terse`: typed obligations retained; optional Markdown deferred;
 - `--format human`: verbose text for people;
 - `--json` (same as `--format json`): the versioned machine protocol `kb.cli.v1`.
 
@@ -31,17 +32,17 @@ snapshots, 30-39 context, 40-49 checks, 50-59 runtime/update, 60-69 environment.
 
 ## What `context` returns
 
-`{{kb_path}}/kbw schema` exports JSON Schemas only for the envelope, records and
-configuration files (in `core/schemas/`). No schema describes command results: the envelope
+`{{kb_path}}/kbw schema` exports JSON Schemas for the envelope, records, configuration
+and code-provider messages (in `core/schemas/`). No schema describes every command result: the envelope
 schema leaves `result` unconstrained. The context result covers:
 
 - **snapshot provenance**: profile, remote name and redacted source, `approved_ref`,
   `selection` (`latest`, `pinned`, `revision`, `working-tree`), `freshness` (`verified` or
   `unverified`), the selected `revision`, `latest_approved`, whether the revision is
   `approved`, the host `pin` if any, the proposal `overlay` if requested, `engine_version`
-  and the snapshot `key`;
+  and the snapshot `key` and content digest;
 - **scope**: resolved repositories, modules, features and concepts, and which dimensions
-  are known or unknown;
+  are known or unknown; explicit/inferred change categories remain distinct;
 - **completeness**: `complete`, `partial`, `conflict` or `incomplete`. "Complete" is
   relative to the declared, validated knowledge base; an empty knowledge base proves nothing
   about the project;
@@ -53,7 +54,13 @@ schema leaves `result` unconstrained. The context result covers:
 - **diagnostics**: warnings and errors about the snapshot or the request;
 - **receipt**: `id` (see below), included ids with reasons, `requires` edges, excluded
   candidates with reasons, undetermined obligations, warnings and source anchors.
-  `--explain` adds details (not counted in the budget).
+   `--explain` adds details (not counted in the budget).
+
+Path-free `--intent diagnose` is provisional even when discovery finds candidates. Before
+editing, request context for the actual paths or `--changed --base BASE`. `--as-of` withholds
+undated/future knowledge and keeps missing required records visible; freeze the host, KB
+and generated artifacts separately for historical replay. `--with-code` needs an explicit
+provider; its observed static facts cannot replace accepted obligations.
 
 ## Receipt id
 
@@ -64,6 +71,14 @@ different ids in `compact`, `human` and `--json`. To verify a compact or human r
 re-run the same request in the same format against the same snapshot and compare the ids.
 Only a `--json` receipt can be recomputed from the printed output.
 
+Normal CLI delivery emits `kb.receipt.v2` with snapshot and per-unit content hashes.
+`--since-receipt ID` is valid only for a response retained in this same task/session, on
+the same KB/host/profile. `--core-receipt ID --core-source FILE` also verifies the current
+managed installation. Reuse preserves applicable ids and typed content identity; only
+unchanged bodies become references. Missing/invalid proof is an error: request full
+context without reuse. After compaction, handoff or a new session, do not assume old text
+is still available. A receipt proves delivery, not compliance.
+
 ## Budget
 
 `--budget <n> --budget-unit tokens-est|bytes`. `tokens-est` is a deterministic estimate
@@ -73,7 +88,13 @@ is exact. Mandatory units are never truncated: if they do not fit, the call fail
 
 ## Other commands you may use
 
-- `show <id>` (optionally `--section <section>`, `--raw` for the authoritative file bytes);
+- `show <id>` (`--sections` for all deferred bodies, `--section <section>`, `--raw` for file bytes);
+- `outline --intent ...`: inventory only, at most 2000 estimated tokens; not a delivery receipt;
 - `search <words>`: finds records, but is not a substitute for `context`;
 - `impact --base <rev> [--working-tree]`: knowledge affected by a diff, and unknown coverage;
-- `validate`: checks records, links, policies, registries and routing tests.
+- `impact --deep --depth 2 --provider ...`: static consumers at base/head, with uncertainty;
+- `coverage`, `propose begin|submit`, `capture`: evidence-backed domain drafts;
+- `anchors check`, `drift`, `ledger`: source/freshness evidence, never semantic approval;
+- `verify --diff BASE`: declared probes; unknown conditions/import evidence cannot pass;
+- `usage report --diff BASE --receipt ID`: local delivery joined to this task's final diff;
+- `validate`, `eval routing`, `eval history`: structure, routing and labeled history evidence.

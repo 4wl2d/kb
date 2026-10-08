@@ -127,6 +127,10 @@ pub struct TaskScope {
     pub repos: DimScope,
     pub modules: DimScope,
     pub features: DimScope,
+    pub change_types: DimScope,
+    pub change_type_hints: BTreeMap<String, BTreeSet<String>>,
+    pub inferred_paths: Vec<String>,
+    pub inferred_features: Vec<String>,
     /// Resolved concepts and how each was resolved (`explicit`, `alias <key>`, ...).
     pub concepts: BTreeMap<String, BTreeSet<String>>,
     pub paths: Vec<ResolvedPath>,
@@ -151,6 +155,10 @@ pub struct TaskScope {
 /// `UNKNOWN_SCOPE` for explicit ids that are not in the registry.
 pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Result<TaskScope> {
     check_limits(req)?;
+    for id in &req.change_types {
+        crate::model::ids::check_local_id(id)
+            .map_err(|e| KbError::invalid_input(format!("--change-type {id}: {e}")))?;
+    }
     let mut notes = Vec::new();
 
     let mut unknown: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
@@ -171,11 +179,19 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
     for c in &req.concepts {
         note_unknown("concepts", c, registry.concept(c).is_some());
     }
+    for c in &req.change_types {
+        note_unknown("change_types", c, registry.change_type(c).is_some());
+    }
     for (r, _) in &req.host_versions {
         note_unknown("repos", r, registry.repo(r).is_some());
     }
     let mut specs: Vec<(Option<String>, String)> = Vec::new();
-    for spec in &req.paths {
+    if req.paths.len() + env.inferred_paths.len() > MAX_PATHS {
+        return Err(KbError::invalid_input(
+            "too many inferred paths; narrow the task or pass explicit modules",
+        ));
+    }
+    for spec in req.paths.iter().chain(&env.inferred_paths) {
         let (repo, path) = split_repo(spec);
         let path = strip_dot_slash(path);
         check_rel_path(path.trim_end_matches('/'))
@@ -229,7 +245,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
             repos.insert(module.repo.clone());
         }
     }
-    for f in &req.features {
+    for f in req.features.iter().chain(&env.inferred_features) {
         if let Some(feature) = registry.feature(f)
             && let [only] = feature.repos.as_slice()
         {
@@ -264,7 +280,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         };
         // The path as given and, when it differs, its directory form `path/`.
         let as_dir = format!("{}/", path.trim_end_matches('/'));
-        let dir_like = !is_file_like(&path);
+        let dir_like = !is_file_like(&path) && !env.known_files.contains(&path);
         let mut forms = vec![path.as_str()];
         if as_dir != path {
             forms.push(as_dir.as_str());
@@ -328,7 +344,11 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         ));
     }
 
-    let modules_dim = if (req.paths.is_empty() && req.modules.is_empty()) || !unresolved.is_empty()
+    let modules_dim = if (req.paths.is_empty()
+        && env.inferred_paths.is_empty()
+        && req.modules.is_empty()
+        && !env.changed_scope)
+        || !unresolved.is_empty()
     {
         DimScope::Unknown
     } else {
@@ -338,25 +358,35 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         }
         DimScope::Known(set)
     };
-    let features_dim =
-        if (req.features.is_empty() && req.paths.is_empty() && req.modules.is_empty())
-            || !unresolved.is_empty()
-        {
-            DimScope::Unknown
-        } else {
-            let mut set: BTreeSet<String> = req.features.iter().cloned().collect();
-            if let Some(mods) = modules_dim.known() {
-                for m in mods {
-                    if let Some(module) = registry.module(m) {
-                        set.extend(module.features.iter().cloned());
-                    }
+    let features_dim = if (req.features.is_empty()
+        && env.inferred_features.is_empty()
+        && req.paths.is_empty()
+        && env.inferred_paths.is_empty()
+        && req.modules.is_empty()
+        && !env.changed_scope)
+        || !unresolved.is_empty()
+    {
+        DimScope::Unknown
+    } else {
+        let mut set: BTreeSet<String> = req.features.iter().cloned().collect();
+        set.extend(
+            env.inferred_features
+                .iter()
+                .filter(|id| registry.feature(id).is_some())
+                .cloned(),
+        );
+        if let Some(mods) = modules_dim.known() {
+            for m in mods {
+                if let Some(module) = registry.module(m) {
+                    set.extend(module.features.iter().cloned());
                 }
             }
-            for p in &paths {
-                set.extend(p.features.iter().cloned());
-            }
-            DimScope::Known(set)
-        };
+        }
+        for p in &paths {
+            set.extend(p.features.iter().cloned());
+        }
+        DimScope::Known(set)
+    };
 
     let (foreign_modules, foreign_features) = match repos_dim.known() {
         Some(known) => (
@@ -391,6 +421,12 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
             .insert("explicit".into());
     }
     let ambiguities = match_concepts(registry, &tokens, &hint_concepts, &mut concepts);
+    let change_type_hints = super::discovery::change_type_hints(
+        registry,
+        req.task.as_deref().unwrap_or_default(),
+        &paths,
+        &env.changed_text,
+    );
 
     let mut host_versions = env.host_versions.clone();
     for (r, v) in &req.host_versions {
@@ -401,6 +437,14 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         repos: repos_dim,
         modules: modules_dim,
         features: features_dim,
+        change_types: if req.change_types.is_empty() {
+            DimScope::Unknown
+        } else {
+            DimScope::Known(req.change_types.iter().cloned().collect())
+        },
+        change_type_hints,
+        inferred_paths: env.inferred_paths.clone(),
+        inferred_features: env.inferred_features.clone(),
         concepts,
         paths,
         host_repo,
@@ -435,6 +479,7 @@ fn check_limits(req: &ContextRequest) -> Result<()> {
         ("--module", req.modules.len()),
         ("--feature", req.features.len()),
         ("--concept", req.concepts.len()),
+        ("--change-type", req.change_types.len()),
         ("--host-version", req.host_versions.len()),
     ] {
         if n > MAX_SCOPE_IDS {

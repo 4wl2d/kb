@@ -1,4 +1,4 @@
-//! Canonical typed record model (document schema 1). See docs/architecture.md §3.
+//! Canonical typed record model (document schemas 1 and 2). See docs/architecture.md §3.
 //!
 //! Every kind is a separate struct with `deny_unknown_fields`; the common fields are
 //! expanded by `record_struct!` so that the strict parser, the generated JSON Schema and
@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 // Constants referenced by `#[schemars(...)]` attributes so that the generated JSON Schema
 // states the same limits as the strict parser (`parse::check_record`).
+use super::evolution::*;
 use crate::model::ids::{
     COMMIT_PATTERN, LOCAL_ID_PATTERN, MAX_LOCAL_ID, MAX_RECORD_ID, NON_BLANK_PATTERN,
     OVERRIDE_TARGET_PATTERN, RECORD_ID_PATTERN, SINGLE_LINE_PATTERN,
@@ -140,15 +141,17 @@ pub enum Intent {
     Debug,
     Review,
     Explain,
+    Diagnose,
 }
 
 impl Intent {
-    pub const ALL: [Intent; 5] = [
+    pub const ALL: [Intent; 6] = [
         Intent::Implement,
         Intent::Refactor,
         Intent::Debug,
         Intent::Review,
         Intent::Explain,
+        Intent::Diagnose,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -157,6 +160,7 @@ impl Intent {
             Intent::Debug => "debug",
             Intent::Review => "review",
             Intent::Explain => "explain",
+            Intent::Diagnose => "diagnose",
         }
     }
     pub fn parse(s: &str) -> Option<Intent> {
@@ -203,6 +207,11 @@ pub struct Scope {
     #[serde(default)]
     #[schemars(extend("uniqueItems" = true), length(max = MAX_LIST_LEN))]
     pub features: Vec<String>,
+    /// Change categories. An unknown task category must never exclude an obligation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(extend("uniqueItems" = true), length(max = MAX_LIST_LEN),
+        inner(regex(pattern = LOCAL_ID_PATTERN), length(max = MAX_LOCAL_ID)))]
+    pub change_types: Vec<String>,
 }
 
 impl Scope {
@@ -344,6 +353,8 @@ pub struct Anchor {
     pub change: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stamp: Option<AnchorStamp>,
 }
 
 /// An exception to a statement. Exceptions are part of normative content.
@@ -376,6 +387,9 @@ pub struct Statement {
     pub conditions: Vec<String>,
     #[serde(default)]
     pub exceptions: Vec<Exception>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))]
+    pub verify: Vec<VerifyProbe>,
 }
 
 /// A contract obligation: a statement bound to a declared party.
@@ -398,6 +412,9 @@ pub struct Obligation {
     pub conditions: Vec<String>,
     #[serde(default)]
     pub exceptions: Vec<Exception>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))]
+    pub verify: Vec<VerifyProbe>,
 }
 
 /// A simple identified text item (behaviors, boundaries, steps).
@@ -661,8 +678,8 @@ macro_rules! record_struct {
         #[serde(deny_unknown_fields)]
         $(#[$m])*
         pub struct $name {
-            /// Document schema version (must be 1).
-            #[schemars(extend("const" = 1))]
+            /// Document schema version. New optional fields require schema 2.
+            #[schemars(extend("enum" = [1, 2]))]
             pub schema: u32,
             /// Stable namespaced id; the first segment is the profile namespace.
             #[schemars(regex(pattern = RECORD_ID_PATTERN), length(max = MAX_RECORD_ID))]
@@ -684,6 +701,18 @@ macro_rules! record_struct {
             pub applicability: Option<Applicability>,
             #[serde(default, skip_serializing_if = "Vec::is_empty")]
             pub anchors: Vec<Anchor>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[schemars(regex(pattern = TEMPORAL_PATTERN))]
+            pub introduced: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[schemars(regex(pattern = TEMPORAL_PATTERN))]
+            pub retired: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[schemars(regex(pattern = DATE_PATTERN))]
+            pub verified_at: Option<String>,
+            #[serde(default, skip_serializing_if = "Option::is_none")]
+            #[schemars(regex(pattern = DATE_PATTERN))]
+            pub review_by: Option<String>,
             $($(#[$fattr])* pub $field: $fty,)*
         }
     };
@@ -701,6 +730,7 @@ record_struct!(
     #[serde(default)] #[schemars(length(max = MAX_LIST_LEN))] rules: Vec<Statement>,
     #[serde(default)] settings: Vec<Setting>,
     #[serde(default)] overrides: Vec<Override>,
+    #[serde(default, skip_serializing_if = "Delivery::is_scoped")] delivery: Delivery,
 });
 
 record_struct!(
@@ -713,6 +743,18 @@ record_struct!(
     #[schemars(length(min = 1, max = MAX_LIST_LEN))]
     behaviors: Vec<Item>,
     #[serde(default)] #[schemars(length(max = MAX_LIST_LEN))] boundaries: Vec<Item>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] states: Vec<Item>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] transitions: Vec<Transition>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] scenarios: Vec<Scenario>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN), inner(regex(pattern = NON_BLANK_PATTERN), length(max = MAX_TEXT_BYTES)))]
+    clocks: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN), inner(regex(pattern = NON_BLANK_PATTERN), length(max = MAX_TEXT_BYTES)))]
+    data_sources: Vec<String>,
 });
 
 record_struct!(
@@ -720,6 +762,7 @@ record_struct!(
     InvariantRecord, InvariantKind {
     #[schemars(length(min = 1, max = MAX_LIST_LEN))]
     statements: Vec<Statement>,
+    #[serde(default, skip_serializing_if = "Delivery::is_scoped")] delivery: Delivery,
 });
 
 record_struct!(
@@ -732,6 +775,10 @@ record_struct!(
     interface: Option<String>,
     #[schemars(length(min = 1))]
     obligations: Vec<Obligation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] scenarios: Vec<Scenario>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] consumers: Vec<Consumer>,
 });
 
 record_struct!(
@@ -779,6 +826,8 @@ record_struct!(
     #[schemars(regex(pattern = NON_BLANK_PATTERN), length(max = MAX_TEXT_BYTES))]
     summary: String,
     #[serde(default)] sources: Vec<SourceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(length(max = MAX_LIST_LEN))] terms: Vec<Term>,
 });
 
 record_struct!(
@@ -831,6 +880,10 @@ pub struct Common<'a> {
     pub links: &'a Links,
     pub applicability: Option<&'a Applicability>,
     pub anchors: &'a [Anchor],
+    pub introduced: Option<&'a str>,
+    pub retired: Option<&'a str>,
+    pub verified_at: Option<&'a str>,
+    pub review_by: Option<&'a str>,
 }
 
 macro_rules! common_of {
@@ -847,6 +900,10 @@ macro_rules! common_of {
             links: &$r.links,
             applicability: $r.applicability.as_ref(),
             anchors: &$r.anchors,
+            introduced: $r.introduced.as_deref(),
+            retired: $r.retired.as_deref(),
+            verified_at: $r.verified_at.as_deref(),
+            review_by: $r.review_by.as_deref(),
         }
     };
 }
@@ -877,6 +934,14 @@ impl Record {
         self.common().status
     }
 
+    pub fn delivery(&self) -> Delivery {
+        match self {
+            Self::Policy(p) => p.delivery,
+            Self::Invariant(i) => i.delivery,
+            _ => Delivery::Scoped,
+        }
+    }
+
     /// Lightweight metadata used for routing, validation and indexing.
     pub fn meta(&self, sections: Vec<String>) -> RecordMeta {
         let c = self.common();
@@ -891,6 +956,10 @@ impl Record {
             links: c.links.clone(),
             applicability: c.applicability.cloned(),
             anchors: c.anchors.to_vec(),
+            consumers: match self {
+                Self::Contract(k) => k.consumers.clone(),
+                _ => Vec::new(),
+            },
             settings: Vec::new(),
             overrides: Vec::new(),
             parties: Vec::new(),
@@ -905,6 +974,13 @@ impl Record {
             }
             Record::Contract(k) => meta.parties = k.parties.clone(),
             Record::Feature(f) => meta.feature = Some(f.feature.clone()),
+            Record::Reference(r) if !r.terms.is_empty() => {
+                meta.selectors
+                    .aliases
+                    .extend(r.terms.iter().map(|t| t.term.clone()));
+                meta.selectors.aliases.sort();
+                meta.selectors.aliases.dedup();
+            }
             Record::Gap(g) => meta.gap_affects = g.affects.clone(),
             _ => {}
         }
@@ -931,6 +1007,7 @@ impl Record {
                     conditions: &o.conditions,
                     exceptions: &o.exceptions,
                     party: Some(&o.party),
+                    verify: &o.verify,
                 })
                 .collect(),
             _ => Vec::new(),
@@ -946,6 +1023,7 @@ pub struct NormativeRef<'a> {
     pub conditions: &'a [String],
     pub exceptions: &'a [Exception],
     pub party: Option<&'a str>,
+    pub verify: &'a [VerifyProbe],
 }
 
 impl<'a> NormativeRef<'a> {
@@ -957,6 +1035,7 @@ impl<'a> NormativeRef<'a> {
             conditions: &s.conditions,
             exceptions: &s.exceptions,
             party: None,
+            verify: &s.verify,
         }
     }
 }
@@ -978,6 +1057,8 @@ pub struct RecordMeta {
     pub applicability: Option<Applicability>,
     #[serde(default)]
     pub anchors: Vec<Anchor>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumers: Vec<Consumer>,
     #[serde(default)]
     pub settings: Vec<Setting>,
     #[serde(default)]

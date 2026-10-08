@@ -1,0 +1,6 @@
+schema = 2
+
+[[concept]]
+id = "auth-token"
+title = "Authentication token"
+aliases = ["token", "токен*"]

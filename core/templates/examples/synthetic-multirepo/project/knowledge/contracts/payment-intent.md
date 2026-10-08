@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.contract.payment-intent"
 kind = "contract"
 title = "Idempotent payment intents between checkout and payments"

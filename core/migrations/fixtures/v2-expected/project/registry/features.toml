@@ -1,0 +1,6 @@
+schema = 2
+
+[[feature]]
+id = "login"
+title = "Login"
+repos = ["mobile", "backend"]

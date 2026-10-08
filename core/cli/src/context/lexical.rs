@@ -1,5 +1,5 @@
-//! Derived search data for one parsed record: FTS columns, path-selector rows and term
-//! rows; plus safe FTS5 query construction and snapshot-local ranking.
+//! Pure search data and scoring shared by the SQLite adapter and temporal views.
+//! No filesystem or database access occurs here.
 
 use crate::glob::RepoGlob;
 use crate::model::{Exception, Item, ParsedRecord, Record};
@@ -106,6 +106,20 @@ pub fn fts_columns(p: &ParsedRecord) -> FtsColumns {
             norm.push(&r.summary);
             norm.items(&mut ids, &r.behaviors);
             norm.items(&mut ids, &r.boundaries);
+            norm.items(&mut ids, &r.states);
+            norm.all(&r.clocks);
+            norm.all(&r.data_sources);
+            for t in &r.transitions {
+                ids.push(&t.id);
+                norm.push(&t.from);
+                norm.push(&t.to);
+                norm.push(&t.when);
+            }
+            for s in &r.scenarios {
+                ids.push(&s.id);
+                norm.push(&s.given);
+                norm.push(&s.expect);
+            }
         }
         Record::Invariant(r) => {
             for s in &r.statements {
@@ -120,6 +134,16 @@ pub fn fts_columns(p: &ParsedRecord) -> FtsColumns {
             }
             for o in &r.obligations {
                 norm.statement(&mut ids, &o.id, &o.text, &o.conditions, &o.exceptions);
+            }
+            for s in &r.scenarios {
+                ids.push(&s.id);
+                norm.push(&s.given);
+                norm.push(&s.expect);
+            }
+            for c in &r.consumers {
+                norm.push(&c.repo);
+                norm.push(&c.path);
+                norm.all(&c.symbol);
             }
         }
         Record::Decision(r) => {
@@ -141,6 +165,11 @@ pub fn fts_columns(p: &ParsedRecord) -> FtsColumns {
             norm.push(&r.summary);
             for s in &r.sources {
                 norm.push(&s.title);
+            }
+            for t in &r.terms {
+                aliases.push(&t.term);
+                norm.push(&t.meaning);
+                norm.push(&t.source);
             }
         }
         Record::Gap(r) => {
@@ -203,7 +232,8 @@ pub struct TermRow {
 /// their first token; single-token prefix aliases by the prefix (a small set scanned in
 /// Rust, since a prefix cannot be looked up by token equality).
 pub fn term_rows(p: &ParsedRecord) -> Vec<TermRow> {
-    let sel = p.record.common().selectors;
+    let meta = p.meta();
+    let sel = &meta.selectors;
     let mut rows: Vec<TermRow> = sel
         .concepts
         .iter()
@@ -249,6 +279,52 @@ pub fn fts_string(token: &str) -> String {
 /// BM25 parameters (the FTS5 defaults).
 const K1: f64 = 1.2;
 const B: f64 = 0.75;
+
+/// Rank a filtered corpus using the same binary-term BM25 formula as IndexView.
+/// Statistics are computed after filtering, so future records cannot alter past rankings.
+pub fn rank_corpus(
+    docs: &std::collections::BTreeMap<String, FtsColumns>,
+    terms: &[String],
+    limit: usize,
+) -> Vec<String> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let terms = query_tokens(terms, 64);
+    if limit == 0 || terms.is_empty() || docs.is_empty() {
+        return Vec::new();
+    }
+    let avg = docs.values().map(|d| d.tokens as f64).sum::<f64>() / docs.len() as f64;
+    let vocabulary: BTreeMap<_, BTreeSet<_>> = docs
+        .iter()
+        .map(|(id, d)| {
+            (
+                id,
+                [&d.ids, &d.title, &d.aliases, &d.normative, &d.body]
+                    .into_iter()
+                    .flat_map(|s| s.split_whitespace())
+                    .collect(),
+            )
+        })
+        .collect();
+    let mut scores: BTreeMap<&String, f64> = BTreeMap::new();
+    for term in terms {
+        let hits: Vec<_> = vocabulary
+            .iter()
+            .filter(|(_, v)| v.contains(term.as_str()))
+            .map(|(id, _)| *id)
+            .collect();
+        let weight = idf(docs.len(), hits.len());
+        for id in hits {
+            *scores.entry(id).or_default() += term_weight(weight, docs[id].tokens as f64, avg);
+        }
+    }
+    let mut ranked: Vec<_> = scores.into_iter().collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0)));
+    ranked
+        .into_iter()
+        .take(limit)
+        .map(|(id, _)| id.clone())
+        .collect()
+}
 
 /// Inverse document frequency of a term matched by `df` of `n` snapshot documents.
 pub fn idf(n: usize, df: usize) -> f64 {

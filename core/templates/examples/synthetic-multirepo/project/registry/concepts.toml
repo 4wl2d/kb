@@ -1,7 +1,7 @@
 # SYNTHETIC EXAMPLE concepts with English and Russian aliases.
 # `композици*` is deliberately shared by two concepts: without a path hint, a task about
 # "композиция" is reported as ambiguous instead of being guessed.
-schema = 1
+schema = 2
 
 [[concept]]
 id = "auth-token"

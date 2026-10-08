@@ -20,8 +20,8 @@ use super::blocks::{
     BLOCK_NAME, append_block, find_block, normalize_content, remove_block, replace_inner,
 };
 use super::generate::{
-    AGENTS_SKILL_DIR, BundleManifest, CLAUDE_SKILL_DIR, MANIFEST_FILE, SKILL_PREFIX, generated_dir,
-    load_bundle, load_settings, render_bundle,
+    AGENTS_SKILL_DIR, BundleManifest, CLAUDE_SKILL_DIR, GROK_SKILL_DIR, MANIFEST_FILE,
+    PORTABLE_SKILL_DIR, SKILL_PREFIX, generated_dir, load_bundle, load_settings, render_bundle,
 };
 use super::{Action, Change, prune_empty_dirs};
 use crate::diag::Diagnostic;
@@ -46,6 +46,8 @@ pub struct IntegrationLock {
     pub skill_protocol: u32,
     pub engine_version: String,
     pub harnesses: Vec<Harness>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_receipt: Option<String>,
     #[serde(default, rename = "file")]
     pub files: Vec<LockedFile>,
     #[serde(default, rename = "block")]
@@ -187,15 +189,29 @@ fn parse_lock(bytes: &[u8]) -> Result<IntegrationLock> {
 }
 
 /// Instruction files that may carry a kb block.
-const MANAGED_BLOCK_FILES: [&str; 2] = ["AGENTS.md", "CLAUDE.md"];
+const MANAGED_BLOCK_FILES: [&str; 5] = [
+    "AGENTS.md",
+    "CLAUDE.md",
+    "AGENTS.override.md",
+    ".junie/AGENTS.md",
+    ".github/copilot-instructions.md",
+];
 
 /// Is `path` inside one of the skill directories kb installs?
 fn managed_file_path(path: &str) -> bool {
     crate::util::check_rel_path(path).is_ok()
-        && [AGENTS_SKILL_DIR, CLAUDE_SKILL_DIR].iter().any(|d| {
-            path.strip_prefix(d)
-                .is_some_and(|r| r.len() > 1 && r.starts_with('/'))
-        })
+        && (matches!(path, ".cursor/rules/kb.mdc" | ".claude/commands/kb.md")
+            || [
+                AGENTS_SKILL_DIR,
+                CLAUDE_SKILL_DIR,
+                GROK_SKILL_DIR,
+                PORTABLE_SKILL_DIR,
+            ]
+            .iter()
+            .any(|d| {
+                path.strip_prefix(d)
+                    .is_some_and(|r| r.len() > 1 && r.starts_with('/'))
+            }))
 }
 
 /// Planned host installation.
@@ -310,6 +326,12 @@ pub fn plan_install(
             }
         }
     }
+    for file in &layout.files {
+        let bytes = bundle.files.get(file.bundle_file).ok_or_else(|| {
+            KbError::invalid_input(format!("bundle is missing {}", file.bundle_file))
+        })?;
+        desired.insert(file.host_file.into(), bytes);
+    }
     let mut paths: BTreeSet<String> = desired.keys().cloned().collect();
     if let Some(l) = &lock {
         paths.extend(l.files.iter().map(|f| f.path.clone()));
@@ -338,6 +360,9 @@ pub fn plan_install(
     // Managed blocks.
     let mut block_targets: BTreeMap<String, Option<Vec<u8>>> = BTreeMap::new();
     for b in &layout.blocks {
+        if b.only_if_exists && read_host_file(host_root, b.host_file)?.is_none() {
+            continue;
+        }
         let content = bundle.files.get(b.bundle_file).ok_or_else(|| {
             KbError::new(
                 ErrorCode::DriftDetected,
@@ -363,6 +388,11 @@ pub fn plan_install(
                 e
             }
         })?;
+        if want.is_some()
+            && let Some(bytes) = &current
+        {
+            super::generate::check_size(file, bytes)?;
+        }
         let span = match &current {
             Some(c) => find_block(c, BLOCK_NAME).map_err(|e| {
                 KbError::invalid_input(format!("`{file}`: {e}")).with_hint(
@@ -391,6 +421,7 @@ pub fn plan_install(
             _ => None,
         };
         if let Some(b) = new_bytes {
+            super::generate::check_size(file, &b)?;
             writes.push((file.clone(), b));
         }
         if let Some(w) = want {
@@ -414,6 +445,7 @@ pub fn plan_install(
         skill_protocol: bundle.manifest.skill_protocol,
         engine_version: bundle.manifest.engine_version.clone(),
         harnesses: bundle.manifest.harnesses.clone(),
+        core_receipt: bundle.manifest.core.as_ref().map(|c| c.digest.clone()),
         files: desired
             .iter()
             .map(|(p, b)| LockedFile {
@@ -450,7 +482,7 @@ fn install_warnings(
     bundle: &super::Bundle,
 ) -> Vec<Diagnostic> {
     let mut w = Vec::new();
-    match load_settings(kb_root, loc).and_then(|(c, s)| render_bundle(kb_root, &c, &s)) {
+    match load_settings(kb_root, loc).and_then(|(c, s)| render_bundle(kb_root, &c, &s, loc)) {
         Ok(fresh) if &fresh == bundle => {}
         Ok(_) => w.push(
             Diagnostic::warning(
@@ -635,6 +667,7 @@ mod tests {
             skill_protocol: 1,
             engine_version: "0.1.0".into(),
             harnesses: vec![Harness::Claude],
+            core_receipt: None,
             files: vec![LockedFile {
                 path: ".claude/skills/kb/SKILL.md".into(),
                 sha256: "00".into(),

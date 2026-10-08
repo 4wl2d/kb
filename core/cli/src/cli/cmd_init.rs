@@ -15,6 +15,9 @@ fn harness_of(h: HarnessArg) -> Harness {
         HarnessArg::Claude => Harness::Claude,
         HarnessArg::Codex => Harness::Codex,
         HarnessArg::Cursor => Harness::Cursor,
+        HarnessArg::Grok => Harness::Grok,
+        HarnessArg::Copilot => Harness::Copilot,
+        HarnessArg::Junie => Harness::Junie,
     }
 }
 

@@ -1,9 +1,8 @@
 //! Schema migrations (`kb migrate`): a registry of transforms between adjacent document
 //! schema versions for records, the profile config and registry files.
 //!
-//! The only historical step is 0 → 1 from `kb-legacy-synthetic-v0`, a synthetic
-//! pre-release format that was never published; it exists to exercise the machinery with
-//! real transformations (see `core/migrations/README.md`).
+//! The synthetic pre-release 0 → 1 step exercises structural transforms; 1 → 2 adds
+//! optional domain knowledge without inventing content (see `core/migrations/README.md`).
 //!
 //! Migration reads the working tree directly, so it also works when
 //! [`crate::corpus::load_config`] rejects a legacy profile config. Every file is transformed
@@ -22,8 +21,8 @@ use crate::corpus::{is_record_path, parse_config};
 use crate::diag::Diagnostic;
 use crate::error::{ErrorCode, KbError, Result};
 use crate::model::registry::{
-    ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, REGISTRY_FILES, ReposFile,
-    parse_registry_file,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, REGISTRY_FILES,
+    ReposFile, parse_registry_file,
 };
 use crate::model::{Profile, ProfileConfig, ProfileLocation};
 use crate::parse::{parse_record, split_front_matter};
@@ -62,18 +61,61 @@ impl Migration {
 }
 
 /// The migration registry, ordered by `from`.
-pub static MIGRATIONS: &[Migration] = &[Migration {
-    from: 0,
-    to: 1,
-    name: "v0-to-v1",
-    description: "kb-legacy-synthetic-v0 to document schema 1: `type` -> `kind`, `state` -> \
+pub static MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 0,
+        to: 1,
+        name: "v0-to-v1",
+        description: "kb-legacy-synthetic-v0 to document schema 1: `type` -> `kind`, `state` -> \
                   `status`, `[applies_to]` -> `[scope]`, tags/depends_on/see_also/replaces -> \
                   selectors/links, policy `[[rule]]` -> `[[rules]]`, config `[kb]`/`[origin]` \
                   -> `[project]`/`[source]`, registry schema bump",
-    record: v0::record,
-    config: v0::config,
-    registry: v0::registry,
-}];
+        record: v0::record,
+        config: v0::config,
+        registry: v0::registry,
+    },
+    Migration {
+        from: 1,
+        to: 2,
+        name: "v1-to-v2",
+        description: "document schema 2: optional domain, provenance, temporal and delivery fields; preserves content and defaults",
+        record: v1_record,
+        config: v1_document,
+        registry: v1_document,
+    },
+];
+
+fn v1_document(text: &str) -> std::result::Result<String, String> {
+    let mut doc = text.parse::<DocumentMut>().map_err(|e| e.to_string())?;
+    let item = doc.get_mut("schema").ok_or("missing `schema` field")?;
+    if item.as_integer() != Some(1) {
+        return Err("expected schema 1".into());
+    }
+    let value = item.as_value_mut().ok_or("invalid `schema` value")?;
+    let decor = value.decor().clone();
+    *value = Value::from(2);
+    *value.decor_mut() = decor;
+    Ok(doc.to_string())
+}
+
+fn v1_record(text: &str) -> std::result::Result<String, String> {
+    // Validate before changing the declaration: mislabeled v2 fields must not gain trust.
+    parse_record("migration-input", text.as_bytes()).map_err(|d| {
+        d.iter()
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    let (fm, _, _) = split_front_matter(text)?;
+    let start = fm.as_ptr() as usize - text.as_ptr() as usize;
+    let end = start + fm.len();
+    Ok(format!(
+        "{}{}{}",
+        &text[..start],
+        v1_document(fm)?,
+        &text[end..]
+    ))
+}
 
 /// Oldest schema version this engine can migrate from.
 pub fn oldest_supported() -> u32 {
@@ -625,8 +667,8 @@ fn verify(
     target: u32,
 ) -> std::result::Result<(), (Vec<String>, Vec<Diagnostic>)> {
     let fail = |m: String| Err((vec![m], Vec::new()));
-    if target != DOCUMENT_SCHEMA {
-        // Intermediate targets cannot be parsed by this engine; check the declared schema.
+    if !crate::versions::supports_document_schema(target) {
+        // Unreadable intermediate targets can only be checked for the declared schema.
         let schema = match kind {
             FileKind::Record => record_schema(text),
             _ => toml::from_str::<toml::Table>(text)
@@ -665,6 +707,9 @@ fn verify(
                 }
                 "concepts.toml" => {
                     parse_registry_file::<ConceptsFile>(path, text).map(|f| f.schema)
+                }
+                "change-types.toml" => {
+                    parse_registry_file::<ChangeTypesFile>(path, text).map(|f| f.schema)
                 }
                 _ => return fail(format!("`{name}` is not a registry file")),
             };
@@ -1375,7 +1420,9 @@ text = \"Rotate keys.\"\n";
         assert_eq!(chain(0, 1).unwrap().len(), 1);
         assert!(chain(1, 1).unwrap().is_empty());
         assert!(chain(1, 0).is_none());
-        assert!(chain(0, 2).is_none());
+        assert_eq!(chain(0, 2).unwrap().len(), 2);
+        assert_eq!(chain(1, 2).unwrap().len(), 1);
+        assert!(chain(0, 3).is_none());
         assert_eq!(oldest_supported(), 0);
     }
 

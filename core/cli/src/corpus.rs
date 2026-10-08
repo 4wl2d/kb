@@ -8,7 +8,8 @@ use std::sync::Arc;
 use crate::diag::{Diagnostic, normalize};
 use crate::error::{ErrorCode, KbError, Result};
 use crate::model::registry::{
-    ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile, parse_registry_file,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile,
+    parse_registry_file,
 };
 use crate::model::{ParsedRecord, ProfileConfig, ProfileLocation, Registry, RegistryData};
 use crate::parse::parse_record;
@@ -73,7 +74,7 @@ pub fn parse_config(path: &str, bytes: &[u8]) -> Result<ProfileConfig> {
         .map_err(|_| KbError::new(ErrorCode::ConfigInvalid, format!("`{path}` is not UTF-8")))?;
     if let Ok(t) = toml::from_str::<toml::Table>(text)
         && let Some(v) = t.get("schema").and_then(|v| v.as_integer())
-        && v != crate::versions::DOCUMENT_SCHEMA as i64
+        && !u32::try_from(v).is_ok_and(crate::versions::supports_document_schema)
     {
         return Err(KbError::new(
             ErrorCode::UnsupportedSchemaVersion,
@@ -147,7 +148,9 @@ pub fn load_registry(
                 match std::str::from_utf8(&bytes) {
                     Ok(text) => match parse_registry_file::<$ty>(&path, text) {
                         Ok(f) => {
-                            if f.schema != crate::versions::DOCUMENT_SCHEMA {
+                            if !crate::versions::supports_document_schema(f.schema)
+                                || ($file == "change-types.toml" && f.schema != 2)
+                            {
                                 diags.push(
                                     Diagnostic::error(
                                         "UNSUPPORTED_SCHEMA_VERSION",
@@ -176,6 +179,12 @@ pub fn load_registry(
     load!("modules.toml", ModulesFile, modules, module);
     load!("features.toml", FeaturesFile, features, feature);
     load!("concepts.toml", ConceptsFile, concepts, concept);
+    load!(
+        "change-types.toml",
+        ChangeTypesFile,
+        change_types,
+        change_type
+    );
     let registry = Registry::new(data);
     diags.extend(registry.validate().into_iter().map(|mut d| {
         if let Some(p) = &d.path {

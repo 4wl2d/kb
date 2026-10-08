@@ -15,10 +15,52 @@ use crate::error::{KbError, Result};
 use crate::glob::split_repo;
 use crate::host::{self, HostContext};
 use crate::knowledge::{KnowledgeView, SnapshotInfo};
-use crate::model::{BudgetUnit, Intent, Registry};
+use crate::model::{BudgetUnit, Intent, Kind, Registry};
 use crate::output::CommandOutput;
 
 pub fn run(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
+    run_inner(ctx, args, false)
+}
+
+pub fn outline(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
+    if args.since_receipt.is_some()
+        || args.core_receipt.is_some()
+        || args.explain
+        || !matches!(args.sections, SectionsArg::None)
+    {
+        return Err(KbError::invalid_input(
+            "outline lists inventory; receipt reuse, --explain and --sections apply to context/show",
+        ));
+    }
+    run_inner(ctx, args, true)
+}
+
+fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutput> {
+    if args
+        .on
+        .as_deref()
+        .is_some_and(|date| crate::model::date_days(date).is_none())
+    {
+        return Err(KbError::invalid_input("--on must be YYYY-MM-DD"));
+    }
+    if ctx.format == crate::output::Format::Terse
+        && (args.explain || !matches!(args.sections, SectionsArg::None))
+    {
+        return Err(KbError::invalid_input(
+            "terse context defers Markdown and explanations; use show --sections or another format",
+        ));
+    }
+    let provider = super::code_options::provider(ctx, &args.code);
+    if args.with_code && !provider.configured() {
+        return Err(KbError::invalid_input(
+            "--with-code needs --provider or --provider-file",
+        ));
+    }
+    if !args.with_code && provider.configured() {
+        return Err(KbError::invalid_input(
+            "provider options on context require --with-code",
+        ));
+    }
     // Validate local input before any Git or network work.
     let host_versions = args
         .host_versions
@@ -26,6 +68,17 @@ pub fn run(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
         .map(|s| context::parse_host_version(s))
         .collect::<Result<Vec<_>>>()?;
     let host = session::detect_host(ctx)?;
+    let receipt_subject = crate::receipts::subject(
+        &ctx.env,
+        host.as_ref().map(|h| h.root.as_path()),
+        ctx.location()?.profile.as_str(),
+    );
+    let previous = args
+        .since_receipt
+        .as_ref()
+        .map(|id| crate::receipts::load(&ctx.env.cache_dir, id, &receipt_subject))
+        .transpose()?
+        .unwrap_or_default();
     let cwd = ctx
         .env
         .cwd
@@ -38,25 +91,209 @@ pub fn run(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
         .collect::<Result<Vec<_>>>()?;
 
     let mut req = ContextRequest::new(intent(args.intent));
+    req.stale = args.stale;
+    if args.stale.is_some_and(|days| days > 365_000) {
+        return Err(KbError::invalid_input(
+            "--stale must be at most 365000 days",
+        ));
+    }
     req.task = args.task.clone();
     req.repos = args.repos.clone();
     req.paths = paths;
     req.modules = args.modules.clone();
     req.features = args.features.clone();
     req.concepts = args.concepts.clone();
+    req.change_types = args.change_types.clone();
     req.budget = args.budget;
     req.budget_unit = args.budget_unit.map(budget_unit);
     req.include_proposals = args.include_proposals;
     req.sections = sections(args.sections);
     req.max_supplementary = args.max_supplementary;
     req.host_versions = host_versions;
+    if outline {
+        req.budget = Some(100_000_000);
+        req.budget_unit = Some(BudgetUnit::TokensEst);
+    }
+
+    let diff = if args.changed {
+        let h = host
+            .as_ref()
+            .ok_or_else(|| KbError::invalid_input("--changed needs a host repository (--host)"))?;
+        let working = args.working_tree || (args.base.is_none() && args.head.is_none());
+        let diff = crate::impact::host_diff(
+            &h.root,
+            args.base.as_deref().unwrap_or("HEAD"),
+            args.head.as_deref(),
+            working,
+            h.kb_submodule_path.as_deref(),
+        )?;
+        for file in &diff.files {
+            req.paths.push(file.path.clone());
+            req.paths.extend(file.old_path.iter().cloned());
+        }
+        req.paths.sort();
+        req.paths.dedup();
+        req.change = Some(context::ChangeScope {
+            base: diff.base.clone(),
+            merge_base: diff.merge_base.clone(),
+            head: diff.head.clone(),
+            working_tree: working,
+        });
+        Some(diff)
+    } else {
+        None
+    };
+    let changed_text = match (&host, &diff) {
+        (Some(h), Some(diff)) => host::facts::diff_text(&h.root, diff)?,
+        _ => String::new(),
+    };
 
     let mut s = Session::open(ctx, host, Options::reading(ctx, args.include_proposals))?;
     let host = s.host.clone();
     let info = s.info.clone();
     let format = ctx.format;
     let result = s.with_view(|view| {
-        let env = task_env(host.as_ref(), view.registry(), info.clone());
+        let mut env = task_env(host.as_ref(), view.registry(), info.clone());
+        env.delivery.since_receipt = args.since_receipt.clone();
+        env.delivery.previous = previous.clone();
+        if let (Some(id), Some(source)) = (&args.core_receipt, &args.core_source) {
+            if args.as_of.is_some() { return Err(KbError::invalid_input("historical context must not reuse a current always-on core; use a frozen, clean replay environment")); }
+            let host = host.as_ref().ok_or_else(|| KbError::invalid_input("--core-receipt needs a host repository"))?;
+            env.delivery.core = crate::integrate::core::verify_installed(&ctx.env.kb_root, &ctx.location()?, &host.root, id, source, view)?;
+            env.delivery.core_receipt = Some(id.clone());
+        }
+        let mut req = req.clone();
+        if env.host_repo.is_none()
+            && let [repo] = req.repos.as_slice()
+            && view.registry().repo(repo).is_some()
+        {
+            env.host_repo = Some(repo.clone());
+            env.host_repo_source = Some("argument".into());
+        }
+        if let Some(diff) = &diff {
+            env.changed_scope = true;
+            env.changed_text = changed_text.clone();
+            for file in &diff.files {
+                env.known_files.insert(file.path.clone());
+                env.known_files.extend(file.old_path.iter().cloned());
+            }
+            if let Some(head) = &diff.head {
+                env.host_head = Some(head.clone());
+            }
+        }
+        if let Some(requested) = &args.as_of {
+            let ids = view
+                .metas_by_kind(&Kind::ALL, crate::knowledge::Origin::Accepted)?
+                .into_iter()
+                .map(|e| e.meta.id.clone())
+                .collect::<Vec<_>>();
+            let records = view.records(&ids, crate::knowledge::Origin::Accepted)?;
+            req.as_of = Some(host::facts::resolve_as_of(
+                host.as_ref().map(|h| h.root.as_path()),
+                requested,
+                &records,
+            )?);
+        }
+        let selected_revision = req
+            .as_of
+            .as_ref()
+            .and_then(|p| p.host_revision.as_deref())
+            .or_else(|| diff.as_ref().and_then(|d| d.head.as_deref()));
+        if req.as_of.is_some() {
+            env.host_head = req.as_of.as_ref().and_then(|p| p.host_revision.clone());
+            // Never use the current work-tree version for historical applicability.
+            env.host_versions.clear();
+        }
+        if let Some(h) = &host {
+            if let Some(rev) = selected_revision
+                && let Some(repo) = &env.host_repo
+                && let Some(file) = view
+                    .registry()
+                    .repo(repo)
+                    .and_then(|r| r.version_file.as_deref())
+                && let Some(bytes) = host::facts::blob_at(&h.root, rev, file, 64 * 1024)?
+                && let Ok(text) = std::str::from_utf8(&bytes)
+                && let Some(line) = text.lines().next()
+                && let Ok(version) = semver::Version::parse(line.trim().trim_start_matches('v'))
+            {
+                env.host_versions.insert(repo.clone(), version);
+            }
+            if let Some(task) = req.task.as_deref().filter(|t| !t.is_empty()) {
+                let files = if req.as_of.is_some() && selected_revision.is_none() {
+                    Vec::new()
+                } else {
+                    host::facts::tracked_files(&h.root, selected_revision)?
+                };
+                let candidates = context::discovery::identifier_paths(task, &files);
+                for path in candidates {
+                    if h.kb_submodule_path
+                        .as_ref()
+                        .is_some_and(|kb| path == *kb || path.starts_with(&format!("{kb}/")))
+                    {
+                        continue;
+                    }
+                    env.known_files.insert(path.clone());
+                    env.inferred_paths.push(path);
+                }
+            }
+        }
+        let on = args.on.as_deref().or_else(|| req.as_of.as_ref().map(|p| p.date.as_str()));
+        if let (Some(on), Some(point)) = (&args.on, &req.as_of) && *on != point.date {
+            return Err(KbError::invalid_input("historical freshness --on must match the --as-of date"));
+        }
+        let date_root = host.as_ref().map(|h| h.root.as_path()).unwrap_or(&ctx.env.kb_root);
+        let date_rev = if host.is_some() { selected_revision.unwrap_or("HEAD") } else { info.revision.as_deref().unwrap_or("HEAD") };
+        env.reference_date = host::facts::reference_date(date_root, date_rev, on)?;
+        if args.with_code {
+            let h = host
+                .as_ref()
+                .ok_or_else(|| KbError::invalid_input("--with-code needs --host"))?;
+            let repo = env.host_repo.as_deref().ok_or_else(|| {
+                KbError::invalid_input("--with-code needs an identified host repo")
+            })?;
+            if req.as_of.is_some() && selected_revision.is_none() {
+                return Err(KbError::invalid_input(
+                    "no host commit exists at the historical code point",
+                ));
+            }
+            let mut code_request = crate::code::request(
+                &h.root,
+                repo,
+                selected_revision.unwrap_or("HEAD"),
+                crate::model::CodeOperation::Symbols,
+            )?;
+            code_request.task = req.task.clone();
+            code_request.paths = req
+                .paths
+                .iter()
+                .filter_map(|p| {
+                    let (qualified, path) = split_repo(p);
+                    (qualified.is_none() || qualified == Some(repo)).then(|| path.to_string())
+                })
+                .collect();
+            code_request.paths.extend(env.inferred_paths.clone());
+            code_request.paths.sort();
+            code_request.paths.dedup();
+            let response = provider.load(&code_request)?;
+            let inferred =
+                crate::code::paths_for_task(&response, req.task.as_deref().unwrap_or_default());
+            env.known_files.extend(inferred.iter().cloned());
+            env.inferred_paths.extend(inferred);
+            env.inferred_paths.sort();
+            env.inferred_paths.dedup();
+            env.code_units = crate::code::brief(&response, &code_request, 8)?;
+            let digest = crate::util::sha256_hex(
+                context::canonical_json(&serde_json::to_value(&response)?).as_bytes(),
+            );
+            env.code_info = Some(context::code::CodeInfo {
+                repo: response.repo,
+                commit: response.commit,
+                tool: response.tool,
+                complete: response.complete,
+                limitations: response.limitations,
+                digest,
+            });
+        }
         context::assemble(&req, &env, view, format)
     })?;
     ctx.env.progress(format!(
@@ -65,6 +302,38 @@ pub fn run(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
         result.footer.counts.mandatory + result.footer.counts.dependencies,
         result.footer.counts.supplementary
     ));
+    if outline {
+        let unit = args
+            .budget_unit
+            .map(budget_unit)
+            .unwrap_or(BudgetUnit::TokensEst);
+        let limit = args.budget.unwrap_or(if unit == BudgetUnit::Bytes {
+            8000
+        } else {
+            2000
+        });
+        let (value, text) = context::outline::render(&result, format, limit, unit)?;
+        let mut out = CommandOutput::new(value, text);
+        if result.status() != context::Completeness::Complete {
+            out = out.with_failure(KbError::new(
+                crate::error::ErrorCode::ContextIncomplete,
+                "outline has the snapshot/scope limitations listed in result",
+            ));
+        }
+        return Ok(s.finish(out));
+    }
+    if let Err(error) = crate::receipts::save(&ctx.env.cache_dir, &receipt_subject, &result) {
+        s.note(crate::diag::Diagnostic::warning(
+            "RECEIPT_NOT_SAVED",
+            error.message,
+        ));
+    }
+    if let Err(error) = crate::usage::append(&ctx.env.cache_dir, &receipt_subject, &result) {
+        s.note(crate::diag::Diagnostic::warning(
+            "USAGE_NOT_LOGGED",
+            error.message,
+        ));
+    }
     let mut out = CommandOutput::new(
         context::to_json(&result, args.explain),
         context::render(&result, format, args.explain),
@@ -213,6 +482,7 @@ fn intent(a: IntentArg) -> Intent {
         IntentArg::Debug => Intent::Debug,
         IntentArg::Review => Intent::Review,
         IntentArg::Explain => Intent::Explain,
+        IntentArg::Diagnose => Intent::Diagnose,
     }
 }
 

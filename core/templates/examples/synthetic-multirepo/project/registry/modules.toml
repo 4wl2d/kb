@@ -1,5 +1,5 @@
 # SYNTHETIC EXAMPLE modules.
-schema = 1
+schema = 2
 
 [[module]]
 id = "mobile.auth"

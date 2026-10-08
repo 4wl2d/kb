@@ -90,6 +90,7 @@ fn working_tree_snapshot(key: &str) -> SnapshotInfo {
         overlay: None,
         engine_version: kb::versions::ENGINE_VERSION.into(),
         key: key.into(),
+        content_digest: None,
     }
 }
 

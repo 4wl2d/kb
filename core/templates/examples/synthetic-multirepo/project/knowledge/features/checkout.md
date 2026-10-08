@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.feature.checkout"
 kind = "feature"
 title = "Checkout: pay for the cart once"

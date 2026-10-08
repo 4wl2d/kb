@@ -1,0 +1,25 @@
+[package]
+name = "kb-eval"
+version = "0.1.0"
+description = "Optional, isolated and preregistered coding-agent replay kit"
+default-run = "kb-eval"
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+kb = { path = "../cli" }
+clap.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+
+[[bin]]
+name = "kb-eval-fixture"
+path = "tests/fixtures/agent.rs"
+test = false
+
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true

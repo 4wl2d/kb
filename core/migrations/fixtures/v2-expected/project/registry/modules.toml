@@ -1,0 +1,15 @@
+schema = 2
+
+[[module]]
+id = "mobile.auth"
+repo = "mobile"
+title = "Mobile authentication"
+paths = ["app/auth/**"]
+features = ["login"]
+
+[[module]]
+id = "backend.api"
+repo = "backend"
+title = "Backend API"
+paths = ["src/api/**"]
+features = ["login"]

@@ -1,12 +1,14 @@
 +++
 # Record template: contract between modules or repositories. PLACEHOLDER TEXT.
-schema = 1
+schema = 2
 id = "example.template.contract"
 kind = "contract"
 title = "Placeholder: interface between two parties"
 status = "draft"
 owner = "architecture"
 interface = "Placeholder: endpoint, event or schema name"
+consumers = [{ repo = "mobile", path = "app/auth/Placeholder.kt", symbol = "Placeholder" }]
+scenarios = [{ id = "missing-reply", given = "Placeholder: the provider has not replied.", expect = "Placeholder: the consumer does not infer success." }]
 
 [scope]
 modules = ["mobile.auth", "backend.api"]

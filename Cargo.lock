@@ -457,7 +457,9 @@ dependencies = [
  "clap",
  "globset",
  "jsonschema",
+ "libc",
  "proptest",
+ "regex",
  "rusqlite",
  "schemars",
  "semver",
@@ -477,6 +479,30 @@ dependencies = [
  "kb",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "kb-code-provider"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "kb",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "kb-eval"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "kb",
+ "libc",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

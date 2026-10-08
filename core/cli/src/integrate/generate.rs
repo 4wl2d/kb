@@ -41,6 +41,10 @@ pub const CLAUDE_BLOCK_FILE: &str = "blocks/CLAUDE.md.block";
 /// Host-relative install locations.
 pub const CLAUDE_SKILL_DIR: &str = ".claude/skills/kb";
 pub const AGENTS_SKILL_DIR: &str = ".agents/skills/kb";
+pub const GROK_SKILL_DIR: &str = ".grok/skills/kb";
+pub const PORTABLE_SKILL_DIR: &str = ".kbw/skills/kb";
+pub const CURSOR_RULE_FILE: &str = "rules/cursor.mdc";
+pub const CLAUDE_COMMAND_FILE: &str = "commands/claude-kb.md";
 
 pub const BUNDLE_SCHEMA: u32 = 1;
 pub const SKILL_CONFIG_SCHEMA: u32 = 1;
@@ -105,7 +109,7 @@ pub fn parse_skill_config(path: &str, bytes: &[u8]) -> Result<SkillConfig> {
     }
     let mut problems = Vec::new();
     if cfg.harnesses.is_empty() {
-        problems.push("harnesses must list at least one of claude, codex, cursor".to_string());
+        problems.push("harnesses must list at least one supported harness".to_string());
     }
     let mut sorted = cfg.harnesses.clone();
     sorted.sort();
@@ -136,40 +140,59 @@ pub struct BlockTarget {
     pub bundle_file: &'static str,
     /// KB-root-relative block template.
     pub source: &'static str,
+    /// Augment an existing overriding instruction file, but never create one that would
+    /// mask pre-existing root instructions.
+    pub only_if_exists: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FileTarget {
+    pub host_file: &'static str,
+    pub bundle_file: &'static str,
+    pub source: &'static str,
 }
 
 /// Where the skill and blocks go for a set of harnesses.
 ///
-/// * Claude Code reads `.claude/skills/<name>/SKILL.md` and `CLAUDE.md`.
-/// * Codex reads `.agents/skills/<name>/SKILL.md` and `AGENTS.md`.
-/// * Cursor reads `.agents/skills`, `.cursor/skills` and, for compatibility, `.claude/skills`
-///   and `.codex/skills`; it also reads `AGENTS.md`. With Claude Code enabled, Cursor
-///   therefore uses `.claude/skills` and no `.agents/skills` copy is made for it.
+/// Exactly one full skill is selected: agents (Codex/Cursor), Claude, Grok, then portable.
+/// Every enabled harness receives a native workflow/pointer target; mixed Claude keeps
+/// a short `/kb` command alias instead of a second full skill. See the generated harness
+/// reference for loading contracts, masking overrides, byte caps and runtime probe limits.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Layout {
     /// Host-relative skill directories, sorted.
     pub skill_dirs: Vec<&'static str>,
     /// Managed blocks, sorted by host file.
     pub blocks: Vec<BlockTarget>,
+    pub files: Vec<FileTarget>,
+    pub primary_source: &'static str,
 }
 
 pub fn layout(harnesses: &[Harness]) -> Layout {
     let claude = harnesses.contains(&Harness::Claude);
     let codex = harnesses.contains(&Harness::Codex);
     let cursor = harnesses.contains(&Harness::Cursor);
-    let mut skill_dirs = Vec::new();
-    if codex || (cursor && !claude) {
-        skill_dirs.push(AGENTS_SKILL_DIR);
-    }
-    if claude {
-        skill_dirs.push(CLAUDE_SKILL_DIR);
-    }
+    let grok = harnesses.contains(&Harness::Grok);
+    let copilot = harnesses.contains(&Harness::Copilot);
+    let junie = harnesses.contains(&Harness::Junie);
+    // Exactly one physical skill, even when a harness discovers several compatibility
+    // directories. Every instruction target names this canonical path explicitly.
+    let skill_dirs = vec![if codex || cursor {
+        AGENTS_SKILL_DIR
+    } else if claude {
+        CLAUDE_SKILL_DIR
+    } else if grok {
+        GROK_SKILL_DIR
+    } else {
+        PORTABLE_SKILL_DIR
+    }];
     let mut blocks = Vec::new();
-    if codex || cursor {
+    if codex || grok || junie {
         blocks.push(BlockTarget {
             host_file: "AGENTS.md",
             bundle_file: AGENTS_BLOCK_FILE,
             source: AGENTS_BLOCK_SOURCE,
+            only_if_exists: false,
         });
     }
     if claude {
@@ -177,9 +200,74 @@ pub fn layout(harnesses: &[Harness]) -> Layout {
             host_file: "CLAUDE.md",
             bundle_file: CLAUDE_BLOCK_FILE,
             source: CLAUDE_BLOCK_SOURCE,
+            only_if_exists: false,
         });
     }
-    Layout { skill_dirs, blocks }
+    if codex {
+        blocks.push(BlockTarget {
+            host_file: "AGENTS.override.md",
+            bundle_file: "blocks/AGENTS.override.md.block",
+            source: AGENTS_BLOCK_SOURCE,
+            only_if_exists: true,
+        });
+    }
+    if junie {
+        blocks.push(BlockTarget {
+            host_file: ".junie/AGENTS.md",
+            bundle_file: "blocks/JUNIE.md.block",
+            source: AGENTS_BLOCK_SOURCE,
+            only_if_exists: true,
+        });
+    }
+    if copilot {
+        blocks.push(BlockTarget {
+            host_file: ".github/copilot-instructions.md",
+            bundle_file: "blocks/COPILOT.md.block",
+            source: AGENTS_BLOCK_SOURCE,
+            only_if_exists: false,
+        });
+    }
+    let primary_source = if codex || grok || junie {
+        "AGENTS.md"
+    } else if claude {
+        "CLAUDE.md"
+    } else if copilot {
+        ".github/copilot-instructions.md"
+    } else {
+        ".cursor/rules/kb.mdc"
+    };
+    let mut files = if cursor {
+        vec![FileTarget {
+            host_file: ".cursor/rules/kb.mdc",
+            bundle_file: CURSOR_RULE_FILE,
+            source: "core/skills/blocks/cursor.mdc.tmpl",
+        }]
+    } else {
+        Vec::new()
+    };
+    if claude && skill_dirs[0] != CLAUDE_SKILL_DIR {
+        files.push(FileTarget {
+            host_file: ".claude/commands/kb.md",
+            bundle_file: CLAUDE_COMMAND_FILE,
+            source: "core/skills/blocks/claude-command.md.tmpl",
+        });
+    }
+    blocks.sort_by_key(|b| b.host_file);
+    Layout {
+        skill_dirs,
+        blocks,
+        files,
+        primary_source,
+    }
+}
+
+/// Conservative kb budgets, not claims about a vendor's complete prompt allowance.
+pub fn instruction_byte_cap(path: &str) -> usize {
+    match path {
+        ".github/copilot-instructions.md" => 4000,
+        ".cursor/rules/kb.mdc" => 8000,
+        _ => 16 * 1024,
+    }
 }
 
 /// `generated/manifest.toml`.
@@ -191,6 +279,10 @@ pub struct BundleManifest {
     pub engine_version: String,
     pub harnesses: Vec<Harness>,
     pub kb_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core: Option<super::core::CoreBundle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub core_source: Option<String>,
     #[serde(default, rename = "file")]
     pub files: Vec<BundleFile>,
 }
@@ -242,11 +334,7 @@ fn skill_vars(config: &ProfileConfig, skill: &SkillConfig, layout: &Layout) -> V
         SkillSnapshot::Latest => " --snapshot latest",
         SkillSnapshot::Pinned => " --snapshot pinned",
     };
-    let agents_dir = if layout.skill_dirs.contains(&AGENTS_SKILL_DIR) {
-        AGENTS_SKILL_DIR
-    } else {
-        CLAUDE_SKILL_DIR
-    };
+    let agents_dir = layout.skill_dirs[0];
     let notes = skill
         .notes
         .as_deref()
@@ -262,7 +350,8 @@ fn skill_vars(config: &ProfileConfig, skill: &SkillConfig, layout: &Layout) -> V
         .text("default_intent", skill.default_intent.as_str())
         .text("notes", notes)
         .text("agents_skill_path", format!("{agents_dir}/SKILL.md"))
-        .text("claude_skill_path", format!("{CLAUDE_SKILL_DIR}/SKILL.md"))
+        .text("claude_skill_path", format!("{agents_dir}/SKILL.md"))
+        .text("core_source", layout.primary_source)
         .fragment("snapshot_arg", snapshot_arg);
     v
 }
@@ -272,6 +361,7 @@ pub fn render_bundle(
     kb_root: &Path,
     config: &ProfileConfig,
     skill: &SkillConfig,
+    loc: &ProfileLocation,
 ) -> Result<Bundle> {
     check_display_name(&config.project.name)
         .map_err(|e| KbError::new(ErrorCode::ConfigInvalid, format!("project.name: {e}")))?;
@@ -279,7 +369,39 @@ pub fn render_bundle(
     harnesses.sort();
     harnesses.dedup();
     let layout = layout(&harnesses);
-    let vars = skill_vars(config, skill, &layout);
+    let mut vars = skill_vars(config, skill, &layout);
+    let source = WorkingTreeSource::new(kb_root);
+    let core = if source.read_path(&loc.config)?.is_some() {
+        let corpus = crate::corpus::load_corpus(&source, loc)?;
+        if corpus.diagnostics.iter().any(|d| d.is_error()) {
+            return Err(KbError::new(
+                ErrorCode::ValidationFailed,
+                "cannot render a core from an invalid corpus",
+            )
+            .with_diagnostics(corpus.diagnostics));
+        }
+        super::core::build(corpus.records().map(|(_, parsed)| &parsed.record))?
+    } else {
+        None
+    };
+    vars.fragment(
+        "core_lines",
+        core.as_ref().map(|c| c.text()).unwrap_or_default(),
+    )
+    .fragment(
+        "core_arg",
+        core.as_ref()
+            .map(|c| {
+                format!(
+                    " --core-receipt {} --core-source {}",
+                    c.digest, layout.primary_source
+                )
+            })
+            .unwrap_or_default(),
+    );
+    let workflow = render_one(kb_root, "core/skills/blocks/workflow.md.tmpl", &vars)?.bytes;
+    let workflow = String::from_utf8(workflow)
+        .map_err(|_| KbError::internal("workflow template is not UTF-8"))?;
     let mut files = BTreeMap::new();
     for f in render_dir(kb_root, SKILL_SOURCE_DIR, &vars)? {
         files.insert(format!("{SKILL_PREFIX}{}", f.path), f.bytes);
@@ -291,11 +413,26 @@ pub fn render_bundle(
         ));
     }
     for b in &layout.blocks {
-        let r = render_one(kb_root, b.source, &vars)?;
+        let mut block_vars = vars.clone();
+        block_vars.fragment("managed_instructions", if b.host_file == layout.primary_source { workflow.clone() } else { format!("## Engineering knowledge base (kb)\n\nRead `{}` for the kb workflow and any always-on core before working. It is the single instruction source shared by the configured harnesses.\n", layout.primary_source) });
+        let r = render_one(kb_root, b.source, &block_vars)?;
+        check_size(b.host_file, &r.bytes)?;
         files.insert(
             b.bundle_file.to_string(),
             super::blocks::normalize_content(&r.bytes),
         );
+    }
+    for f in &layout.files {
+        let mut rule_vars = vars.clone();
+        rule_vars.fragment("managed_instructions", if f.host_file == layout.primary_source { workflow.clone() } else if f.bundle_file == CLAUDE_COMMAND_FILE { format!("Read `{}` and follow `{}/SKILL.md` for this task.\n", layout.primary_source, layout.skill_dirs[0]) } else { format!("Read `{}` for the kb workflow and always-on core. Consult it once; do not load another copy of the kb skill.\n", layout.primary_source) });
+        let rendered = render_one(kb_root, f.source, &rule_vars)?;
+        check_size(f.host_file, &rendered.bytes)?;
+        files.insert(f.bundle_file.into(), rendered.bytes);
+    }
+    if files[SKILL_FILE].len() > 16 * 1024 {
+        return Err(KbError::invalid_input(
+            "generated skill exceeds the 16 KiB cap; shorten project notes or use lazy references",
+        ));
     }
     let manifest = BundleManifest {
         schema: BUNDLE_SCHEMA,
@@ -303,6 +440,8 @@ pub fn render_bundle(
         engine_version: ENGINE_VERSION.to_string(),
         harnesses,
         kb_path: skill.kb_path.clone(),
+        core_source: core.as_ref().map(|_| layout.primary_source.into()),
+        core,
         files: files
             .iter()
             .map(|(p, b)| BundleFile {
@@ -314,13 +453,32 @@ pub fn render_bundle(
     Ok(Bundle { manifest, files })
 }
 
+pub fn check_size(path: &str, bytes: &[u8]) -> Result<()> {
+    let cap = instruction_byte_cap(path);
+    if bytes.len() > cap {
+        return Err(KbError::invalid_input(format!(
+            "{path} needs {} bytes; kb's instruction-file cap is {cap}; split or shorten the instructions without dropping obligations",
+            bytes.len()
+        )));
+    }
+    Ok(())
+}
+
 /// Is `path` a file kb may install from a bundle?
 fn allowed_bundle_path(path: &str) -> bool {
     crate::util::check_rel_path(path).is_ok()
         && !path.ends_with('/')
         && (path.starts_with(SKILL_PREFIX)
             || path == AGENTS_BLOCK_FILE
-            || path == CLAUDE_BLOCK_FILE)
+            || path == CLAUDE_BLOCK_FILE
+            || matches!(
+                path,
+                "blocks/AGENTS.override.md.block"
+                    | "blocks/JUNIE.md.block"
+                    | "blocks/COPILOT.md.block"
+                    | CURSOR_RULE_FILE
+                    | CLAUDE_COMMAND_FILE
+            ))
 }
 
 /// Load the committed bundle of a profile and verify every file against its manifest.
@@ -422,7 +580,7 @@ impl GeneratePlan {
 /// Compare the rendered bundle with `generated/` on disk.
 pub fn plan_generate(kb_root: &Path, loc: &ProfileLocation) -> Result<GeneratePlan> {
     let (config, skill) = load_settings(kb_root, loc)?;
-    let bundle = render_bundle(kb_root, &config, &skill)?;
+    let bundle = render_bundle(kb_root, &config, &skill, loc)?;
     let dir = generated_dir(loc);
     let src = WorkingTreeSource::new(kb_root);
     let (existing, issues) = src.list(std::slice::from_ref(&dir))?;
@@ -490,14 +648,15 @@ mod tests {
     fn layout_avoids_duplicate_skill_dirs() {
         use Harness::*;
         let l = layout(&[Claude, Cursor]);
-        assert_eq!(l.skill_dirs, vec![CLAUDE_SKILL_DIR]);
+        assert_eq!(l.skill_dirs, vec![AGENTS_SKILL_DIR]);
         let files: Vec<_> = l.blocks.iter().map(|b| b.host_file).collect();
-        assert_eq!(files, vec!["AGENTS.md", "CLAUDE.md"]);
+        assert_eq!(files, vec!["CLAUDE.md"]);
+        assert_eq!(l.files[0].host_file, ".cursor/rules/kb.mdc");
         assert_eq!(layout(&[Cursor]).skill_dirs, vec![AGENTS_SKILL_DIR]);
         assert_eq!(layout(&[Codex]).skill_dirs, vec![AGENTS_SKILL_DIR]);
         assert_eq!(
             layout(&[Claude, Codex, Cursor]).skill_dirs,
-            vec![AGENTS_SKILL_DIR, CLAUDE_SKILL_DIR]
+            vec![AGENTS_SKILL_DIR]
         );
         let claude_only = layout(&[Claude]);
         assert_eq!(claude_only.blocks.len(), 1);

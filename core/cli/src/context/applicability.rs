@@ -28,6 +28,7 @@ pub enum Dim {
     Repos,
     Modules,
     Features,
+    ChangeTypes,
     Version,
 }
 
@@ -37,6 +38,7 @@ impl Dim {
             Dim::Repos => "repos",
             Dim::Modules => "modules",
             Dim::Features => "features",
+            Dim::ChangeTypes => "change_types",
             Dim::Version => "version",
         }
     }
@@ -141,8 +143,30 @@ pub fn evaluate_required(meta: &RecordMeta, task: &TaskScope) -> Applicability {
 }
 
 fn evaluate_with(meta: &RecordMeta, task: &TaskScope, skip_foreign_unknown: bool) -> Applicability {
+    evaluate_parts(
+        &meta.scope,
+        meta.applicability.as_ref(),
+        task,
+        skip_foreign_unknown,
+    )
+}
+
+/// Evaluate a saved declaration without fabricating a full record (local usage joins).
+pub fn evaluate_saved_scope(
+    scope: &crate::model::Scope,
+    versions: Option<&crate::model::Applicability>,
+    task: &TaskScope,
+) -> Applicability {
+    evaluate_parts(scope, versions, task, true)
+}
+
+fn evaluate_parts(
+    s: &crate::model::Scope,
+    versions: Option<&crate::model::Applicability>,
+    task: &TaskScope,
+    skip_foreign_unknown: bool,
+) -> Applicability {
     let mut a = Applicability::default();
-    let s = &meta.scope;
     if s.product {
         a.product = true;
     } else {
@@ -162,7 +186,24 @@ fn evaluate_with(meta: &RecordMeta, task: &TaskScope, skip_foreign_unknown: bool
             Some(&task.foreign_features),
         );
     }
-    if let Some(app) = &meta.applicability {
+    if !task.change_types.is_known()
+        && s.change_types
+            .iter()
+            .any(|t| task.change_type_hints.contains_key(t))
+    {
+        a.matched.insert(Dim::ChangeTypes);
+        a.scope_notes
+            .push("change type inferred from positive task/path evidence".into());
+    } else {
+        dimension(
+            &mut a,
+            Dim::ChangeTypes,
+            &s.change_types,
+            &task.change_types,
+            None,
+        );
+    }
+    if let Some(app) = versions {
         for (repo, req) in &app.versions {
             let host = task.host_versions.get(repo);
             if skip_foreign_unknown
@@ -255,6 +296,7 @@ mod tests {
                     .collect(),
             }),
             anchors: vec![],
+            consumers: vec![],
             settings: vec![],
             overrides: vec![],
             parties: vec![],
@@ -273,6 +315,10 @@ mod tests {
             repos: dim(repos),
             modules: dim(modules),
             features: DimScope::Unknown,
+            change_types: DimScope::Unknown,
+            change_type_hints: BTreeMap::new(),
+            inferred_paths: Vec::new(),
+            inferred_features: Vec::new(),
             concepts: BTreeMap::new(),
             paths: vec![],
             host_repo: None,
@@ -293,7 +339,28 @@ mod tests {
             repos: repos.iter().map(|s| s.to_string()).collect(),
             modules: modules.iter().map(|s| s.to_string()).collect(),
             features: vec![],
+            change_types: vec![],
         }
+    }
+
+    #[test]
+    fn change_types_are_conservative_when_unknown_and_precise_when_explicit() {
+        let mut s = Scope {
+            product: true,
+            ..Default::default()
+        };
+        s.change_types = vec!["migration".into()];
+        let record = meta(s, &[]);
+        let mut request = task(Some(&["mobile"]), Some(&["mobile.auth"]));
+        let unresolved = evaluate(&record, &request);
+        assert_eq!(unresolved.verdict(), Verdict::Undetermined);
+        assert!(unresolved.undetermined.contains(&Dim::ChangeTypes));
+        request.change_types = DimScope::Known(["migration".into()].into_iter().collect());
+        assert_eq!(evaluate(&record, &request).verdict(), Verdict::Applies);
+        request.change_types = DimScope::Known(["ui-test".into()].into_iter().collect());
+        let excluded = evaluate(&record, &request);
+        assert_eq!(excluded.verdict(), Verdict::NotApplicable);
+        assert!(excluded.not_applicable.contains(&Dim::ChangeTypes));
     }
 
     #[test]

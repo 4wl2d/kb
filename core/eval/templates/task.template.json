@@ -1,0 +1,23 @@
+{
+  "protocol": "kb.eval.task.v1",
+  "id": "synthetic-task-replace-me",
+  "repository": "../host",
+  "base": "0000000000000000000000000000000000000000",
+  "golden": "1111111111111111111111111111111111111111",
+  "as_of": "0000000000000000000000000000000000000000",
+  "history": "ancestors",
+  "prompt": "SYNTHETIC PLACEHOLDER: replace with a prompt recoverable before the fix, without future code or test hints.",
+  "hidden": "./hidden",
+  "hidden_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "build": [{"program":"/path/to/product-build-tool","args":["build-offline"],"timeout_seconds":600}],
+  "regression": [{"program":"/path/to/product-build-tool","args":["regression-offline"],"timeout_seconds":600}],
+  "test": [{"program":"/path/to/product-build-tool","args":["hidden-tests-offline"],"timeout_seconds":600}],
+  "quality": [
+    {"id":"behavior","text":"Replace with the concrete required behavior and observable failure condition.","weight":2.0},
+    {"id":"edge-cases","text":"Replace with the relevant, independently specified boundary cases.","weight":1.0,"metric":"edge_cases"}
+  ],
+  "rules": [
+    {"id":"project-rule","text":"Replace with one applicable rule whose compliance is observable in the frozen judge packet.","weight":1.0}
+  ],
+  "judge_context": []
+}

@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.mobile.single-refresh"
 kind = "invariant"
 title = "At most one token refresh in flight per session"

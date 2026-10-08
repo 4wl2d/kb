@@ -2,19 +2,27 @@
 //! `fn run(ctx: &Ctx, args: &Args) -> Result<CommandOutput>`.
 
 pub mod args;
+mod cmd_capture;
 mod cmd_context;
+mod cmd_coverage;
 mod cmd_doctor;
+mod cmd_eval;
 mod cmd_impact;
 mod cmd_index;
 mod cmd_init;
 mod cmd_integrate;
 mod cmd_migrate;
+mod cmd_propose;
 mod cmd_schema;
 mod cmd_search;
 mod cmd_show;
 mod cmd_sync;
+mod cmd_trust;
 mod cmd_update;
+mod cmd_usage;
 mod cmd_validate;
+mod cmd_verify;
+mod code_options;
 mod session;
 
 use std::time::Instant;
@@ -62,6 +70,7 @@ fn format_of(g: &GlobalOpts) -> Format {
     match g.format {
         Some(FormatArg::Json) => Format::Json,
         Some(FormatArg::Human) => Format::Human,
+        Some(FormatArg::Terse) => Format::Terse,
         _ => Format::Compact,
     }
 }
@@ -71,8 +80,18 @@ fn command_name(c: &Command) -> &'static str {
         Command::Init(_) => "init",
         Command::Doctor(_) => "doctor",
         Command::Validate(_) => "validate",
+        Command::Eval(_) => "eval",
         Command::Index(_) => "index",
         Command::Context(_) => "context",
+        Command::Outline(_) => "outline",
+        Command::Coverage(_) => "coverage",
+        Command::Propose(_) => "propose",
+        Command::Capture(_) => "capture",
+        Command::Anchors(_) => "anchors",
+        Command::Drift(_) => "drift",
+        Command::Ledger(_) => "ledger",
+        Command::Verify(_) => "verify",
+        Command::Usage(_) => "usage",
         Command::Search(_) => "search",
         Command::Show(_) => "show",
         Command::Sync(_) => "sync",
@@ -169,8 +188,18 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
         Command::Init(a) => cmd_init::run(&ctx, a),
         Command::Doctor(a) => cmd_doctor::run(&ctx, a),
         Command::Validate(a) => cmd_validate::run(&ctx, a),
+        Command::Eval(a) => cmd_eval::run(&ctx, a),
         Command::Index(a) => cmd_index::run(&ctx, a),
         Command::Context(a) => cmd_context::run(&ctx, a),
+        Command::Outline(a) => cmd_context::outline(&ctx, a),
+        Command::Coverage(a) => cmd_coverage::run(&ctx, a),
+        Command::Propose(a) => cmd_propose::run(&ctx, a),
+        Command::Capture(a) => cmd_capture::run(&ctx, a),
+        Command::Anchors(a) => cmd_trust::anchors(&ctx, a),
+        Command::Drift(a) => cmd_trust::drift(&ctx, a),
+        Command::Ledger(a) => cmd_trust::ledger(&ctx, a),
+        Command::Verify(a) => cmd_verify::run(&ctx, a),
+        Command::Usage(a) => cmd_usage::run(&ctx, a),
         Command::Search(a) => cmd_search::run(&ctx, a),
         Command::Show(a) => cmd_show::run(&ctx, a),
         Command::Sync(a) => cmd_sync::run(&ctx, a),

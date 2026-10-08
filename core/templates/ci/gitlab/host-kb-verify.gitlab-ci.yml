@@ -1,0 +1,15 @@
+# Host template. Include from .gitlab-ci.yml. Configure read access to the pinned KB and
+# add a commit-bound provider for import probes. Unavailable evidence is a failed check.
+kb-verify:
+  image: rust:1
+  variables:
+    KB_PATH: ".kb"
+    GIT_DEPTH: "0"
+    GIT_SUBMODULE_STRATEGY: none
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+  script:
+    - git submodule update --init -- "$KB_PATH"
+    - (cd "$KB_PATH" && rustup toolchain install)
+    - '"$KB_PATH/kbw" --kbw-bootstrap'
+    - '"$KB_PATH/kbw" verify --diff "$CI_MERGE_REQUEST_DIFF_BASE_SHA" --head "$CI_COMMIT_SHA" --branch "$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME" --snapshot pinned --strict'

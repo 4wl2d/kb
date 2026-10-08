@@ -1,0 +1,11 @@
+schema = 2
+
+[[repo]]
+id = "mobile"
+title = "Mobile app"
+remotes = ["example.invalid/legacy/mobile"]
+
+[[repo]]
+id = "backend"
+title = "Backend service"
+remotes = ["example.invalid/legacy/backend"]

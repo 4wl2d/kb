@@ -1,6 +1,6 @@
 # Product features. `repos` lists the repositories implementing the feature; `paths` are
 # optional globs (qualify with `repo:` when the feature spans repositories).
-schema = 1
+schema = 2
 
 # [[feature]]
 # id = "login"

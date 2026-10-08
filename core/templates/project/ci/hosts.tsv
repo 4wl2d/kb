@@ -1,0 +1,5 @@
+# Pinned evidence checkouts provisioned by the team's CI, one tab-separated row per repo:
+# registry-id<TAB>local-checkout-path<TAB>full-expected-HEAD-SHA
+# Paths may contain spaces; tabs/newlines are not supported. No credentials here.
+# Configure checkout jobs with read-only access. Missing mappings leave external anchors
+# unverifiable and the evidence gate fails; no job silently treats them as supported.

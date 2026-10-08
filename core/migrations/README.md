@@ -7,18 +7,23 @@ lives in `core/cli/src/migrate.rs` (registry `MIGRATIONS`); integration tests li
 ## Version history (honest statement)
 
 Document schema `1` is the first schema served by this engine. There is **no earlier
-published format**. The only registered step, `v0-to-v1` (schema `0` → `1`), migrates from
+published format**. The historical step `v0-to-v1` (schema `0` → `1`) migrates from
 `kb-legacy-synthetic-v0`: a **synthetic** pre-release format defined below solely to
 exercise the migration machinery with real transformations. It was never published, never
 shipped by any release and never used by a real project. `core/release.toml` lists it in
-`migrates_from = [0]` for that reason only.
+`migrates_from = [0, 1]`: 0 is synthetic; 1 is the published format.
+
+Schema `2` adds optional domain models, scenarios, consumers, glossary terms, temporal
+validity, freshness, delivery, change categories, anchor stamps and verification probes.
+The `v1-to-v2` step only changes schema declarations. Defaults are absent, never invented.
+Schema-1 records remain readable before migration; new fields require schema 2.
 
 ## Using `kb migrate`
 
 ```sh
 kbw migrate                # dry-run: per-file plan and unified diff, writes nothing
 kbw migrate --apply        # transform, verify, then write
-kbw migrate --to 1         # explicit target (default: the engine's document schema)
+kbw migrate --to 2         # explicit target (default: the engine's document schema)
 kbw --json migrate         # machine-readable plan (kb.cli.v1 envelope)
 ```
 
@@ -136,12 +141,15 @@ anything the schema-1 parser does not accept.
   transformation above (config, all five registries, all four states, present / empty /
   absent `[applies_to]`, every renamed list, `must` and `must_not` rules, comments and a
   body containing a TOML code block).
-* `fixtures/v1-expected/project/` — the exact expected output of `kb migrate --apply`. Tests
+* `fixtures/v1-expected/project/` — the exact expected output of `kb migrate --to 1 --apply`. Tests
   compare it byte-for-byte, check that it loads under the current engine without
   diagnostics, and that re-applying changes nothing. `kb update prepare` tests migrate the
   same legacy project on an update branch.
 
-Both fixtures are synthetic (`legacy` namespace, `example.invalid` remotes) and are never
+* `fixtures/v2-expected/project/` — output of the adjacent 1 → 2 step and the default
+  0 → 1 → 2 chain. Tests compare bytes, retain schema-1 semantics and check idempotence.
+
+All fixtures are synthetic (`legacy` namespace, `example.invalid` remotes) and are never
 indexed as project data.
 
 ## Adding a migration (maintainers)

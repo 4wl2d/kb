@@ -101,6 +101,15 @@ pub trait KnowledgeView {
     fn raw(&self, id: &str, origin: Origin) -> Result<Option<RawEntry>>;
     /// Proposal overlay entries (empty when proposals are not included).
     fn proposals(&self) -> Result<Vec<ProposalEntry>>;
+
+    fn all_records(&self, origin: Origin) -> Result<Vec<RecordEntry>> {
+        let ids = self
+            .metas_by_kind(&Kind::ALL, origin)?
+            .into_iter()
+            .map(|e| e.meta.id.clone())
+            .collect::<Vec<_>>();
+        self.records(&ids, origin)
+    }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -175,6 +184,9 @@ pub struct SnapshotInfo {
     pub engine_version: String,
     /// Deterministic snapshot identity (index key).
     pub key: String,
+    /// Digest of the listed profile content identities, independent of cache location.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_digest: Option<String>,
 }
 
 impl SnapshotInfo {
@@ -302,6 +314,7 @@ mod tests {
             overlay: None,
             engine_version: "0.1.0".into(),
             key: "k".repeat(64),
+            content_digest: None,
         }
     }
 
