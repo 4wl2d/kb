@@ -127,10 +127,13 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
             working,
             h.kb_submodule_path.as_deref(),
         )?;
+        // Diff paths are bounded by the diff itself, not by the `--path` limit.
         for file in &diff.files {
-            req.paths.push(file.path.clone());
-            req.paths.extend(file.old_path.iter().cloned());
+            req.changed_paths.push(file.path.clone());
+            req.changed_paths.extend(file.old_path.iter().cloned());
         }
+        req.changed_paths.sort();
+        req.changed_paths.dedup();
         req.paths.sort();
         req.paths.dedup();
         req.change = Some(context::ChangeScope {
@@ -145,7 +148,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
     };
     let changed_text = match (&host, &diff) {
         (Some(h), Some(diff)) => host::facts::diff_text(&h.root, diff)?,
-        _ => String::new(),
+        _ => Some(String::new()),
     };
 
     let mut s = Session::open(ctx, host, Options::reading(ctx, args.include_proposals))?;
@@ -172,7 +175,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
         }
         if let Some(diff) = &diff {
             env.changed_scope = true;
-            env.changed_text = changed_text.clone();
+            env.set_changed_text(changed_text.clone());
             for file in &diff.files {
                 env.known_files.insert(file.path.clone());
                 env.known_files.extend(file.old_path.iter().cloned());
@@ -187,7 +190,20 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
                 .into_iter()
                 .map(|e| e.meta.id.clone())
                 .collect::<Vec<_>>();
-            let records = view.records(&ids, crate::knowledge::Origin::Accepted)?;
+            let mut records = view.records(&ids, crate::knowledge::Origin::Accepted)?;
+            // Commit bounds of records scoped to other repositories name another history;
+            // the slice withholds those records (AS_OF_BOUND_UNRESOLVED).
+            if let Some(repo) = env.host_repo.as_deref()
+                && view.registry().repo(repo).is_some()
+            {
+                records.retain(|r| {
+                    context::temporal::scope_reaches_repo(
+                        r.parsed.record.common().scope,
+                        view.registry(),
+                        repo,
+                    )
+                });
+            }
             req.as_of = Some(host::facts::resolve_as_of(
                 host.as_ref().map(|h| h.root.as_path()),
                 requested,
@@ -219,13 +235,23 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
                 env.host_versions.insert(repo.clone(), version);
             }
             if let Some(task) = req.task.as_deref().filter(|t| !t.is_empty()) {
-                let files = if req.as_of.is_some() && selected_revision.is_none() {
-                    Vec::new()
+                let (files, skipped) = if req.as_of.is_some() && selected_revision.is_none() {
+                    (Vec::new(), 0)
                 } else {
-                    host::facts::tracked_files(&h.root, selected_revision)?
+                    host::facts::discoverable_files(&h.root, selected_revision)?
                 };
+                if skipped > 0 {
+                    env.notes.push(crate::diag::Diagnostic::info(
+                        "TRACKED_NAMES_SKIPPED",
+                        format!(
+                            "{skipped} tracked filename(s) are not UTF-8 or not safe relative \
+                             paths and were not used for identifier discovery"
+                        ),
+                    ));
+                }
                 let candidates = context::discovery::identifier_paths(task, &files);
-                for path in candidates {
+                env.notes.extend(candidates.note("tracked filenames"));
+                for path in candidates.paths {
                     if h.kb_submodule_path
                         .as_ref()
                         .is_some_and(|kb| path == *kb || path.starts_with(&format!("{kb}/")))
@@ -266,6 +292,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
             code_request.paths = req
                 .paths
                 .iter()
+                .chain(&req.changed_paths)
                 .filter_map(|p| {
                     let (qualified, path) = split_repo(p);
                     (qualified.is_none() || qualified == Some(repo)).then(|| path.to_string())
@@ -277,8 +304,9 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
             let response = provider.load(&code_request)?;
             let inferred =
                 crate::code::paths_for_task(&response, req.task.as_deref().unwrap_or_default());
-            env.known_files.extend(inferred.iter().cloned());
-            env.inferred_paths.extend(inferred);
+            env.notes.extend(inferred.note("code symbols"));
+            env.known_files.extend(inferred.paths.iter().cloned());
+            env.inferred_paths.extend(inferred.paths);
             env.inferred_paths.sort();
             env.inferred_paths.dedup();
             let (units, omitted) = crate::code::brief(&response, &code_request, 8)?;

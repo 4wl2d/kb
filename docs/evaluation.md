@@ -65,7 +65,8 @@ Host versions come from parent Git blobs. No source checkout is modified.
 
 Without `--as-of`, this is explicitly a **current-snapshot retrospective**: which records
 from today's selected KB apply to past touched scope. With `--as-of`, records are filtered
-at each change's first parent using `introduced`/`retired`; undated/future records are
+at each change's first parent using `introduced`/`retired`; undated/future records, and
+records scoped to other repositories whose commit bounds cannot be resolved in this host, are
 withheld. This does not reconstruct older text, status or registries. For leak-free replay,
 freeze the KB and all generated artifacts independently at the intended cutoff.
 

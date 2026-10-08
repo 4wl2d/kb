@@ -321,9 +321,11 @@ Pipeline:
    selection (§6), snapshot engine compatibility, snapshot validity. A snapshot with
    validation errors yields `completeness = incomplete` plus diagnostics (never `complete`).
 2. **Scope resolution**: host repo, paths → modules/features, alias → concepts. Tracked
-   filename/identifier matches can discover paths before an explicit path is known.
-   `--changed` includes old/deleted paths and distinguishes an empty diff from unknown
-   scope. Explicit change types can prune inapplicable categories; inferred hints only
+   filename/identifier matches can discover paths before an explicit path is known; such
+   paths are candidates that never make an unknown module/feature scope known (identifiers
+   naming more than 8 files are skipped, at most 64 discovered paths are used, outside the
+   `--path` limit). `--changed` includes old/deleted paths and distinguishes an empty diff
+   from unknown scope. Explicit change types can prune inapplicable categories; inferred hints only
    add candidates and cannot silently exclude unknown categories. Unknown
    registry ids given explicitly → `UNKNOWN_SCOPE` error. A plain `--path` is made
    host-relative (relative to the current directory inside the host, else to the host root);
@@ -363,8 +365,9 @@ Pipeline:
 `diagnose` without explicit paths/modules/diff remains provisional, with
 `DIAGNOSE_SCOPE_PROVISIONAL`; discovery is not authority to skip a scoped pre-edit query.
 `--as-of` installs a pure temporal view across every lookup and recalculates lexical
-statistics on that slice. Undated accepted records are withheld (`AS_OF_UNDATED`), and
-required records outside the slice remain missing. Git adapters resolve commit ancestry,
+statistics on that slice. Undated accepted records are withheld (`AS_OF_UNDATED`), as are
+records scoped to other repositories whose commit bounds cannot be resolved in the host
+(`AS_OF_BOUND_UNRESOLVED`), and required records outside the slice remain missing. Git adapters resolve commit ancestry,
 historical filenames and version files; no checkout mutation or wall clock enters the
 pure assembler. Frozen input artifacts remain necessary for replay (ADR 0012).
 

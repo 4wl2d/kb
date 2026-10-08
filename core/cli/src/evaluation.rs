@@ -145,7 +145,17 @@ pub fn history(
     let mut rows = Vec::new();
     let mut incomplete = 0;
     let mut tokens_total = 0;
-    let records = view.all_records(Origin::Accepted)?;
+    // Commit bounds of records scoped to other repositories are not resolved in this host.
+    let mut records = view.all_records(Origin::Accepted)?;
+    if view.registry().repo(options.repo).is_some() {
+        records.retain(|r| {
+            context::temporal::scope_reaches_repo(
+                r.parsed.record.common().scope,
+                view.registry(),
+                options.repo,
+            )
+        });
+    }
     let selected: BTreeSet<_> = changes.iter().map(|c| &c.commit).collect();
     let unused: Vec<_> = labels.keys().filter(|id| !selected.contains(id)).collect();
     if !unused.is_empty() {
@@ -195,7 +205,7 @@ pub fn history(
             .map_err(|e| KbError::invalid_input(format!("{}: {e}", change.commit)))?;
         let mut request = ContextRequest::new(Intent::Review);
         request.repos = vec![options.repo.into()];
-        request.paths = diff
+        request.changed_paths = diff
             .files
             .iter()
             .flat_map(|f| std::iter::once(f.path.clone()).chain(f.old_path.clone()))
@@ -203,8 +213,9 @@ pub fn history(
         let mut env = TaskEnv::new(snapshot.clone());
         env.host_repo = Some(options.repo.into());
         env.changed_scope = true;
-        env.changed_text = crate::host::facts::diff_text(&options.host.root, &diff)?;
-        env.known_files.extend(request.paths.iter().cloned());
+        env.set_changed_text(crate::host::facts::diff_text(&options.host.root, &diff)?);
+        env.known_files
+            .extend(request.changed_paths.iter().cloned());
         request.as_of = point;
         env.host_head = Some(change.parent.clone());
         env.reference_date =

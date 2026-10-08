@@ -31,9 +31,67 @@ fn contains(tokens: &[String], phrase: &[String]) -> bool {
     !phrase.is_empty() && tokens.windows(phrase.len()).any(|w| w == phrase)
 }
 
-/// A symbol-like filename stem or explicit filename in task text scopes to every matching
-/// tracked file. Duplicate stems stay ambiguous candidates; no disk/source scan occurs.
-pub fn identifier_paths(task: &str, tracked: &[String]) -> Vec<String> {
+/// Most files one identifier (a filename key or a code symbol name) may name and still
+/// supply candidate paths. A word that names more (`init` for every `__init__.py`, `save`
+/// declared in hundreds of files) is ambiguous and is skipped.
+pub const MAX_PATHS_PER_IDENTIFIER: usize = 8;
+
+/// Candidate paths found for task text, and the identifiers skipped as ambiguous.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Discovered {
+    /// Sorted, distinct paths.
+    pub paths: Vec<String>,
+    /// Identifiers that name more than [`MAX_PATHS_PER_IDENTIFIER`] files, with their file
+    /// counts; sorted.
+    pub ambiguous: Vec<(String, usize)>,
+}
+
+impl Discovered {
+    /// Collect `(identifier, path)` matches: identifiers within the cap supply their paths.
+    pub fn collect<'a>(matches: impl IntoIterator<Item = (String, &'a String)>) -> Discovered {
+        let mut by_identifier: BTreeMap<String, BTreeSet<&String>> = BTreeMap::new();
+        for (identifier, path) in matches {
+            by_identifier.entry(identifier).or_default().insert(path);
+        }
+        let mut paths = BTreeSet::new();
+        let mut ambiguous = Vec::new();
+        for (identifier, found) in by_identifier {
+            if found.len() > MAX_PATHS_PER_IDENTIFIER {
+                ambiguous.push((identifier, found.len()));
+            } else {
+                paths.extend(found.into_iter().cloned());
+            }
+        }
+        Discovered {
+            paths: paths.into_iter().collect(),
+            ambiguous,
+        }
+    }
+
+    /// Info note listing the skipped identifiers of `source`, if any.
+    pub fn note(&self, source: &str) -> Option<crate::diag::Diagnostic> {
+        if self.ambiguous.is_empty() {
+            return None;
+        }
+        let list: Vec<String> = self
+            .ambiguous
+            .iter()
+            .map(|(identifier, n)| format!("`{identifier}` ({n} files)"))
+            .collect();
+        Some(crate::diag::Diagnostic::info(
+            "IDENTIFIER_AMBIGUOUS",
+            format!(
+                "{source} named by the task match more than {MAX_PATHS_PER_IDENTIFIER} files and \
+                 supply no candidate paths: {}",
+                list.join(", ")
+            ),
+        ))
+    }
+}
+
+/// A symbol-like filename stem or explicit filename in task text names its tracked files as
+/// candidates (at most [`MAX_PATHS_PER_IDENTIFIER`] per key); no disk/source scan occurs.
+pub fn identifier_paths(task: &str, tracked: &[String]) -> Discovered {
     IdentifierIndex::new(tracked).find(task)
 }
 
@@ -71,17 +129,18 @@ impl IdentifierIndex {
         Self { terms, max_words }
     }
 
-    pub fn find(&self, task: &str) -> Vec<String> {
+    pub fn find(&self, task: &str) -> Discovered {
         let words = normalize::tokens(task);
-        let mut found = BTreeSet::new();
+        let mut found = Vec::new();
         for size in 1..=self.max_words.min(words.len()) {
             for phrase in words.windows(size) {
-                if let Some(paths) = self.terms.get(&phrase.join(" ")) {
-                    found.extend(paths.iter().cloned());
+                let key = phrase.join(" ");
+                if let Some(paths) = self.terms.get(&key) {
+                    found.extend(paths.iter().map(|p| (key.clone(), p)));
                 }
             }
         }
-        found.into_iter().collect()
+        Discovered::collect(found)
     }
 }
 
@@ -147,4 +206,32 @@ pub fn change_type_hints(
         }
     }
     found
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn identifiers_naming_too_many_files_are_skipped() {
+        let mut tracked: Vec<String> = (0..MAX_PATHS_PER_IDENTIFIER)
+            .map(|n| format!("m{n}/Config.kt"))
+            .collect();
+        tracked.push("app/TokenStore.kt".into());
+        let found = identifier_paths("Read Config in TokenStore", &tracked);
+        assert_eq!(found.paths.len(), MAX_PATHS_PER_IDENTIFIER + 1);
+        assert!(found.ambiguous.is_empty());
+        assert!(found.note("tracked filenames").is_none());
+        tracked.push("m9/Config.kt".into());
+        let found = identifier_paths("Read Config in TokenStore", &tracked);
+        assert_eq!(found.paths, vec!["app/TokenStore.kt"]);
+        assert_eq!(found.ambiguous, vec![("config".to_string(), 9)]);
+        let note = found.note("tracked filenames").unwrap();
+        assert_eq!(note.code, "IDENTIFIER_AMBIGUOUS");
+        assert!(
+            note.message.contains("`config` (9 files)"),
+            "{}",
+            note.message
+        );
+    }
 }

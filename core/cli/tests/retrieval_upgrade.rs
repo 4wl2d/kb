@@ -63,6 +63,30 @@ impl World {
     }
 
     fn run(&self, extra: &[&str]) -> Value {
+        let out = self.output(extra);
+        assert!(
+            matches!(out.status.code(), Some(0 | 30)),
+            "{}\n{}",
+            common::stdout(&out),
+            common::stderr(&out)
+        );
+        let doc = json(&out);
+        assert!(!doc["result"].is_null());
+        doc["result"].clone()
+    }
+
+    /// The `error` of a failing context call.
+    fn fail(&self, extra: &[&str]) -> Value {
+        let out = self.output(extra);
+        assert!(
+            !matches!(out.status.code(), Some(0 | 30)),
+            "{}",
+            common::stdout(&out)
+        );
+        json(&out)["error"].clone()
+    }
+
+    fn output(&self, extra: &[&str]) -> std::process::Output {
         let mut args = vec![
             "--root",
             self.kb.to_str().unwrap(),
@@ -75,16 +99,7 @@ impl World {
             "context",
         ];
         args.extend_from_slice(extra);
-        let out = self.sb.kb(&self.host, &args, &[]);
-        assert!(
-            matches!(out.status.code(), Some(0 | 30)),
-            "{}\n{}",
-            common::stdout(&out),
-            common::stderr(&out)
-        );
-        let doc = json(&out);
-        assert!(!doc["result"].is_null());
-        doc["result"].clone()
+        self.sb.kb(&self.host, &args, &[])
     }
 }
 
@@ -95,6 +110,28 @@ fn ids(result: &Value) -> Vec<&str> {
         .iter()
         .filter_map(|u| u["id"].as_str())
         .collect()
+}
+
+/// Codes of a result array such as `status_reasons` or `issues`.
+fn codes<'a>(result: &'a Value, field: &str) -> Vec<&'a str> {
+    result[field]
+        .as_array()
+        .map(|a| a.iter().filter_map(|r| r["code"].as_str()).collect())
+        .unwrap_or_default()
+}
+
+fn issue<'a>(result: &'a Value, code: &str) -> &'a str {
+    result["issues"]
+        .as_array()
+        .and_then(|a| a.iter().find(|i| i["code"] == code))
+        .and_then(|i| i["message"].as_str())
+        .unwrap_or_else(|| panic!("no {code} in {}", result["issues"]))
+}
+
+fn module_policy(id: &str, module: &str) -> String {
+    format!(
+        "+++\nschema = 2\nid = \"acme.policy.{id}\"\nkind = \"policy\"\ntitle = \"Synthetic {id}\"\nstatus = \"accepted\"\nowner = \"arch\"\n[scope]\nmodules = [\"{module}\"]\n[[rules]]\nid = \"preserve\"\nlevel = \"must\"\ntext = \"Preserve the synthetic {id} contract.\"\n+++\n"
+    )
 }
 
 fn policy(id: &str, category: &str) -> String {
@@ -148,12 +185,19 @@ fn identifiers_use_tracked_files_and_split_acronyms() {
     );
     let result = w.run(&["--intent", "implement", "--task", "Fix Token HTTP Client"]);
     assert_eq!(
-        result["scope"]["modules"]["values"],
-        serde_json::json!(["mobile.auth"])
-    );
-    assert_eq!(
         result["scope"]["inferred_paths"],
         serde_json::json!(["app/auth/TokenHTTPClient.kt"])
+    );
+    // A discovered file is a candidate: it maps to its module without making the module
+    // scope known.
+    assert_eq!(result["scope"]["modules"]["state"], "unknown");
+    assert!(
+        result["scope"]["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|p| p["path"] == "app/auth/TokenHTTPClient.kt"
+                && p["modules"] == serde_json::json!(["mobile.auth"]))
     );
     let ghost = w.run(&["--intent", "diagnose", "--task", "Fix GhostStore"]);
     assert!(ghost["scope"]["inferred_paths"].is_null());
@@ -417,4 +461,249 @@ fn temporal_filter_does_not_waive_a_future_required_record() {
             .any(|r| r["code"] == "REQUIRES_MISSING")
     );
     assert!(!ids(&result).contains(&"acme.reference.future"));
+}
+
+#[test]
+fn identifier_matches_never_make_an_unknown_module_scope_known() {
+    let w = World::new();
+    write(&w.host.join("LICENSE"), "Synthetic license text.\n");
+    w.commit_host("2024-01-02T00:00:00Z");
+    w.record("auth", &module_policy("auth", "mobile.auth"));
+    let result = w.run(&[
+        "--intent",
+        "implement",
+        "--task",
+        "Update the login flow and keep the license header",
+    ]);
+    assert_eq!(
+        result["scope"]["inferred_paths"],
+        serde_json::json!(["LICENSE"])
+    );
+    assert_eq!(result["scope"]["modules"]["state"], "unknown");
+    assert!(
+        result["undetermined"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["id"] == "acme.policy.auth"),
+        "a filename in the task must not drop module obligations"
+    );
+    assert!(codes(&result, "status_reasons").contains(&"UNDETERMINED_OBLIGATIONS"));
+    // Beside explicit scope, a discovered file adds the module it names.
+    let explicit = w.run(&[
+        "--intent",
+        "implement",
+        "--module",
+        "backend.api",
+        "--task",
+        "Fix TokenHTTPClient",
+    ]);
+    assert_eq!(
+        explicit["scope"]["modules"],
+        serde_json::json!({"state": "known", "values": ["backend.api", "mobile.auth"]})
+    );
+    assert!(ids(&explicit).contains(&"acme.policy.auth"));
+}
+
+#[test]
+fn ambiguous_filename_stems_are_skipped_beside_explicit_scope() {
+    let w = World::new();
+    for n in 0..520 {
+        write(&w.host.join(format!("pkg/p{n}/__init__.py")), "");
+    }
+    w.commit_host("2024-01-02T00:00:00Z");
+    let explicit = [
+        "--module",
+        "mobile.auth",
+        "--path",
+        "app/auth/TokenHTTPClient.kt",
+    ];
+    for extra in [&[][..], &explicit[..]] {
+        let mut args = vec![
+            "--intent",
+            "implement",
+            "--task",
+            "Fix init order of the TokenHTTPClient",
+        ];
+        args.extend_from_slice(extra);
+        let result = w.run(&args);
+        assert_eq!(
+            result["scope"]["inferred_paths"],
+            serde_json::json!(["app/auth/TokenHTTPClient.kt"])
+        );
+        assert!(issue(&result, "IDENTIFIER_AMBIGUOUS").contains("`init` (520 files)"));
+    }
+}
+
+#[test]
+fn discovered_paths_are_capped_and_never_count_against_the_path_limit() {
+    let w = World::new();
+    let names: Vec<String> = (0..70).map(|n| format!("Synth{n:03}")).collect();
+    for name in &names {
+        write(
+            &w.host.join(format!("app/auth/{name}.kt")),
+            "// synthetic\n",
+        );
+    }
+    w.commit_host("2024-01-02T00:00:00Z");
+    let task = format!("Rename {}", names.join(" "));
+    let explicit: Vec<String> = (0..500)
+        .map(|n| format!("app/auth/Explicit{n}.kt"))
+        .collect();
+    let mut args = vec![
+        "--intent",
+        "implement",
+        "--task",
+        &task,
+        "--budget",
+        "1000000",
+    ];
+    for path in &explicit {
+        args.extend(["--path", path.as_str()]);
+    }
+    let result = w.run(&args);
+    let inferred = result["scope"]["inferred_paths"].as_array().unwrap();
+    assert_eq!(inferred.len(), 64);
+    assert_eq!(inferred[0], "app/auth/Synth000.kt");
+    assert_eq!(inferred[63], "app/auth/Synth063.kt");
+    assert!(issue(&result, "INFERRED_PATHS_TRUNCATED").contains("70 identifier paths"));
+}
+
+#[test]
+fn unusual_tracked_names_do_not_fail_identifier_discovery() {
+    let w = World::new();
+    write(
+        &w.host.join("app/a\\b.txt"),
+        "synthetic Windows-style name\n",
+    );
+    write(&w.host.join("app/Icon\r"), "");
+    w.commit_host("2024-01-02T00:00:00Z");
+    let result = w.run(&[
+        "--intent",
+        "implement",
+        "--path",
+        "app/auth/TokenHTTPClient.kt",
+        "--task",
+        "retry refresh in TokenHTTPClient",
+    ]);
+    assert!(issue(&result, "TRACKED_NAMES_SKIPPED").starts_with("2 tracked filename(s)"));
+    assert_eq!(
+        result["scope"]["inferred_paths"],
+        serde_json::json!(["app/auth/TokenHTTPClient.kt"])
+    );
+}
+
+#[test]
+fn commit_bounds_of_other_repositories_are_withheld_not_fatal() {
+    let w = World::new();
+    let missing = "0123456789abcdef0123456789abcdef01234567";
+    let foreign = reference("backend", missing, None, None)
+        .replace("[scope]\nproduct = true", "[scope]\nrepos = [\"backend\"]");
+    w.record("backend", &foreign);
+    w.record("dated", &reference("dated", "2024-01-01", None, None));
+    let args = [
+        "--intent",
+        "explain",
+        "--task",
+        "time travel",
+        "--as-of",
+        "2026-06-01",
+        "--explain",
+    ];
+    let result = w.run(&args);
+    assert!(codes(&result, "status_reasons").contains(&"AS_OF_BOUND_UNRESOLVED"));
+    assert!(ids(&result).contains(&"acme.reference.dated"));
+    assert!(
+        result["explain"]["excluded"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["id"] == "acme.reference.backend" && e["reason"] == "temporal")
+    );
+    // A missing commit of knowledge that can apply in this host remains an error.
+    w.record("backend", &reference("backend", missing, None, None));
+    let error = w.fail(&args);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing or ambiguous in the host"),
+        "{error}"
+    );
+}
+
+#[test]
+fn oversized_patch_text_skips_changed_text_hints() {
+    let w = World::new();
+    let base = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    // About 9 MB of generated text: above the 8 MiB lexical-analysis limit.
+    let line = format!("{}\n", "x".repeat(99));
+    write(
+        &w.host.join("app/auth/package-lock.json"),
+        &line.repeat(90_000),
+    );
+    w.commit_host("2024-01-02T00:00:00Z");
+    let result = w.run(&["--intent", "review", "--changed", "--base", &base]);
+    assert!(codes(&result, "issues").contains(&"CHANGED_TEXT_SKIPPED"));
+    assert_eq!(
+        result["scope"]["modules"],
+        serde_json::json!({"state": "known", "values": ["mobile.auth"]})
+    );
+}
+
+#[test]
+fn diff_paths_are_not_limited_as_path_options() {
+    let w = World::new();
+    for n in 0..520 {
+        write(
+            &w.host.join(format!("app/auth/generated/G{n}.kt")),
+            "// synthetic generated file\n",
+        );
+    }
+    let result = w.run(&["--intent", "review", "--changed", "--budget", "1000000"]);
+    assert_eq!(result["request"]["paths"].as_array().unwrap().len(), 520);
+    assert_eq!(
+        result["scope"]["modules"],
+        serde_json::json!({"state": "known", "values": ["mobile.auth"]})
+    );
+    // The `--path` option keeps its own limit.
+    let many: Vec<String> = (0..513).map(|n| format!("app/auth/P{n}.kt")).collect();
+    let mut args = vec!["--intent", "implement"];
+    for path in &many {
+        args.extend(["--path", path.as_str()]);
+    }
+    let error = w.fail(&args);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("513 --path values given"),
+        "{error}"
+    );
+}
+
+#[test]
+fn historical_full_text_folds_diacritics_like_the_index() {
+    let w = World::new();
+    w.record(
+        "ordering",
+        &reference("ordering", "2024-01-01", None, None).replace(
+            "title = \"Synthetic ordering\"",
+            "title = \"Synthetic café ordering\"",
+        ),
+    );
+    let live = w.run(&["--intent", "explain", "--task", "cafe"]);
+    assert!(ids(&live).contains(&"acme.reference.ordering"));
+    let past = w.run(&[
+        "--intent",
+        "explain",
+        "--task",
+        "cafe",
+        "--as-of",
+        "2026-06-01",
+    ]);
+    assert!(
+        ids(&past).contains(&"acme.reference.ordering"),
+        "the as-of slice must match accented terms like the index"
+    );
 }

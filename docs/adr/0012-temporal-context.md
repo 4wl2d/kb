@@ -10,7 +10,9 @@ inclusive, retired exclusive. Commit bounds use ancestry in the explicitly selec
 repository. Revision queries use that commit's UTC date for date-bounded records. Date
 queries use the host's last first-parent commit before the end of the requested UTC day
 for commit-bounded records. Missing or ambiguous Git objects are errors, not string-order
-comparisons. Mixed date/commit bounds on one record are invalid.
+comparisons. Commit bounds of records whose scope excludes the host repository name another
+repository's history: they are not resolved, and such records are withheld with a partial
+`AS_OF_BOUND_UNRESOLVED` reason. Mixed date/commit bounds on one record are invalid.
 
 An undated record cannot establish that its knowledge existed at the cut-off. Temporal
 queries withhold such records, list the exclusion and report partial context. They never

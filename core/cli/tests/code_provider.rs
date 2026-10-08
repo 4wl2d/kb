@@ -501,6 +501,72 @@ fn validation_reads_files_with_a_constant_number_of_git_processes() {
 }
 
 #[test]
+fn ambiguous_code_symbol_names_supply_no_candidate_paths() {
+    if isolated("ambiguous_code_symbol_names_supply_no_candidate_paths") {
+        return;
+    }
+    let w = World::new();
+    for n in 0..9 {
+        write(&w.host.join(format!("lib/m{n}.rs")), "pub fn save() {}\n");
+    }
+    let commit = w.sb.commit_all(&w.host, "synthetic duplicate definitions");
+    let mut graph = w.graph(&commit);
+    for n in 0..9 {
+        let path = format!("lib/m{n}.rs");
+        let bytes = kb::host::facts::blob_at(&w.host, &commit, &path, 8192)
+            .unwrap()
+            .unwrap();
+        graph.symbols.push(CodeSymbol {
+            id: format!("save_m{n}"),
+            name: "save".into(),
+            kind: "function".into(),
+            path,
+            start_line: 1,
+            end_line: 1,
+            extent: CodeExtent::Definition,
+            sha256: kb::util::sha256_hex(&bytes),
+            signature: None,
+            test: false,
+        });
+    }
+    let fixture = w.fixture(&graph);
+    let result = w.run(
+        &[
+            "context",
+            "--intent",
+            "implement",
+            "--path",
+            "app/auth/Core.rs",
+            "--task",
+            "change save behavior",
+            "--with-code",
+            "--provider-file",
+            fixture.to_str().unwrap(),
+        ],
+        30,
+    );
+    // `save` is declared in ten files: no candidate paths, a note, unchanged obligations.
+    assert!(
+        result["scope"]["inferred_paths"].is_null(),
+        "{}",
+        result["scope"]
+    );
+    assert!(result["issues"].as_array().unwrap().iter().any(|i| {
+        i["code"] == "IDENTIFIER_AMBIGUOUS"
+            && i["message"].as_str().unwrap().contains("`save` (10 files)")
+    }));
+    assert_eq!(
+        result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|u| u["tier"] == "mandatory")
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn deep_impact_reads_base_graph_for_deleted_symbol_and_lists_covering_records() {
     if isolated("deep_impact_reads_base_graph_for_deleted_symbol_and_lists_covering_records") {
         return;

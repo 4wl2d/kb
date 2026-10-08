@@ -513,7 +513,7 @@ pub(super) fn header_json(h: &Header) -> Map<String, Value> {
         json!({
             "task": r.task,
             "repos": r.repos,
-            "paths": r.paths,
+            "paths": r.all_paths(),
             "modules": r.modules,
             "features": r.features,
             "concepts": r.concepts,

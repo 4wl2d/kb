@@ -113,18 +113,11 @@ pub fn history_window(root: &Path, since: &str) -> Result<HistoryWindow> {
 /// Tracked names only. Historical requests use an immutable tree; ordinary requests use
 /// `ls-files` so staged additions are visible without reading source files from disk.
 pub fn tracked_files(root: &Path, revision: Option<&str>) -> Result<Vec<String>> {
-    let git = Git::new(root);
-    let bytes = match revision {
-        Some(rev) => {
-            let commit = git
-                .resolve_commit(rev)?
-                .ok_or_else(|| KbError::invalid_input(format!("unknown host revision {rev}")))?;
-            git.run_bytes(&["ls-tree", "-r", "--name-only", "-z", &commit, "--"])?
-        }
-        None => git.run_bytes(&["ls-files", "--cached", "-z", "--"])?,
-    };
     let mut paths = BTreeSet::new();
-    for bytes in bytes.split(|b| *b == 0).filter(|b| !b.is_empty()) {
+    for bytes in tracked_names(root, revision)?.split(|b| *b == 0) {
+        if bytes.is_empty() {
+            continue;
+        }
         let path = std::str::from_utf8(bytes)
             .map_err(|_| KbError::invalid_input("tracked filename is not UTF-8"))?;
         check_rel_path(path).map_err(KbError::unsafe_path)?;
@@ -133,7 +126,45 @@ pub fn tracked_files(root: &Path, revision: Option<&str>) -> Result<Vec<String>>
     Ok(paths.into_iter().collect())
 }
 
-pub fn diff_text(root: &Path, diff: &crate::impact::HostDiff) -> Result<String> {
+/// Tracked names for lexical discovery, and how many were skipped. A name that is not UTF-8
+/// or not a safe relative path (a backslash, a control character) cannot be named by task
+/// text as scope, so it is skipped instead of failing a request that never mentions it.
+pub fn discoverable_files(root: &Path, revision: Option<&str>) -> Result<(Vec<String>, usize)> {
+    let mut paths = BTreeSet::new();
+    let mut skipped = 0;
+    for bytes in tracked_names(root, revision)?.split(|b| *b == 0) {
+        match std::str::from_utf8(bytes) {
+            Ok("") => {}
+            Ok(path) if check_rel_path(path).is_ok() => {
+                paths.insert(path.to_string());
+            }
+            _ => skipped += 1,
+        }
+    }
+    Ok((paths.into_iter().collect(), skipped))
+}
+
+/// NUL-separated tracked names at `revision`, or of the index.
+fn tracked_names(root: &Path, revision: Option<&str>) -> Result<Vec<u8>> {
+    let git = Git::new(root);
+    match revision {
+        Some(rev) => {
+            let commit = git
+                .resolve_commit(rev)?
+                .ok_or_else(|| KbError::invalid_input(format!("unknown host revision {rev}")))?;
+            git.run_bytes(&["ls-tree", "-r", "--name-only", "-z", &commit, "--"])
+        }
+        None => git.run_bytes(&["ls-files", "--cached", "-z", "--"]),
+    }
+}
+
+/// Most patch bytes read as lexical evidence for change-type hints.
+pub const MAX_DIFF_TEXT_BYTES: usize = 8 * 1024 * 1024;
+
+/// Zero-context patch of `diff`, used only for optional change-type hints. `None` when it
+/// exceeds [`MAX_DIFF_TEXT_BYTES`] (a generated lockfile or dump): the hints are skipped
+/// rather than failing the request.
+pub fn diff_text(root: &Path, diff: &crate::impact::HostDiff) -> Result<Option<String>> {
     let mut args = vec![
         "diff",
         "--unified=0",
@@ -146,14 +177,13 @@ pub fn diff_text(root: &Path, diff: &crate::impact::HostDiff) -> Result<String> 
         args.push(head);
     }
     args.push("--");
-    let bytes = Git::new(root).run_bytes(&args)?;
-    if bytes.len() > 8 * 1024 * 1024 {
-        return Err(KbError::invalid_input(
-            "host diff exceeds the 8 MiB lexical-analysis limit; split the change or pass explicit paths and change types",
-        ));
-    }
+    let bytes = match Git::new(root).run_bytes_limited(&args, MAX_DIFF_TEXT_BYTES) {
+        Ok(bytes) => bytes,
+        Err(e) if e.details["kind"] == "stdout-limit" => return Ok(None),
+        Err(e) => return Err(e),
+    };
     // Git's binary-file notices remain lexical text; no binary contents are read.
-    Ok(String::from_utf8_lossy(&bytes).into_owned())
+    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
 }
 
 pub fn resolve_as_of(

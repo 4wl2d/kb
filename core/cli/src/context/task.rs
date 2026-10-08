@@ -6,9 +6,14 @@
 //!   repo explicitly: a `repo:path` qualifier, the repo of an explicit `--module`, or the only
 //!   repo of an explicit `--feature` declared in exactly one repo. Explicit `--repo` values
 //!   take precedence over the host repo; explicitly named repos are added to either.
-//! * modules: Known when `--path` or `--module` is given (paths map through registry globs).
-//! * features: Known when `--feature`, `--path` or `--module` is given (explicit features,
-//!   features of resolved modules, features whose `paths` match).
+//! * modules: Known when `--path`, `--module` or a host diff is given (paths map through
+//!   registry globs).
+//! * features: Known when `--feature`, `--path`, `--module` or a host diff is given (explicit
+//!   features, features of resolved modules, features whose `paths` match).
+//!
+//! Identifier-discovered paths (tracked filenames or code symbols named in the task) are
+//! candidates: they add their modules and features to a Known dimension but never make a
+//! dimension Known on their own.
 //!
 //! A `--path` may name a file or a directory, and context assembly cannot look at the disk.
 //! A path therefore maps to the modules (features) whose globs match it as given, match its
@@ -48,6 +53,9 @@ use super::{ContextRequest, TaskEnv};
 pub const MAX_TASK_BYTES: usize = 8 * 1024;
 /// Maximum number of `--path` values.
 pub const MAX_PATHS: usize = 512;
+/// Identifier-discovered paths used per task; more are truncated (sorted by path) with a
+/// warning. They never count against the `--path` limit.
+pub const MAX_INFERRED_PATHS: usize = 64;
 /// Maximum number of values in any other repeatable scope option.
 pub const MAX_SCOPE_IDS: usize = 512;
 
@@ -159,7 +167,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         crate::model::ids::check_local_id(id)
             .map_err(|e| KbError::invalid_input(format!("--change-type {id}: {e}")))?;
     }
-    let mut notes = Vec::new();
+    let mut notes = env.notes.clone();
 
     let mut unknown: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
     let mut note_unknown = |dim: &'static str, id: &str, exists: bool| {
@@ -185,13 +193,27 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
     for (r, _) in &req.host_versions {
         note_unknown("repos", r, registry.repo(r).is_some());
     }
-    let mut specs: Vec<(Option<String>, String)> = Vec::new();
-    if req.paths.len() + env.inferred_paths.len() > MAX_PATHS {
-        return Err(KbError::invalid_input(
-            "too many inferred paths; narrow the task or pass explicit modules",
+    let mut inferred_paths = env.inferred_paths.clone();
+    inferred_paths.sort();
+    inferred_paths.dedup();
+    if inferred_paths.len() > MAX_INFERRED_PATHS {
+        notes.push(Diagnostic::warning(
+            "INFERRED_PATHS_TRUNCATED",
+            format!(
+                "{} identifier paths were discovered; only the first {MAX_INFERRED_PATHS} by \
+                 path are used (name the files with --path)",
+                inferred_paths.len()
+            ),
         ));
+        inferred_paths.truncate(MAX_INFERRED_PATHS);
     }
-    for spec in req.paths.iter().chain(&env.inferred_paths) {
+    let mut specs: Vec<(Option<String>, String)> = Vec::new();
+    for spec in req
+        .paths
+        .iter()
+        .chain(&req.changed_paths)
+        .chain(&inferred_paths)
+    {
         let (repo, path) = split_repo(spec);
         let path = strip_dot_slash(path);
         check_rel_path(path.trim_end_matches('/'))
@@ -344,12 +366,12 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         ));
     }
 
-    let modules_dim = if (req.paths.is_empty()
-        && env.inferred_paths.is_empty()
-        && req.modules.is_empty()
-        && !env.changed_scope)
-        || !unresolved.is_empty()
-    {
+    // Identifier-discovered paths are candidates: they add the modules and features of the
+    // files they name to a scope made known by explicit paths, modules or a diff, but never
+    // make an unknown scope known (obligations stay undetermined, not dropped).
+    let explicit_paths =
+        !req.paths.is_empty() || !req.changed_paths.is_empty() || env.changed_scope;
+    let modules_dim = if (!explicit_paths && req.modules.is_empty()) || !unresolved.is_empty() {
         DimScope::Unknown
     } else {
         let mut set: BTreeSet<String> = req.modules.iter().cloned().collect();
@@ -360,10 +382,8 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
     };
     let features_dim = if (req.features.is_empty()
         && env.inferred_features.is_empty()
-        && req.paths.is_empty()
-        && env.inferred_paths.is_empty()
-        && req.modules.is_empty()
-        && !env.changed_scope)
+        && !explicit_paths
+        && req.modules.is_empty())
         || !unresolved.is_empty()
     {
         DimScope::Unknown
@@ -443,7 +463,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
             DimScope::Known(req.change_types.iter().cloned().collect())
         },
         change_type_hints,
-        inferred_paths: env.inferred_paths.clone(),
+        inferred_paths,
         inferred_features: env.inferred_features.clone(),
         concepts,
         paths,

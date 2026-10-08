@@ -62,6 +62,7 @@ fn preserves_exit_stdout_and_stderr_with_stdin_eof() {
 fn refuses_excess_output() {
     let error = capture(&mut child("large"), b"", limits()).err().unwrap();
     assert!(error.message.contains("stdout exceeds"), "{error}");
+    assert_eq!(error.details["kind"], "stdout-limit");
 }
 
 #[test]

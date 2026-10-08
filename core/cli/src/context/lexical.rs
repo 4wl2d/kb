@@ -276,12 +276,44 @@ pub fn fts_string(token: &str) -> String {
     format!("\"{}\"", token.replace('"', "\"\""))
 }
 
+/// Fold a normalized token as the index tokenizer (`unicode61 remove_diacritics 2`) does:
+/// Latin letters lose their diacritics (`café` → `cafe`) and final sigma becomes sigma, so a
+/// filtered corpus matches exactly the terms the FTS5 index matches.
+pub fn fts_term(token: &str) -> String {
+    token.chars().map(fts_char).collect()
+}
+
+fn fts_char(c: char) -> char {
+    // SQLite's diacritic table has no entry for U+01E1 (ǡ).
+    if c.is_ascii() || c == '\u{1e1}' {
+        return c;
+    }
+    if c == 'ς' {
+        return 'σ';
+    }
+    let (mut base, mut len, mut marks) = (c, 0, true);
+    unicode_normalization::char::decompose_canonical(c, |d| {
+        if len == 0 {
+            base = d;
+        } else {
+            marks &= unicode_normalization::char::is_combining_mark(d);
+        }
+        len += 1;
+    });
+    if len > 1 && marks && base.is_ascii_alphabetic() {
+        base.to_ascii_lowercase()
+    } else {
+        c
+    }
+}
+
 /// BM25 parameters (the FTS5 defaults).
 const K1: f64 = 1.2;
 const B: f64 = 0.75;
 
-/// Rank a filtered corpus using the same binary-term BM25 formula as IndexView.
-/// Statistics are computed after filtering, so future records cannot alter past rankings.
+/// Rank a filtered corpus using the same binary-term BM25 formula and term folding
+/// ([`fts_term`]) as IndexView. Statistics are computed after filtering, so future records
+/// cannot alter past rankings.
 pub fn rank_corpus(
     docs: &std::collections::BTreeMap<String, FtsColumns>,
     terms: &[String],
@@ -301,15 +333,17 @@ pub fn rank_corpus(
                 [&d.ids, &d.title, &d.aliases, &d.normative, &d.body]
                     .into_iter()
                     .flat_map(|s| s.split_whitespace())
+                    .map(fts_term)
                     .collect(),
             )
         })
         .collect();
     let mut scores: BTreeMap<&String, f64> = BTreeMap::new();
     for term in terms {
+        let term = fts_term(&term);
         let hits: Vec<_> = vocabulary
             .iter()
-            .filter(|(_, v)| v.contains(term.as_str()))
+            .filter(|(_, v)| v.contains(&term))
             .map(|(id, _)| *id)
             .collect();
         let weight = idf(docs.len(), hits.len());
@@ -433,6 +467,27 @@ Why this exists.
         assert_eq!(toks, vec!["drop", "near", "or", "token"]);
         assert_eq!(fts_string("a\"b"), "\"a\"\"b\"");
         assert_eq!(query_tokens(&["a b c".into()], 2), vec!["a", "b"]);
+    }
+
+    #[test]
+    fn corpus_ranking_folds_diacritics_like_the_index() {
+        assert_eq!(fts_term("café"), "cafe");
+        assert_eq!(fts_term("ệλόγος"), "eλόγοσ");
+        let docs = std::collections::BTreeMap::from([(
+            "acme.reference.cafe".to_string(),
+            FtsColumns {
+                title: "synthetic café ordering".into(),
+                tokens: 3,
+                ..Default::default()
+            },
+        )]);
+        for query in ["cafe", "Café", "CAFÉ"] {
+            assert_eq!(
+                rank_corpus(&docs, &[query.into()], 5),
+                vec!["acme.reference.cafe"],
+                "{query}"
+            );
+        }
     }
 
     #[test]

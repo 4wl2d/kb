@@ -283,6 +283,7 @@ describe how the snapshot was obtained, not the knowledge; routing fixtures igno
 | `REPO_UNKNOWN` | partial | no | no `--repo` and the host repository was not identified |
 | `DIAGNOSE_SCOPE_PROVISIONAL` | partial | no | path-free diagnosis has no explicit path/module/diff scope |
 | `AS_OF_UNDATED` | partial | no | accepted records lack a verifiable introduction boundary for the requested slice |
+| `AS_OF_BOUND_UNRESOLVED` | partial | no | accepted records scoped to other repositories have commit bounds that cannot be resolved in the host; they are withheld from the slice |
 | `UNDETERMINED_OBLIGATIONS` | partial | no | obligations may apply but a scope dimension is unknown (see `undetermined[]`) |
 | `DEPENDENCY_VERSION_UNDETERMINED` | partial | no | a `requires` target has a version constraint for a repo whose version is unknown |
 | `SETTING_CONFLICT` | conflict | no | the most specific applicable overrides of one policy setting (none strictly more specific) disagree |

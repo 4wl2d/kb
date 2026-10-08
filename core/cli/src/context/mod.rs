@@ -87,6 +87,9 @@ pub struct ContextRequest {
     pub repos: Vec<String>,
     /// Host-relative paths or `repo:path`.
     pub paths: Vec<String>,
+    /// Host-relative paths of a host diff (new and old names). Bounded by the diff, not by
+    /// the `--path` limit; reported with `paths` in the result's `request.paths`.
+    pub changed_paths: Vec<String>,
     pub modules: Vec<String>,
     pub features: Vec<String>,
     pub concepts: Vec<String>,
@@ -114,6 +117,7 @@ impl ContextRequest {
             task: None,
             repos: Vec::new(),
             paths: Vec::new(),
+            changed_paths: Vec::new(),
             modules: Vec::new(),
             features: Vec::new(),
             concepts: Vec::new(),
@@ -127,6 +131,16 @@ impl ContextRequest {
             max_supplementary: None,
             host_versions: Vec::new(),
         }
+    }
+
+    /// The result's `request.paths`: `paths`, or the sorted union of `paths` and
+    /// `changed_paths` when a diff supplied paths.
+    pub fn all_paths(&self) -> Vec<String> {
+        if self.changed_paths.is_empty() {
+            return self.paths.clone();
+        }
+        let all: BTreeSet<&String> = self.paths.iter().chain(&self.changed_paths).collect();
+        all.into_iter().cloned().collect()
     }
 }
 
@@ -161,6 +175,9 @@ pub struct TaskEnv {
     pub changed_scope: bool,
     /// Zero-context patch from the selected host diff; used only as lexical evidence.
     pub changed_text: String,
+    /// Adapter findings about the supplied facts (skipped names, dropped lexical evidence),
+    /// reported in the result's `issues`.
+    pub notes: Vec<Diagnostic>,
     pub code_info: Option<code::CodeInfo>,
     pub code_units: Vec<code::CodeEvidence>,
     pub delivery: delivery::DeliveryState,
@@ -181,9 +198,24 @@ impl TaskEnv {
             known_files: BTreeSet::new(),
             changed_scope: false,
             changed_text: String::new(),
+            notes: Vec::new(),
             code_info: None,
             code_units: Vec::new(),
             delivery: delivery::DeliveryState::default(),
+        }
+    }
+
+    /// Use the patch text of the selected host diff as lexical evidence. `None` (the patch
+    /// exceeded the adapter's size limit) skips the changed-text hints with a note: they only
+    /// add change-type candidates, so their absence never prunes an obligation.
+    pub fn set_changed_text(&mut self, text: Option<String>) {
+        match text {
+            Some(text) => self.changed_text = text,
+            None => self.notes.push(Diagnostic::info(
+                "CHANGED_TEXT_SKIPPED",
+                "the host patch exceeds the lexical-analysis limit; changed-text identifier \
+                 hints were skipped (pass --change-type for explicit categories)",
+            )),
         }
     }
 }
@@ -864,6 +896,20 @@ pub fn assemble(
             &format!(
                 "withheld {} accepted record(s) without introduced evidence; see --explain",
                 slice.undated_accepted
+            ),
+        );
+    }
+    if let Some(slice) = &temporal
+        && slice.unresolved_accepted > 0
+    {
+        f.reason(
+            Completeness::Partial,
+            "AS_OF_BOUND_UNRESOLVED",
+            false,
+            &format!(
+                "withheld {} accepted record(s) scoped to other repositories whose commit \
+                 bounds cannot be resolved in this host; see --explain",
+                slice.unresolved_accepted
             ),
         );
     }

@@ -9,7 +9,7 @@ use crate::error::{KbError, Result};
 use crate::knowledge::{
     KnowledgeView, MetaEntry, Origin, ProposalEntry, RawEntry, RecordEntry, TaskPath,
 };
-use crate::model::{Kind, ProfileConfig, Registry, Status, date_days};
+use crate::model::{Kind, ProfileConfig, Registry, Scope, Status, date_days};
 
 use super::{Excluded, ExcludedReason};
 
@@ -36,18 +36,36 @@ impl AsOf {
         })
     }
 
-    fn reached(&self, bound: &str) -> Result<bool> {
+    /// Is the bound reached at this point? `None` for a commit bound without host ancestry
+    /// evidence: the adapter resolves only bounds of records that can apply in the host.
+    fn reached(&self, bound: &str) -> Result<Option<bool>> {
         if let Some(day) = date_days(bound) {
             let cutoff = date_days(&self.date)
                 .ok_or_else(|| KbError::invalid_input("invalid resolved temporal date"))?;
-            return Ok(day <= cutoff);
+            return Ok(Some(day <= cutoff));
         }
-        self.commit_ancestry.get(bound).copied().ok_or_else(|| {
-            KbError::invalid_input(format!(
-                "no host ancestry evidence for temporal bound {bound}"
-            ))
-        })
+        Ok(self.commit_ancestry.get(bound).copied())
     }
+}
+
+/// Can a record with `scope` apply to a task in registry repo `repo`? Not when its repos, or
+/// every registry repo of its modules (features), exclude `repo` (the registry narrowing of
+/// applicability). Commit bounds of such a record name another repository's history, so the
+/// host adapter does not resolve them; the slice withholds the record instead.
+pub fn scope_reaches_repo(scope: &Scope, registry: &Registry, repo: &str) -> bool {
+    if scope.product {
+        return true;
+    }
+    let foreign_module = |id: &String| registry.module(id).is_some_and(|m| m.repo != repo);
+    let foreign_feature = |id: &String| {
+        registry
+            .feature(id)
+            .is_some_and(|f| !f.repos.is_empty() && f.repos.iter().all(|r| r != repo))
+    };
+    let other_repos = !scope.repos.is_empty() && !scope.repos.iter().any(|r| r == repo);
+    let other_modules = !scope.modules.is_empty() && scope.modules.iter().all(foreign_module);
+    let other_features = !scope.features.is_empty() && scope.features.iter().all(foreign_feature);
+    !(other_repos || other_modules || other_features)
 }
 
 pub struct TemporalView<'a> {
@@ -56,6 +74,8 @@ pub struct TemporalView<'a> {
     fulltext: BTreeMap<String, super::lexical::FtsColumns>,
     pub excluded: Vec<Excluded>,
     pub undated_accepted: usize,
+    /// Accepted records withheld because a commit bound has no host ancestry evidence.
+    pub unresolved_accepted: usize,
 }
 
 impl<'a> TemporalView<'a> {
@@ -66,20 +86,27 @@ impl<'a> TemporalView<'a> {
         let mut excluded = Vec::new();
         let mut fulltext = BTreeMap::new();
         let mut undated_accepted = 0;
+        let mut unresolved_accepted = 0;
         for entry in inner.records(&ids, Origin::Accepted)? {
             let c = entry.parsed.record.common();
-            let why = match c.introduced {
+            let accepted = usize::from(c.status == Status::Accepted);
+            let unresolved = "commit bound not resolvable in this host";
+            let why = match c.introduced.map(|b| point.reached(b)).transpose()? {
                 None => {
-                    if c.status == Status::Accepted {
-                        undated_accepted += 1;
-                    }
+                    undated_accepted += accepted;
                     Some("introduced is missing; historical availability is unverified")
                 }
-                Some(start) if !point.reached(start)? => {
-                    Some("not introduced at the requested point")
+                Some(None) => {
+                    unresolved_accepted += accepted;
+                    Some(unresolved)
                 }
-                _ => match c.retired {
-                    Some(end) if point.reached(end)? => Some("retired at the requested point"),
+                Some(Some(false)) => Some("not introduced at the requested point"),
+                Some(Some(true)) => match c.retired.map(|b| point.reached(b)).transpose()? {
+                    Some(None) => {
+                        unresolved_accepted += accepted;
+                        Some(unresolved)
+                    }
+                    Some(Some(true)) => Some("retired at the requested point"),
                     _ => None,
                 },
             };
@@ -102,6 +129,7 @@ impl<'a> TemporalView<'a> {
             fulltext,
             excluded,
             undated_accepted,
+            unresolved_accepted,
         })
     }
 
@@ -163,5 +191,55 @@ impl KnowledgeView for TemporalView<'_> {
     }
     fn proposals(&self) -> Result<Vec<ProposalEntry>> {
         Ok(Vec::new())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model::RegistryData;
+    use crate::model::registry::{Feature, Module};
+
+    #[test]
+    fn records_scoped_to_other_repositories_do_not_reach_the_host() {
+        let module = |id: &str, repo: &str| Module {
+            id: id.into(),
+            repo: repo.into(),
+            title: id.into(),
+            paths: vec![],
+            features: vec![],
+        };
+        let feature = |id: &str, repos: &[&str]| Feature {
+            id: id.into(),
+            title: id.into(),
+            repos: repos.iter().map(|r| r.to_string()).collect(),
+            paths: vec![],
+        };
+        let registry = Registry::new(RegistryData {
+            modules: vec![
+                module("mobile.auth", "mobile"),
+                module("backend.api", "backend"),
+            ],
+            features: vec![feature("billing", &["backend"]), feature("login", &[])],
+            ..Default::default()
+        });
+        let scope = |repos: &[&str], modules: &[&str], features: &[&str]| Scope {
+            repos: repos.iter().map(|s| s.to_string()).collect(),
+            modules: modules.iter().map(|s| s.to_string()).collect(),
+            features: features.iter().map(|s| s.to_string()).collect(),
+            ..Default::default()
+        };
+        let reaches = |s: Scope| scope_reaches_repo(&s, &registry, "mobile");
+        assert!(reaches(Scope {
+            product: true,
+            ..Default::default()
+        }));
+        assert!(reaches(scope(&[], &[], &[])));
+        assert!(reaches(scope(&["mobile", "backend"], &[], &[])));
+        assert!(reaches(scope(&[], &["backend.api", "mobile.auth"], &[])));
+        assert!(reaches(scope(&[], &["unregistered"], &["login"])));
+        assert!(!reaches(scope(&["backend"], &[], &[])));
+        assert!(!reaches(scope(&[], &["backend.api"], &[])));
+        assert!(!reaches(scope(&[], &[], &["billing"])));
     }
 }

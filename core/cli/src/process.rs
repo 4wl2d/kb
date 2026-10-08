@@ -118,7 +118,11 @@ fn run(command: &mut Command, input: &[u8], limits: Limits, own_group: bool) -> 
                     if bytes.len() > limits.stdout {
                         return Err(KbError::invalid_input(
                             "subprocess stdout exceeds the byte limit",
-                        ));
+                        )
+                        .with_details(serde_json::json!({
+                            "kind": "stdout-limit",
+                            "limit_bytes": limits.stdout,
+                        })));
                     }
                     out = Some(bytes);
                 }

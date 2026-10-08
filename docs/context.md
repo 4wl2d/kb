@@ -38,7 +38,7 @@ repository used as `origin`). The local origin path is shown as `<kb-origin.git>
 | `--max-supplementary <n>` | cap on ranked supplementary records; default `[context] max_supplementary` (12), at most 200 |
 | `--sections none\|mandatory\|all` | add optional Markdown sections as separate units (default `none`) |
 | `--include-proposals` | add local, unreviewed knowledge changes as a labeled overlay |
-| `--changed`, `--base`, `--head`, `--working-tree` | use actual host diff paths, including old/deleted paths; no-base default is local changes since HEAD |
+| `--changed`, `--base`, `--head`, `--working-tree` | use actual host diff paths, including old/deleted paths (not subject to the `--path` limit); no-base default is local changes since HEAD |
 | `--change-type <id>` | explicit category (repeatable); only known explicit categories can exclude mismatched obligations |
 | `--as-of <date\|revision>` | filter all lookups at a historical host point; incompatible with proposal overlays |
 | `--with-code`, `--provider`, `--provider-arg`, `--provider-file` | opt-in commit-bound static code evidence; shared provider deadline/bounds apply |
@@ -90,11 +90,23 @@ appear only in the envelope `meta`.
 ```
 
 Tracked filenames and unambiguous identifier spelling can discover paths before the caller
-knows them. No source parser is embedded in the engine. Diagnose also consults feature/gap
-aliases, but remains partial with `DIAGNOSE_SCOPE_PROVISIONAL` until explicit paths, modules
-or a real diff establish scope. Discovery is not a substitute for a scoped pre-edit query.
+knows them. No source parser is embedded in the engine. Discovered paths (reported in
+`scope.inferred_paths`, together with code symbols named in the task under `--with-code`) are
+candidates: they feed path candidates, ranking and change-type hints, and add the modules and
+features of the files they name to a scope that explicit paths, modules or a diff made known.
+On their own they never make the module or feature scope known, so module-scoped obligations
+stay undetermined. An identifier that names more than 8 files is skipped
+(`IDENTIFIER_AMBIGUOUS`); at most 64 discovered paths are used, sorted by path
+(`INFERRED_PATHS_TRUNCATED`), and they never count against the `--path` limit. Tracked names
+that are not UTF-8 or not safe relative paths are skipped (`TRACKED_NAMES_SKIPPED`). Diagnose
+also consults feature/gap aliases, but remains partial with `DIAGNOSE_SCOPE_PROVISIONAL`
+until explicit paths, modules or a real diff establish scope. Discovery is not a substitute
+for a scoped pre-edit query.
 
 An explicit empty diff is known-empty; old/deleted/renamed paths retain their applicability.
+Diff paths are bounded by the diff, not by the `--path` limit. A patch larger than 8 MiB (a
+generated lockfile or dump) skips the changed-text identifier hints (`CHANGED_TEXT_SKIPPED`)
+instead of failing.
 `change-types.toml` aliases/path/symbol hints can add candidates. Such lexical hints cannot
 prune unknown categories. Explicit `--change-type` supplies that knowledge; exclusions are
 reported in `pruned_change_types` and required dependencies remain reachable.
@@ -109,9 +121,13 @@ reported in `pruned_change_types` and required dependencies remain reachable.
 `introduced` is inclusive and `retired` exclusive. Date bounds use the Gregorian calendar;
 commit bounds use ancestry in the selected host. Revision queries also resolve a UTC date;
 date queries resolve the last first-parent host commit before the end of that day.
-Undated accepted knowledge is withheld and reported as `AS_OF_UNDATED`. Dependencies
-outside the slice stay missing. Ranking statistics, aliases, ids and source filenames all
-use the same slice, so future corpus entries cannot change past lexical order.
+Undated accepted knowledge is withheld and reported as `AS_OF_UNDATED`. Commit bounds of
+records whose repos, modules or features all belong to other registry repos are not resolved
+in the host: such records are withheld and reported as `AS_OF_BOUND_UNRESOLVED`; a missing
+commit of a product-wide or host-repo record remains an error. Dependencies outside the slice
+stay missing. Ranking statistics, aliases, ids and source filenames all use the same slice,
+so future corpus entries cannot change past lexical order; full-text terms fold diacritics as
+the index does (`cafe` matches `café`).
 
 This filters author-declared validity; it does not reconstruct older text, registries or
 review status. Replay must independently freeze the KB, host and generated/provider inputs.
@@ -124,8 +140,8 @@ Every task dimension is either *known* (a set, possibly empty) or *unknown*.
 | Dimension | Known when |
 |---|---|
 | repos | `--repo` is given; or the host repo is identified; plus repos named explicitly: a `repo:path` qualifier, the repo of an explicit `--module`, the only repo of an explicit `--feature` that declares exactly one repo. Explicit `--repo` values take precedence over the host repo. |
-| modules | `--path` or `--module` is given |
-| features | `--feature`, `--path` or `--module` is given: explicit features, features of resolved modules, features whose `paths` match |
+| modules | `--path`, `--module` or `--changed` is given (discovered paths alone do not count) |
+| features | `--feature`, `--path`, `--module` or `--changed` is given: explicit features, features of resolved modules, features whose `paths` match |
 | concepts | explicit `--concept` ids, plus concept aliases found in the normalized task text |
 
 **Paths.** A relative `--path` is taken relative to the current directory when that lies in
@@ -421,6 +437,7 @@ The overall status is the worst of all reasons (`complete` < `partial` < `confli
 | `NOT_APPROVED` | partial | the selected revision is not reachable from the approved tip |
 | `APPROVAL_UNKNOWN` | partial | no approved tip is known, so approval cannot be decided |
 | `REPO_UNKNOWN` | partial | no `--repo` and no identified host repo |
+| `AS_OF_BOUND_UNRESOLVED` | partial | `--as-of` withheld accepted records scoped to other repositories whose commit bounds cannot be resolved in this host |
 | `UNDETERMINED_OBLIGATIONS` | partial | obligations whose applicability is undetermined |
 | `DEPENDENCY_VERSION_UNDETERMINED` | partial | a required record's version constraint cannot be checked |
 | `SETTING_CONFLICT` | conflict | the most specific applicable overrides disagree |
@@ -441,8 +458,10 @@ their `expect_status` with the *knowledge status*, which ignores the provenance 
 
 Other findings are reported in `issues` without changing the status by themselves:
 `PATH_SCOPE_UNKNOWN`, `HOST_REPO_UNKNOWN`, `REQUIRES_DEPRECATED` (a deprecated required
-record, included with label `deprecated`), ignored overrides (`OVERRIDE_*`, warnings) and
-`PROPOSAL_INVALID`; every reason above that concerns a record is repeated there too.
+record, included with label `deprecated`), ignored overrides (`OVERRIDE_*`, warnings),
+`PROPOSAL_INVALID`, and the discovery notes `IDENTIFIER_AMBIGUOUS`, `TRACKED_NAMES_SKIPPED`,
+`CHANGED_TEXT_SKIPPED` (info) and `INFERRED_PATHS_TRUNCATED` (warning); every reason above
+that concerns a record is repeated there too.
 
 ## Receipts
 

@@ -504,23 +504,31 @@ pub fn info(response: &CodeResponse) -> Result<crate::context::code::CodeInfo> {
     })
 }
 
-pub fn paths_for_task(response: &CodeResponse, task: &str) -> Vec<String> {
+/// Files declaring symbols the task names. A name (case-insensitive leaf) declared in more
+/// than [`MAX_PATHS_PER_IDENTIFIER`](crate::context::discovery::MAX_PATHS_PER_IDENTIFIER)
+/// files is ambiguous and supplies no path.
+pub fn paths_for_task(
+    response: &CodeResponse,
+    task: &str,
+) -> crate::context::discovery::Discovered {
     let tokens = crate::normalize::tokens(task);
-    response
-        .symbols
-        .iter()
-        .filter(|s| symbol_mentioned(&s.name, &tokens))
-        .map(|s| s.path.clone())
-        .collect::<BTreeSet<_>>()
-        .into_iter()
-        .collect()
+    crate::context::discovery::Discovered::collect(
+        response
+            .symbols
+            .iter()
+            .filter(|s| symbol_mentioned(&s.name, &tokens))
+            .map(|s| (leaf(&s.name).to_lowercase(), &s.path)),
+    )
+}
+
+fn leaf(name: &str) -> &str {
+    name.rsplit([':', '.', '/'])
+        .find(|s| !s.is_empty())
+        .unwrap_or(name)
 }
 
 fn symbol_mentioned(name: &str, tokens: &[String]) -> bool {
-    let leaf = name
-        .rsplit([':', '.', '/'])
-        .find(|s| !s.is_empty())
-        .unwrap_or(name);
+    let leaf = leaf(name);
     if leaf.chars().count() < 4
         || ["main", "test", "tests", "build", "default"]
             .contains(&leaf.to_ascii_lowercase().as_str())
@@ -545,10 +553,7 @@ pub fn brief(
 ) -> Result<(Vec<crate::context::code::CodeEvidence>, Option<String>)> {
     let tokens = crate::normalize::tokens(request.task.as_deref().unwrap_or_default());
     let mut paths: BTreeSet<_> = request.paths.iter().cloned().collect();
-    paths.extend(paths_for_task(
-        response,
-        request.task.as_deref().unwrap_or_default(),
-    ));
+    paths.extend(paths_for_task(response, request.task.as_deref().unwrap_or_default()).paths);
     let callers: BTreeMap<_, _> = dependents(response, &paths, 2)
         .into_iter()
         .map(|d| (d.symbol, d.confidence))

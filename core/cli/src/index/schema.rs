@@ -337,4 +337,47 @@ mod tests {
     fn quotes_identifiers() {
         assert_eq!(quote_ident("a\"b"), "\"a\"\"b\"");
     }
+
+    /// Historical slices rank in Rust (`lexical::rank_corpus`); its term folding must agree
+    /// with the FTS5 tokenizer of `docs_fts` for every character that normalizes to a token.
+    #[test]
+    fn slice_term_folding_matches_the_full_text_tokenizer() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(DDL).unwrap();
+        conn.execute_batch(
+            "CREATE VIRTUAL TABLE temp.vocab USING fts5vocab(main, docs_fts, instance)",
+        )
+        .unwrap();
+        let mut expected = BTreeMap::new();
+        let mut insert = conn
+            .prepare("INSERT INTO docs_fts (rowid, ids) VALUES (?1, ?2)")
+            .unwrap();
+        for c in (0x80..=0x10FFFF).filter_map(char::from_u32) {
+            if let [token] = crate::normalize::tokens(&c.to_string()).as_slice() {
+                // Surrounding ASCII keeps every character inside one FTS token.
+                let folded = crate::context::lexical::fts_term(token);
+                insert.execute((c as i64, format!("x{token}x"))).unwrap();
+                expected.insert(c as i64, (token.clone(), format!("x{folded}x")));
+            }
+        }
+        let mut terms: BTreeMap<i64, Vec<String>> = BTreeMap::new();
+        let mut rows = conn.prepare("SELECT doc, term FROM temp.vocab").unwrap();
+        for row in rows.query_map([], |r| Ok((r.get(0)?, r.get(1)?))).unwrap() {
+            let (doc, term) = row.unwrap();
+            terms.entry(doc).or_default().push(term);
+        }
+        let mut folded = 0;
+        for (doc, (token, want)) in &expected {
+            // Characters unicode61 treats as separators (or as unassigned in its Unicode
+            // version) split or drop the token; that involves no folding.
+            if let Some([got]) = terms.get(doc).map(Vec::as_slice) {
+                assert_eq!(got, want, "U+{doc:04X}");
+                folded += usize::from(*want != format!("x{token}x"));
+            }
+        }
+        assert!(
+            folded > 400,
+            "only {folded} folded characters were compared"
+        );
+    }
 }
