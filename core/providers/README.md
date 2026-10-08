@@ -14,10 +14,15 @@ Build with `cargo build --release -p kb-code-provider --locked`.
 
 Use `--backend ast-index` for the other adapter. The adapter's `--timeout` (default
 120 seconds) bounds each native command; the engine's `--provider-timeout` bounds the
-entire invocation. Plain invocation reads one request from stdin and writes one response
-to stdout. Schemas live in `core/schemas/code-{request,response}.v1.schema.json`.
+entire invocation. Native tools and snapshot Git stay in the provider's process group, so
+the engine's deadline ends them too. The engine points `TMPDIR` at a private directory
+that it removes after every invocation, including the temporary checkout of a provider
+killed at the deadline. Plain invocation reads one request from stdin and writes one
+response to stdout. Schemas live in `core/schemas/code-{request,response}.v1.schema.json`.
 Alternatively, `--provider-file response.json` replays pinned facts without a native tool;
-repeat this option for base and head when running `impact --deep`.
+repeat this option for base and head when running `impact --deep`. A pinned response
+does not replay its `similar` candidates, which answered the task of the request that
+produced them; a limitation reports their omission.
 
 Every request materializes ordinary files from the requested Git commit into a temporary
 checkout with an isolated home and index. It never checks out, cleans, stages or writes

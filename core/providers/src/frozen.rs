@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use kb::error::{KbError, Result};
 use kb::model::CodeRequest;
-use kb::process::{Limits, capture};
+use kb::process::{Limits, capture_in_group};
 
 pub(crate) struct Frozen {
     _temp: tempfile::TempDir,
@@ -72,7 +72,7 @@ impl Frozen {
             ])
             .args(args);
         self.environment(&mut command);
-        let output = capture(
+        let output = capture_in_group(
             &mut command,
             input,
             Limits {

@@ -281,16 +281,20 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
             env.inferred_paths.extend(inferred);
             env.inferred_paths.sort();
             env.inferred_paths.dedup();
-            env.code_units = crate::code::brief(&response, &code_request, 8)?;
+            let (units, omitted) = crate::code::brief(&response, &code_request, 8)?;
+            env.code_units = units;
             let digest = crate::util::sha256_hex(
                 context::canonical_json(&serde_json::to_value(&response)?).as_bytes(),
             );
+            let mut limitations = response.limitations;
+            limitations.extend(omitted);
+            limitations.sort();
             env.code_info = Some(context::code::CodeInfo {
                 repo: response.repo,
                 commit: response.commit,
                 tool: response.tool,
                 complete: response.complete,
-                limitations: response.limitations,
+                limitations,
                 digest,
             });
         }

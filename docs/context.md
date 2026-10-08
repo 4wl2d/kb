@@ -541,7 +541,9 @@ delivery receipt and cannot replace `context` before editing.
 reference/consumer facts and precedent candidates are optional code units after KB
 supplementary records, sharing the same budget. They are labeled observed/provider, never
 accepted knowledge. The response retains tool/version, full commit, digest, completeness
-and limitations. Name-based static edges are not runtime reachability. See
+and limitations. A pinned response file supplies no precedent candidates, and a unit whose
+source is not UTF-8 is omitted; limitations report both. Name-based static edges are not
+runtime reachability. See
 [reference adapters](../core/providers/README.md).
 
 ### Compact (default, for agents)

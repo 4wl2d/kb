@@ -276,6 +276,90 @@ pub fn blob_at(root: &Path, revision: &str, path: &str, max_bytes: u64) -> Resul
     Ok(None)
 }
 
+/// [`blob_at`] for many paths of one immutable tree with one `ls-tree` listing and batched
+/// `cat-file --batch` reads of at most 64 MiB each, not three processes per file. `visit`
+/// receives every requested path in order, with None when it is absent or not a blob.
+pub fn for_each_blob_at(
+    root: &Path,
+    revision: &str,
+    paths: &BTreeSet<String>,
+    max_bytes: u64,
+    mut visit: impl FnMut(&str, Option<&[u8]>) -> Result<()>,
+) -> Result<()> {
+    const BATCH_BYTES: u64 = 64 * 1024 * 1024;
+    if paths.is_empty() {
+        return Ok(());
+    }
+    for path in paths {
+        check_rel_path(path).map_err(KbError::unsafe_path)?;
+    }
+    let git = Git::new(root);
+    let commit = git
+        .resolve_commit(revision)?
+        .ok_or_else(|| KbError::invalid_input(format!("unknown host revision {revision}")))?;
+    let listing = git.run_bytes(&["ls-tree", "-r", "-l", "-z", &commit, "--"])?;
+    let mut found = BTreeMap::new();
+    for entry in listing.split(|b| *b == 0).filter(|b| !b.is_empty()) {
+        // Unrequested names may be any bytes; only exact requested names are interpreted.
+        let Some(tab) = entry.iter().position(|b| *b == b'\t') else {
+            continue;
+        };
+        let Some(path) = std::str::from_utf8(&entry[tab + 1..])
+            .ok()
+            .and_then(|name| paths.get(name))
+        else {
+            continue;
+        };
+        let metadata = std::str::from_utf8(&entry[..tab])
+            .map_err(|_| KbError::invalid_input("invalid Git tree metadata"))?;
+        let parts: Vec<_> = metadata.split_whitespace().collect();
+        if parts.len() != 4 || parts[1] != "blob" {
+            continue;
+        }
+        if !matches!(parts[0], "100644" | "100755") {
+            return Err(KbError::unsafe_path(format!(
+                "{path} is not an ordinary Git file"
+            )));
+        }
+        let size = parts[3]
+            .parse::<u64>()
+            .map_err(|_| KbError::invalid_input("invalid Git blob size"))?;
+        if size > max_bytes {
+            return Err(KbError::invalid_input(format!(
+                "{path} exceeds the {max_bytes}-byte limit"
+            )));
+        }
+        found.insert(path.as_str(), (parts[2].to_string(), size));
+    }
+    let mut pending = paths.iter().peekable();
+    while pending.peek().is_some() {
+        let mut group = Vec::new();
+        let mut bytes = 0;
+        while let Some(path) = pending.peek() {
+            let size = found.get(path.as_str()).map_or(0, |(_, size)| *size);
+            if !group.is_empty() && bytes + size > BATCH_BYTES {
+                break;
+            }
+            bytes += size;
+            group.extend(pending.next());
+        }
+        let oids: Vec<_> = group
+            .iter()
+            .filter_map(|path| found.get(path.as_str()).map(|(oid, _)| oid.clone()))
+            .collect();
+        let mut blobs = git.cat_file_batch(&oids)?.into_iter();
+        for path in group {
+            let blob = if found.contains_key(path.as_str()) {
+                blobs.next()
+            } else {
+                None
+            };
+            visit(path, blob.as_deref())?;
+        }
+    }
+    Ok(())
+}
+
 /// Ordinary stage-0 index blob, independent of unstaged changes. Unmerged files have no
 /// single version and return None instead of borrowing a version from the work tree.
 pub fn index_blob(root: &Path, path: &str, max_bytes: usize) -> Result<Option<Vec<u8>>> {

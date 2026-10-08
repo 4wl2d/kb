@@ -11,7 +11,7 @@ use std::time::Duration;
 use clap::ValueEnum;
 use kb::error::{KbError, Result};
 use kb::model::*;
-use kb::process::{Limits, capture};
+use kb::process::{Limits, capture_in_group};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum Backend {
@@ -105,7 +105,9 @@ fn native(frozen: &frozen::Frozen, options: &Options, args: &[&str]) -> Result<V
     let mut command = Command::new(tool);
     command.args(args).current_dir(&frozen.root);
     frozen.environment(&mut command);
-    let output = capture(
+    // Native tools and snapshot Git stay in the provider's process group, so the engine's
+    // deadline ends them together with the provider.
+    let output = capture_in_group(
         &mut command,
         &[],
         Limits {

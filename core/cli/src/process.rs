@@ -1,5 +1,6 @@
 //! Bounded, shell-free subprocess adapter. No output or duration enters deterministic data
-//! unless the caller explicitly chooses it. Each child owns a separate Unix process group.
+//! unless the caller explicitly chooses it. Each child owns a separate Unix process group,
+//! except that [`capture_in_group`] keeps a nested child in its caller's group.
 
 use std::io::{Read, Write};
 use std::process::{Child, Command, Stdio};
@@ -27,23 +28,36 @@ enum Event {
     Input(std::io::Result<()>),
 }
 
-fn stop(child: &mut Child) {
+fn stop(child: &mut Child, own_group: bool) {
     #[cfg(unix)]
     {
         // The child has not been reaped and was spawned with process_group(0), so its PID
         // cannot be reused and this negative PID names only our owned process group.
-        if let Ok(pid) = i32::try_from(child.id()) {
+        if own_group && let Ok(pid) = i32::try_from(child.id()) {
             // SAFETY: kill receives a valid signal and a verified, owned process-group id.
             unsafe {
                 libc::kill(-pid, libc::SIGKILL);
             }
         }
     }
+    #[cfg(not(unix))]
+    let _ = own_group;
     let _ = child.kill();
     let _ = child.wait();
 }
 
 pub fn capture(command: &mut Command, input: &[u8], limits: Limits) -> Result<Captured> {
+    run(command, input, limits, true)
+}
+
+/// [`capture`] for a program started by a process that itself runs under a caller's
+/// deadline, such as a code provider's native tool or Git. The child stays in the caller's
+/// process group, so the caller's group kill also ends it; this deadline kills the child.
+pub fn capture_in_group(command: &mut Command, input: &[u8], limits: Limits) -> Result<Captured> {
+    run(command, input, limits, false)
+}
+
+fn run(command: &mut Command, input: &[u8], limits: Limits, own_group: bool) -> Result<Captured> {
     if limits.timeout.is_zero() || limits.stdout == 0 || limits.stderr == 0 {
         return Err(KbError::invalid_input("process limits must be positive"));
     }
@@ -52,7 +66,7 @@ pub fn capture(command: &mut Command, input: &[u8], limits: Limits) -> Result<Ca
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     #[cfg(unix)]
-    {
+    if own_group {
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
@@ -148,7 +162,7 @@ pub fn capture(command: &mut Command, input: &[u8], limits: Limits) -> Result<Ca
         }
     })();
     if gathered.is_err() {
-        stop(&mut child);
+        stop(&mut child, own_group);
     }
     // Never let a nonconforming daemon that escaped its process group hold up a timeout.
     for thread in [writer, out_reader, err_reader] {

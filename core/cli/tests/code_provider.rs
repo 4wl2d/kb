@@ -3,7 +3,7 @@ mod common;
 
 use std::collections::BTreeSet;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use common::{Sandbox, json, write};
 use kb::model::*;
@@ -11,6 +11,11 @@ use kb::model::*;
 // Library adapters also invoke Git. Isolate the child rather than changing the parallel
 // test runner's global HOME.
 fn isolated(name: &str) -> bool {
+    isolated_with(name, |_, _| {})
+}
+
+/// `configure` may add environment and files to a sandbox that outlives the child.
+fn isolated_with(name: &str, configure: impl FnOnce(&mut std::process::Command, &Path)) -> bool {
     if std::env::var("KB_PROVIDER_TEST").as_deref() == Ok(name) {
         return false;
     }
@@ -20,6 +25,7 @@ fn isolated(name: &str) -> bool {
         .args(["--exact", name, "--nocapture"])
         .env("KB_PROVIDER_TEST", name);
     common::isolated_env(&mut command, &sb.home());
+    configure(&mut command, &sb.path());
     let out = command.output().unwrap();
     assert!(
         out.status.success(),
@@ -312,6 +318,186 @@ fn context_code_is_opt_in_repeatable_budgeted_and_reads_git_not_dirty_source() {
         2
     );
     assert!(limited["budget"]["used"].as_u64().unwrap() <= budget.parse::<u64>().unwrap());
+}
+
+fn code_units(result: &serde_json::Value) -> Vec<serde_json::Value> {
+    result["units"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|u| u["kind"] == "code")
+        .cloned()
+        .collect()
+}
+
+fn code_limitations(result: &serde_json::Value) -> Vec<String> {
+    result["code"]["limitations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|l| l.as_str().unwrap().to_string())
+        .collect()
+}
+
+#[test]
+fn non_utf8_code_unit_is_omitted_with_a_limitation_instead_of_failing_context() {
+    if isolated("non_utf8_code_unit_is_omitted_with_a_limitation_instead_of_failing_context") {
+        return;
+    }
+    let w = World::new();
+    // Synthetic Latin-1 comment byte; the provider stamp still matches the Git blob.
+    fs::write(
+        w.host.join("app/auth/Client.rs"),
+        b"pub fn client() { save(); } // caf\xe9\n",
+    )
+    .unwrap();
+    let head = w.sb.commit_all(&w.host, "synthetic latin-1 comment");
+    let fixture = w.fixture(&w.graph(&head));
+    let result = w.run(
+        &[
+            "context",
+            "--intent",
+            "implement",
+            "--path",
+            "app/auth/Core.rs",
+            "--with-code",
+            "--provider-file",
+            fixture.to_str().unwrap(),
+            "--budget",
+            "8000",
+        ],
+        30,
+    );
+    let titles: BTreeSet<_> = code_units(&result)
+        .iter()
+        .map(|u| u["title"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(
+        titles,
+        BTreeSet::from(["save".to_string(), "test_client".to_string()])
+    );
+    assert!(
+        code_limitations(&result)
+            .contains(&"Omitted 1 code unit(s) whose source is not UTF-8.".into()),
+        "{}",
+        result["code"]
+    );
+}
+
+#[test]
+fn pinned_response_does_not_replay_task_specific_similar_candidates() {
+    if isolated("pinned_response_does_not_replay_task_specific_similar_candidates") {
+        return;
+    }
+    let w = World::new();
+    let mut graph = w.graph(&w.base);
+    // As generated for another task; `save` is related to the requested path only by it.
+    graph.similar = vec![CodeSimilar {
+        symbol: "save".into(),
+        score: 1000,
+        reason: "lexical overlap with the task; inspect before reusing as a precedent".into(),
+    }];
+    let fixture = w.fixture(&graph);
+    let result = w.run(
+        &[
+            "context",
+            "--intent",
+            "implement",
+            "--path",
+            "app/auth/tests/ClientTest.rs",
+            "--with-code",
+            "--provider-file",
+            fixture.to_str().unwrap(),
+            "--budget",
+            "8000",
+        ],
+        30,
+    );
+    let units = code_units(&result);
+    assert!(!units.is_empty());
+    assert!(
+        units.iter().all(
+            |u| u["title"] != "save" && !u["why"].as_str().unwrap().contains("lexical overlap")
+        ),
+        "{units:?}"
+    );
+    assert!(code_limitations(&result).contains(&kb::code::PINNED_SIMILAR.into()));
+    let request = w.request(&w.base);
+    let replayed = kb::code::Provider {
+        files: vec![fixture],
+        ..Default::default()
+    }
+    .load(&request)
+    .unwrap();
+    assert!(replayed.similar.is_empty());
+}
+
+#[test]
+fn validation_reads_files_with_a_constant_number_of_git_processes() {
+    let name = "validation_reads_files_with_a_constant_number_of_git_processes";
+    let logging = isolated_with(name, |command, dir| {
+        // Synthetic shim first on PATH: log each Git invocation, then run the real Git.
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let real = std::env::split_paths(&path)
+            .map(|d| d.join("git"))
+            .find(|p| p.is_file())
+            .expect("git on PATH");
+        let shim = dir.join("shim");
+        write(
+            &shim.join("git"),
+            &format!(
+                "#!/bin/sh\necho \"$*\" >> \"$KB_GIT_LOG\"\nexec '{}' \"$@\"\n",
+                real.display()
+            ),
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(shim.join("git"), fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let mut dirs = vec![shim];
+        dirs.extend(std::env::split_paths(&path));
+        command
+            .env("PATH", std::env::join_paths(dirs).unwrap())
+            .env("KB_GIT_LOG", dir.join("git.log"));
+    });
+    if logging {
+        return;
+    }
+    let w = World::new();
+    for i in 0..40 {
+        write(
+            &w.host.join(format!("app/auth/gen/F{i:02}.rs")),
+            &format!("pub fn generated_{i}() {{}}\n"),
+        );
+    }
+    let head = w.sb.commit_all(&w.host, "synthetic generated sources");
+    let mut graph = w.graph(&head);
+    for i in 0..40 {
+        graph.symbols.push(CodeSymbol {
+            id: format!("generated_{i}"),
+            name: format!("generated_{i}"),
+            kind: "function".into(),
+            path: format!("app/auth/gen/F{i:02}.rs"),
+            start_line: 1,
+            end_line: 1,
+            extent: CodeExtent::Line,
+            sha256: kb::util::sha256_hex(format!("pub fn generated_{i}() {{}}\n").as_bytes()),
+            signature: None,
+            test: false,
+        });
+    }
+    let request = w.request(&head);
+    let log = PathBuf::from(std::env::var_os("KB_GIT_LOG").unwrap());
+    fs::write(&log, "").unwrap();
+    let validated = kb::code::validate(graph, &request).unwrap();
+    assert_eq!(validated.symbols.len(), 43);
+    let calls = fs::read_to_string(&log).unwrap();
+    // Resolve the commit, list the tree, read every blob in one batch.
+    assert!(
+        calls.lines().count() <= 3 && calls.contains("cat-file --batch"),
+        "{calls}"
+    );
 }
 
 #[test]

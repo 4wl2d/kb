@@ -53,10 +53,13 @@ impl Provider {
                     "choose a provider program or provider files, not both",
                 ));
             }
+            // A provider killed at the deadline cannot remove its temporary checkout itself.
+            let scratch = Scratch::create()?;
             let mut command = Command::new(program);
             command
                 .args(&self.args)
                 .current_dir(&request.root)
+                .env("TMPDIR", &scratch.0)
                 .env("CODEGRAPH_NO_DAEMON", "1")
                 .env("CODEGRAPH_TELEMETRY", "0")
                 .env("CODEGRAPH_NO_UPDATE_CHECK", "1")
@@ -103,7 +106,52 @@ impl Provider {
             }
             matching.remove(0)
         };
-        validate(response, request)
+        let mut response = validate(response, request)?;
+        if self.program.is_none() && !response.similar.is_empty() {
+            // Similarity answers the generating request's task and identifiers, which a
+            // pinned response does not record; replaying it would mislabel precedents.
+            response.similar.clear();
+            response.limitations.push(PINNED_SIMILAR.into());
+            response.limitations.sort();
+            response.limitations.dedup();
+        }
+        Ok(response)
+    }
+}
+
+pub const PINNED_SIMILAR: &str =
+    "A pinned provider response does not replay its task-specific similar candidates.";
+
+/// Engine-owned temporary directory for one provider call, removed on drop.
+struct Scratch(PathBuf);
+
+impl Scratch {
+    fn create() -> Result<Self> {
+        let base = std::env::temp_dir();
+        let mut attempt = 0;
+        loop {
+            let path = base.join(format!(
+                "kb-provider-{}-{:016x}",
+                std::process::id(),
+                crate::util::unique_suffix()
+            ));
+            let mut builder = std::fs::DirBuilder::new();
+            #[cfg(unix)]
+            std::os::unix::fs::DirBuilderExt::mode(&mut builder, 0o700);
+            match builder.create(&path) {
+                Ok(()) => return Ok(Self(path)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < 16 => {
+                    attempt += 1;
+                }
+                Err(e) => return Err(KbError::io("provider temporary directory", e)),
+            }
+        }
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -174,9 +222,6 @@ pub fn validate(mut response: CodeResponse, request: &CodeRequest) -> Result<Cod
         .symbols
         .sort_by(|a, b| (&a.path, a.start_line, &a.id).cmp(&(&b.path, b.start_line, &b.id)));
     let mut ids = BTreeSet::new();
-    let mut blob_path = String::new();
-    let mut blob = Vec::new();
-    let mut line_counts = BTreeMap::new();
     let mut symbol_paths = BTreeMap::new();
     for symbol in &response.symbols {
         if !single_line(&symbol.id, 1024)
@@ -193,43 +238,45 @@ pub fn validate(mut response: CodeResponse, request: &CodeRequest) -> Result<Cod
             ));
         }
         check_rel_path(&symbol.path).map_err(KbError::unsafe_path)?;
-        if blob_path != symbol.path {
-            blob = crate::host::facts::blob_at(
-                Path::new(&request.root),
-                &request.commit,
-                &symbol.path,
-                crate::provenance::MAX_ANCHOR_BYTES,
-            )?
-            .ok_or_else(|| {
+        symbol_paths.insert(symbol.id.as_str(), symbol.path.as_str());
+    }
+    let paths: BTreeSet<String> = response.symbols.iter().map(|s| s.path.clone()).collect();
+    let mut line_counts = BTreeMap::new();
+    // Symbols are sorted by path, the order in which their files are visited.
+    let mut pending = response.symbols.iter().peekable();
+    crate::host::facts::for_each_blob_at(
+        Path::new(&request.root),
+        &request.commit,
+        &paths,
+        crate::provenance::MAX_ANCHOR_BYTES,
+        |path, blob| {
+            let blob = blob.ok_or_else(|| {
                 KbError::invalid_input(format!(
-                    "provider file {} is absent at the requested commit",
-                    symbol.path
+                    "provider file {path} is absent at the requested commit"
                 ))
             })?;
-            blob_path = symbol.path.clone();
-            line_counts.insert(
-                blob_path.clone(),
-                blob.split_inclusive(|b| *b == b'\n').count().max(1),
-            );
-        }
-        symbol_paths.insert(symbol.id.as_str(), symbol.path.as_str());
-        if (symbol.extent == CodeExtent::Line && symbol.start_line != symbol.end_line)
-            || (symbol.extent == CodeExtent::File
-                && (symbol.start_line != 1
-                    || symbol.end_line as usize != line_counts[&symbol.path]))
-        {
-            return Err(KbError::invalid_input(
-                "provider extent disagrees with its source span",
-            ));
-        }
-        let bytes = crate::provenance::line_span(&blob, symbol.start_line, symbol.end_line)?;
-        if sha256_hex(bytes) != symbol.sha256 {
-            return Err(KbError::invalid_input(format!(
-                "provider stamp for {} does not match Git content",
-                symbol.id
-            )));
-        }
-    }
+            let lines = blob.split_inclusive(|b| *b == b'\n').count().max(1);
+            line_counts.insert(path.to_string(), lines);
+            while let Some(symbol) = pending.next_if(|s| s.path == path) {
+                if (symbol.extent == CodeExtent::Line && symbol.start_line != symbol.end_line)
+                    || (symbol.extent == CodeExtent::File
+                        && (symbol.start_line != 1 || symbol.end_line as usize != lines))
+                {
+                    return Err(KbError::invalid_input(
+                        "provider extent disagrees with its source span",
+                    ));
+                }
+                let bytes = crate::provenance::line_span(blob, symbol.start_line, symbol.end_line)?;
+                if sha256_hex(bytes) != symbol.sha256 {
+                    return Err(KbError::invalid_input(format!(
+                        "provider stamp for {} does not match Git content",
+                        symbol.id
+                    )));
+                }
+            }
+            Ok(())
+        },
+    )?;
     for edge in &response.refs {
         if !ids.contains(&edge.from)
             || !ids.contains(&edge.to)
@@ -489,12 +536,13 @@ fn symbol_mentioned(name: &str, tokens: &[String]) -> bool {
 }
 
 /// Compose bounded candidate units, reading their actual source from the pinned Git tree.
-/// Budgeting later either includes or excludes each whole unit.
+/// Budgeting later either includes or excludes each whole unit. Candidates whose source is
+/// not UTF-8 are omitted, never failing the command, and reported as a limitation.
 pub fn brief(
     response: &CodeResponse,
     request: &CodeRequest,
     limit: usize,
-) -> Result<Vec<crate::context::code::CodeEvidence>> {
+) -> Result<(Vec<crate::context::code::CodeEvidence>, Option<String>)> {
     let tokens = crate::normalize::tokens(request.task.as_deref().unwrap_or_default());
     let mut paths: BTreeSet<_> = request.paths.iter().cloned().collect();
     paths.extend(paths_for_task(
@@ -549,6 +597,7 @@ pub fn brief(
     });
     candidates.truncate(limit);
     let mut out = Vec::new();
+    let mut not_utf8 = 0;
     for (_, symbol, role, reason) in candidates {
         let bytes = crate::host::facts::blob_at(
             Path::new(&request.root),
@@ -560,9 +609,10 @@ pub fn brief(
             KbError::invalid_input("provider source disappeared from its pinned Git tree")
         })?;
         let span = crate::provenance::line_span(&bytes, symbol.start_line, symbol.end_line)?;
-        let source = std::str::from_utf8(span)
-            .map_err(|_| KbError::invalid_input("code evidence is not UTF-8"))?
-            .to_string();
+        let Ok(source) = std::str::from_utf8(span).map(str::to_string) else {
+            not_utf8 += 1;
+            continue;
+        };
         out.push(crate::context::code::CodeEvidence {
             repo: response.repo.clone(),
             commit: response.commit.clone(),
@@ -573,5 +623,7 @@ pub fn brief(
             source,
         });
     }
-    Ok(out)
+    let omitted = (not_utf8 > 0)
+        .then(|| format!("Omitted {not_utf8} code unit(s) whose source is not UTF-8."));
+    Ok((out, omitted))
 }
