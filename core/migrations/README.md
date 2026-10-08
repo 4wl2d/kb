@@ -31,7 +31,9 @@ What is scanned (directly in the working tree, so it works while the current eng
 rejects a legacy profile config):
 
 * the profile config (`project/project.toml`, or `--config` / `--profile maintainer`),
-* registry files `registry/{owners,repos,modules,features,concepts}.toml`,
+* registry files `registry/{owners,repos,modules,features,concepts,change-types}.toml`
+  (`change-types.toml` exists only at schema 2: `kb validate` rejects any other declared
+  `schema`, and the `v1-to-v2` step bumps a schema-1 declaration),
 * record files (`*.md` except `README.md`) under the knowledge roots declared by the
   config (`[knowledge] roots`, default `["knowledge"]`).
 

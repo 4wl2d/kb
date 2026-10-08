@@ -133,7 +133,20 @@ implicit timezone; commit ancestry is resolved by the host adapter, never by the
 Probe kinds: `commit-message`/`branch-name` with `pattern`; `forbidden-import` with nonempty
 `from`/`to` globs; `naming`/`banned-api` with nonempty `paths` and a regex `pattern`. Unknown
 fields, invalid regexes and unsafe globs are errors. A probe declaration is not evidence
-that it ran. See the record templates for synthetic authoring examples.
+that it ran. A synthetic probe on a rule of the example's `example.mobile.token-storage`
+policy:
+
+```toml
+[[rules]]
+id = "no-plaintext"
+level = "must-not"
+text = "Write refresh tokens to logs, preferences, files or crash reports."
+
+[[rules.verify]]
+kind = "banned-api"
+paths = ["mobile:app/auth/**"]   # repo-relative globs, optionally "repo:glob"
+pattern = 'Log\.[a-z]+\(.*refreshToken'
+```
 
 ### Original kind fields
 
@@ -644,7 +657,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `FRONT_MATTER_SYNTAX` | TOML syntax error, including duplicate keys |
 | `FRONT_MATTER_INVALID` | strict typed parse failed: unknown field, wrong type, unknown enum value, missing required field (also a top-level key written after a table) |
 | `SCHEMA_FIELD_MISSING` / `SCHEMA_FIELD_INVALID` | `schema` is absent / not an integer |
-| `UNSUPPORTED_SCHEMA_VERSION` | `schema` is not `1` (records, registry files, routing fixtures) |
+| `UNSUPPORTED_SCHEMA_VERSION` | `schema` is not readable by this engine: records and registry files accept `1` or `2`, `registry/change-types.toml` requires `2`, routing fixtures require `1` |
 | `KIND_MISSING` / `KIND_INVALID` / `KIND_UNKNOWN` | `kind` is absent / not a string / not one of the eight kinds |
 | `BODY_INVALID` | duplicate section slug, or a `## ` heading with an empty slug |
 | `NON_RECORD_FILE` (warning) | a non-`.md` file under a knowledge root is ignored |
@@ -692,7 +705,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `DUPLICATE_ID` | the same id is defined in more than one file (reported for every file; context serves the first file by path) |
 | `OWNER_UNKNOWN` | the owner, or an `override_owners` entry, is not in `owners.toml` |
 | `OWNER_NOT_AUTHORIZED` | the owner has no authority over the record's scope |
-| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or the feature field does not exist |
+| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or consumers, the `repo:` qualifier of a `verify` probe glob, or the feature field does not exist |
 | `SCOPE_UNSATISFIABLE` | no task can match every scope dimension |
 | `CONTRACT_PARTY_OUT_OF_SCOPE` | a party's repo is outside the contract's scope, so the contract would not reach that party |
 | `CONTRACT_PARTY_MODULE_MISMATCH` | a party lists a module of another repo |
@@ -715,12 +728,48 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `REGISTRY_DUPLICATE_ID` | an id repeats within one registry file |
 | `REGISTRY_UNKNOWN_REPO` | an owner, module, feature or `repo:` glob qualifier names an unknown repo |
 | `REGISTRY_UNKNOWN_FEATURE` | a module lists an unknown feature |
-| `REGISTRY_GLOB_INVALID` | a module, feature or concept glob is invalid |
+| `REGISTRY_GLOB_INVALID` | a module, feature, concept or change-type glob is invalid |
 | `REGISTRY_PATH_INVALID` | a repo `version_file` is not a safe relative path |
-| `REGISTRY_ALIAS_INVALID` | a concept alias normalizes to nothing |
+| `REGISTRY_ALIAS_INVALID` | a concept alias, or a change-type alias or symbol, normalizes to nothing |
 
 Problems in `project.toml` are not diagnostics: they stop every command with
-`CONFIG_INVALID` (exit 11), or `UNSUPPORTED_SCHEMA_VERSION` (exit 13) for another `schema`.
+`CONFIG_INVALID` (exit 11), or `UNSUPPORTED_SCHEMA_VERSION` (exit 13) for a `schema` other
+than `1` or `2`.
+
+### Schema-2 fields (`parse.rs`, `parse/evolution.rs`, `validate.rs`, `model/registry.rs`, `freshness.rs`)
+
+The fields are described in [Schema 2 additions](#schema-2-additions). Their lists, local ids
+and texts also use the generic `LIST_TOO_LONG`, `LIST_DUPLICATE`, `LOCAL_ID_INVALID`,
+`LOCAL_ID_DUPLICATE`, `TEXT_EMPTY` and `TEXT_TOO_LONG` codes above.
+
+| Code | Meaning |
+|---|---|
+| `SCHEMA_FIELD_UNAVAILABLE` | a `schema = 1` record uses a schema-2 field (for example `introduced`, `delivery`, `scope.change_types`, `verify`, `anchors.stamp` or the `diagnose` intent); run `kb migrate` |
+| `TEMPORAL_INVALID` | `introduced`/`retired` is neither an ISO calendar date nor a 7–64 hex commit id, or `verified_at`/`review_by` is not an ISO calendar date |
+| `TEMPORAL_ORDER` | a date `retired` is not after `introduced` (the upper bound is exclusive) |
+| `TEMPORAL_KIND_MISMATCH` | `introduced` and `retired` mix a date and a commit id |
+| `FRESHNESS_ORDER` | `review_by` precedes `verified_at` |
+| `CHANGE_TYPE_INVALID` | a `scope.change_types` entry, or an id in `registry/change-types.toml`, is not a valid local id |
+| `UNKNOWN_CHANGE_TYPE` | a `scope.change_types` entry is not in `registry/change-types.toml` |
+| `DELIVERY_SCOPE_INVALID` | `delivery = "always"` without unconditional product scope (`product = true`, no `change_types`, no `applicability`) |
+| `ANCHOR_STAMP_INVALID` | an `anchors.stamp` lacks a path (and a repo, except on `doc` anchors), a commit id, a nonzero inclusive line range or a lowercase hex SHA-256 |
+| `ANCHOR_STAMP_COMMIT_MISMATCH` | the anchor's `commit` and its stamp's `commit` disagree |
+| `TRANSITION_STATE_UNKNOWN` | a feature transition's `from` or `to` is not a declared state |
+| `CONSUMER_INVALID` / `CONSUMER_DUPLICATE` | a contract consumer lacks a registry repo id or a safe repo-relative path / repeats the same repo, path and symbol |
+| `TERM_DUPLICATE` | two glossary `terms` normalize to the same term |
+| `VERIFY_INVALID` | a `forbidden-import` probe has empty `from` or `to`, or a `naming`/`banned-api` probe has empty `paths` |
+| `VERIFY_GLOB_INVALID` | a probe glob is unsafe or not valid glob syntax |
+| `VERIFY_REGEX_INVALID` | a probe `pattern` is not a valid regex or exceeds the 1 MiB compiled-size limit |
+| `FRESHNESS_DATE_UNKNOWN` (warning) | no reference date: no `--on` and no commit date to read; freshness is not evaluated |
+| `REVIEW_OVERDUE` (warning) | `review_by` is before the reference date |
+| `VERIFIED_AT_FUTURE` (warning) | `verified_at` is after the reference date |
+| `KNOWLEDGE_STALE` (warning) | (`--stale <days>`) `verified_at` is older than the allowed age |
+| `VERIFIED_AT_MISSING` (warning) | (`--stale <days>`) the record has no `verified_at` |
+
+The five freshness warnings concern accepted records only, and only those with
+`verified_at` or `review_by` unless `--stale` is given. The reference date is `--on`, else
+the commit date of the host `HEAD` (outside a host, of the validated KB revision).
+`kb context` reports the same warnings for the records it delivers.
 
 ### Routing fixtures, templates and informational notes (`context/routing.rs`, `validate.rs`, `cli/cmd_validate.rs`)
 

@@ -126,7 +126,7 @@ Two different causes share this code; `details` tells them apart.
 
 ## SKILL_OUTDATED
 
-* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 1` (exit 23), `details = {"caller": 99, "engine": 1}`.
+* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 2` (exit 23), `details = {"caller": 99, "engine": 2}`.
 * **Cause**: generated skills pass `--skill-protocol <n>`; the KB's engine changed the skill
   protocol since the agent loaded its instructions.
 * **Fix**: re-read the installed `SKILL.md` (or start a new session so the harness reloads

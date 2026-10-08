@@ -96,7 +96,27 @@ fn render_text(p: &InitPlan, applied: bool, written: usize) -> String {
             .join(", ")
     ));
     if applied {
-        s.push_str("next: review and commit project/ and .github/workflows/kb-knowledge.yml, then run `./kbw validate`\n");
+        // Name everything init wrote outside project/ (CI and review templates), so the
+        // first commit does not leave part of the scaffolding untracked.
+        let mut paths: Vec<&str> = Vec::new();
+        for c in p.changes.iter().filter(|c| c.action.writes()) {
+            let path = if c.path.starts_with("project/") {
+                "project/"
+            } else {
+                c.path.as_str()
+            };
+            if !paths.contains(&path) {
+                paths.push(path);
+            }
+        }
+        paths.sort_by_key(|path| *path != "project/");
+        let list = match paths.split_last() {
+            Some((last, rest)) if !rest.is_empty() => format!("{} and {last}", rest.join(", ")),
+            _ => paths.concat(),
+        };
+        s.push_str(&format!(
+            "next: review and commit {list}, then run `./kbw validate`\n"
+        ));
     } else {
         s.push_str("next: re-run with --apply to write these files\n");
     }

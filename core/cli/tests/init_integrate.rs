@@ -413,6 +413,40 @@ fn init_never_overwrites_existing_files() {
 }
 
 #[test]
+fn init_next_hint_names_every_written_path_outside_project() {
+    let kb = Kb::new();
+    // A kept file is not written, so the hint must not ask to commit it.
+    write(
+        &kb.root.join(".github/pull_request_template.md"),
+        "Human review process.\n",
+    );
+    let root = kb.root.to_str().unwrap();
+    let args = [
+        "--root",
+        root,
+        "init",
+        "--name",
+        "Acme",
+        "--namespace",
+        "acme",
+        "--apply",
+    ];
+    let o = kb.sb.kb(&kb.sb.path(), &args, &[]);
+    assert_ok(&o);
+    let text = common::stdout(&o);
+    let next = text
+        .lines()
+        .find(|l| l.starts_with("next: "))
+        .unwrap_or_else(|| panic!("no next hint in:\n{text}"));
+    assert_eq!(
+        next,
+        "next: review and commit project/, .github/workflows/kb-knowledge.yml, \
+         .gitlab/ci/kb-knowledge.yml and .gitlab/merge_request_templates/Knowledge.md, \
+         then run `./kbw validate`"
+    );
+}
+
+#[test]
 fn example_initializes_and_validates_without_errors() {
     let kb = Kb::new();
     let o = kb.run(&["init", "--example", "synthetic-multirepo", "--apply"]);

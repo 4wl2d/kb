@@ -11,7 +11,7 @@ operation is covered in [downstream.md](downstream.md).
 |---|---|---|
 | Rust `1.98.1` with `rustfmt`, `clippy` | `rust-toolchain.toml`, `core/release.toml` `rust_toolchain` | rustup selects it automatically; without rustup, the `rustc` on `PATH` must report exactly this version or `./kbw --kbw-bootstrap` fails with `KBW_TOOLCHAIN_MISMATCH` |
 | Git ≥ `2.38.0` | `core/release.toml` `min_git` | `kb update check` predicts conflicts with `git merge-tree --write-tree`; `kb doctor` checks the version |
-| `shellcheck` | CI | lints the POSIX launcher `kbw` |
+| `shellcheck` | CI | lints the POSIX launcher `kbw` and the shipped CI and hook shell templates |
 | macOS SDK headers | — | the bundled SQLite is compiled from source; if headers are not found, `export SDKROOT="$(xcrun --show-sdk-path)"` (the launcher does this for its own builds) |
 
 ```sh
@@ -94,7 +94,8 @@ Notes:
   leg has no format change; `update_production.rs` covers a real schema migration through the
   production launcher.
 * `kbw_is_shellcheck_clean` prints `skipping` and passes when `shellcheck` is not installed;
-  CI runs `shellcheck kbw` explicitly.
+  CI runs `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`
+  explicitly.
 * Regenerate golden context output only intentionally, then review the diff:
   `KB_UPDATE_GOLDEN=1 cargo test -p kb --test context_golden`.
 * One suite: `cargo test -p kb --test cli_commands`.
@@ -107,7 +108,7 @@ Run before finishing any change (the same list is in AGENTS.md):
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-shellcheck kbw
+shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
 ./kbw schema --check
 ./kbw validate --profile maintainer --templates
 ```
@@ -160,8 +161,8 @@ record every bump in `CHANGELOG.md`, and add an ADR for significant decisions.
 
 ## Adding a document schema migration
 
-The full procedure and the only existing step (`v0-to-v1` from the synthetic legacy schema
-0, see [ADR 0009](adr/0009-synthetic-legacy-schema.md)) are in
+The full procedure and the existing steps (`v0-to-v1` from the synthetic legacy schema 0,
+see [ADR 0009](adr/0009-synthetic-legacy-schema.md), and `v1-to-v2`) are in
 [core/migrations/README.md](../core/migrations/README.md). In short:
 
 1. Agree on the new schema in an ADR.
@@ -291,12 +292,18 @@ macOS):
 2. `cargo fmt --all --check`;
 3. `cargo clippy --workspace --all-targets --locked -- -D warnings`;
 4. `cargo test --workspace --locked`;
-5. `shellcheck kbw` (Linux only);
-6. `./kbw --kbw-bootstrap`, `./kbw --kbw-runtime-info`, `./kbw version` (with
+5. install the Linux replay isolation backend: bubblewrap, with its user namespaces enabled
+   (Linux only);
+6. the replay isolation smoke `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`
+   (Seatbelt on macOS, bubblewrap on Linux; synthetic, offline, no model credentials);
+7. `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` (Linux only);
+8. `./kbw --kbw-bootstrap`, `./kbw --kbw-runtime-info`, `./kbw version` (with
    `KBW_CARGO_TARGET_DIR` set to the workspace `target/`);
-7. `./kbw schema --check`;
-8. `./kbw validate --profile maintainer --templates`;
-9. `cargo run -p kb-bench --release --locked -- smoke`.
+9. `./kbw schema --check`;
+10. `./kbw validate --profile maintainer --templates`;
+11. Tier A routing on both corpora: `./kbw eval routing --profile maintainer --json` and
+    `./kbw eval routing --example synthetic-multirepo --json`;
+12. `cargo run -p kb-bench --release --locked -- smoke`.
 
 Making these checks required for merging is a repository setting. Downstream forks inherit
 this workflow; setting the repository variable `KB_ENGINE_CI` to `disabled` skips its job

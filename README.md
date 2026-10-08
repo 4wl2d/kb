@@ -138,9 +138,9 @@ git clone . ../kb-demo && cd ../kb-demo
 ./kbw --kbw-bootstrap         # each checkout has its own runtime; optionally reuse compiled
                               # dependencies: KBW_CARGO_TARGET_DIR="$OLDPWD/.cache/cargo-target"
 ./kbw init --example synthetic-multirepo            # dry-run: prints the plan
-./kbw init --example synthetic-multirepo --apply    # writes project/ and the CI workflow
+./kbw init --example synthetic-multirepo --apply    # writes project/, GitHub/GitLab KB CI and review templates
 ./kbw validate                                      # records, links, policies, 7 routing tests
-git add project .github/workflows/kb-knowledge.yml
+git add project .github .gitlab
 git commit -m "Synthetic example"
 git remote rename origin upstream
 git clone --bare . ../kb-demo-origin.git            # the local approved source
@@ -151,17 +151,18 @@ git remote add origin "$(cd .. && pwd)/kb-demo-origin.git"
 
 The example's `project/project.toml` allows the `file` transport for exactly this purpose;
 real projects normally allow only `https` and `ssh`. Excerpt of the result (the progress
-lines go to stderr; paths shortened):
+lines go to stderr; paths shortened; commit ids, keys and receipts differ per run):
 
 ```text
 kb: checking refs/heads/main on origin (<...>/kb-demo-origin.git)
-kb: snapshot 0722edbb3d33 (latest, freshness=verified) (key 649311a9dd022c3e)
-kb: index: built snapshot 649311a9dd022c3e (21 record files, 21 parsed, 0 reused, 0 proposals, 0 errors, 0 warnings)
+kb: snapshot 4aa0f99cd4c2 (latest, freshness=verified) (key 2bad1f6822381b84)
+kb: index: built snapshot 2bad1f6822381b84 (21 record files, 21 parsed, 0 reused, 0 proposals, 0 errors, 0 warnings)
 kb: context: complete (5 mandatory, 3 supplementary units)
-# kb context intent=implement engine=0.1.0 skill_protocol=1 protocol=kb.cli.v1
-snapshot: 0722edbb3d33 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=<...>/kb-demo-origin.git; latest=0722edbb3d33; key=649311a9dd02
-host: repo=unknown; head=unknown; versions=unknown
+# kb context intent=implement engine=0.1.0 skill_protocol=2 protocol=kb.cli.v1
+snapshot: 4aa0f99cd4c2 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=<...>/kb-demo-origin.git; latest=4aa0f99cd4c2; key=2bad1f682238
+host: repo=mobile (argument); head=unknown; versions=unknown
 scope: repos=mobile; modules=mobile.auth; features=login; concepts=auth-token (alias `token refresh`)
+change type hints: retry (positive evidence; unmentioned categories stay unresolved)
 path: mobile:app/auth/TokenRefresher.kt -> modules mobile.auth
 status: COMPLETE
 effective settings:
@@ -183,8 +184,9 @@ interface: POST /v2/auth/refresh (synthetic)
 requires: example.contract.error-envelope
 ### supplementary example.feature.login (feature, accepted): Login: sign-in and silent session refresh
 ...
--- receipt sha256:d0d1cb91...; included: mandatory 5, dependencies 0, proposals 0, supplementary 3, sections 0; excluded by budget: none; other exclusions: 5 (--explain); budget: 1767/8000 tokens-est (estimate, not a tokenizer count), measured as compact
+-- receipt sha256:91e9e17e...; included: mandatory 5, dependencies 0, proposals 0, supplementary 3, sections 0; excluded by budget: none; other exclusions: 5 (--explain); budget: 1815/8000 tokens-est (estimate, not a tokenizer count), measured as compact
 -- a receipt proves delivery, not understanding or compliance; re-request context after compaction, a new session, a hand-off, or a scope or snapshot change
+-- kb.receipt.v2 snapshot-content=6ce5466c...
 ```
 
 The backend contract reaches this mobile task through scope and `requires`, while
@@ -207,7 +209,7 @@ $ ./kbw --json context --intent implement --task "Retry the token refresh after 
     "example.contract.error-envelope",
     "example.contract.token-refresh"
   ],
-  "receipt": "sha256:8af47958..."
+  "receipt": "sha256:0bb5acb5..."
 }
 ```
 

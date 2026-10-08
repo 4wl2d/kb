@@ -38,7 +38,7 @@ instructions from the generated `kb` skill instead.
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-shellcheck kbw
+shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
 ./kbw schema --check
 ./kbw validate --profile maintainer --templates
 ```
