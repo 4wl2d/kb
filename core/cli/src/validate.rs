@@ -20,7 +20,8 @@ use crate::error::{KbError, Result};
 use crate::glob::RepoGlob;
 use crate::model::ids::namespace_of;
 use crate::model::registry::{
-    ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile, parse_registry_file,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile,
+    parse_registry_file,
 };
 use crate::model::routing::RoutingTestFile;
 use crate::model::{
@@ -251,16 +252,22 @@ fn check_registry_refs(registry: &Registry, r: &MetaInput, out: &mut Vec<Diagnos
             );
         }
     }
-    for p in &m.selectors.paths {
-        // Invalid globs are reported by the parser; only the repo qualifier is checked here.
-        if let Ok(g) = RepoGlob::parse(p)
-            && let Some(repo) = &g.repo
-            && registry.repo(repo).is_none()
-        {
-            unknown(
-                "UNKNOWN_REPO",
-                format!("selectors.paths: `{p}` names unknown repo `{repo}`"),
-            );
+    // Invalid globs are reported by the parser; only the repo qualifier is checked here. A
+    // probe glob of an unknown repo never matches, which would silently skip the probe.
+    for (field, globs) in [
+        ("selectors.paths", &m.selectors.paths),
+        ("verify", &m.probe_globs),
+    ] {
+        for p in globs {
+            if let Ok(g) = RepoGlob::parse(p)
+                && let Some(repo) = &g.repo
+                && registry.repo(repo).is_none()
+            {
+                unknown(
+                    "UNKNOWN_REPO",
+                    format!("{field}: `{p}` names unknown repo `{repo}`"),
+                );
+            }
         }
     }
     if let Some(a) = &m.applicability {
@@ -1249,6 +1256,18 @@ fn check_profile_toml(path: &str, dest: &str, text: &str) -> Option<Diagnostic> 
         "registry/modules.toml" => registry::<ModulesFile>(path, text),
         "registry/features.toml" => registry::<FeaturesFile>(path, text),
         "registry/concepts.toml" => registry::<ConceptsFile>(path, text),
+        // Change types exist only in schema 2, as for a loaded corpus.
+        "registry/change-types.toml" => match parse_registry_file::<ChangeTypesFile>(path, text) {
+            Ok(f) if f.schema != 2 => Some(
+                Diagnostic::error(
+                    "UNSUPPORTED_SCHEMA_VERSION",
+                    format!("registry file schema {} is not supported", f.schema),
+                )
+                .at_path(path),
+            ),
+            Ok(_) => None,
+            Err(d) => Some(d),
+        },
         "skill-config/skill.toml" => typed::<SkillConfig>(path, text),
         "upstream.toml" => typed::<UpstreamConfig>(path, text),
         d if d.starts_with("routing-tests/") => typed::<RoutingTestFile>(path, text),

@@ -379,7 +379,7 @@ update check: upstream v0.1.1 = 323c06a5ab5e (from <...>/upstream)
 
 For this upgrade, document schema 1 → 2 changes only the declarations and preserves ids,
 kind, status, comments, body and existing facts. Skill protocol changes to 2, index schema
-to 2 and parser version to 5. `update prepare` runs the adjacent migration and regeneration
+to 2 and parser version to 6. `update prepare` runs the adjacent migration and regeneration
 in its review worktree; a manual migration remains previewable with `./kbw migrate` before
 `--apply`. Host-binding, routing and skill-config schema numbers remain independently 1.
 New engine templates do not overwrite an existing downstream's `project/` or host CI.

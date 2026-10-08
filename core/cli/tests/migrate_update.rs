@@ -154,6 +154,60 @@ fn fixture_migration_matches_expected_byte_for_byte_and_is_idempotent() {
 }
 
 #[test]
+fn crlf_profile_migrates_byte_for_byte_with_a_faithful_preview() {
+    let crlf = |bytes: &[u8]| {
+        String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .replace('\n', "\r\n")
+    };
+    let sb = Sandbox::new();
+    let root = kb_with_fixture(&sb, "v1-expected");
+    let project = root.join("project");
+    for (path, bytes) in tree(&project) {
+        fs::write(project.join(path), crlf(&bytes)).unwrap();
+    }
+    let before = tree(&project);
+
+    let (out, v) = kb_json(&sb, &root, &["migrate"]);
+    assert_exit(&out, 0);
+    let files = v["result"]["files"].as_array().unwrap();
+    let migrating: Vec<_> = files.iter().filter(|f| f["status"] == "migrate").collect();
+    assert_eq!(migrating.len(), 13, "{v}");
+    for f in migrating {
+        let diff = f["diff"].as_str().unwrap();
+        let changed: Vec<&str> = diff
+            .split_inclusive('\n')
+            .skip(2)
+            .filter(|l| l.starts_with('-') || l.starts_with('+'))
+            .collect();
+        assert_eq!(
+            changed,
+            ["-schema = 1\r\n", "+schema = 2\r\n"],
+            "{}: {diff}",
+            f["path"]
+        );
+    }
+    assert_eq!(tree(&project), before, "dry-run must not write");
+
+    let (out, v) = kb_json(&sb, &root, &["migrate", "--apply"]);
+    assert_exit(&out, 0);
+    assert_eq!(v["result"]["written"].as_array().unwrap().len(), 13);
+    let migrated = tree(&project);
+    let expected = tree(&fixture("v2-expected"));
+    assert_eq!(
+        migrated.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>()
+    );
+    for (path, bytes) in &expected {
+        assert_eq!(
+            String::from_utf8_lossy(&migrated[path]),
+            crlf(bytes),
+            "{path} must keep CRLF line endings and change only the schema value"
+        );
+    }
+}
+
+#[test]
 fn expected_fixture_loads_under_the_current_engine() {
     let sb = Sandbox::new();
     let root = kb_with_fixture(&sb, "v1-expected");

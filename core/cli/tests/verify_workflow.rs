@@ -381,6 +381,27 @@ fn invalid_knowledge_cannot_turn_into_a_successful_empty_probe_set() {
     assert_eq!(failed["error"]["code"], "VALIDATION_FAILED");
 }
 
+#[test]
+fn probe_glob_of_an_unregistered_repo_fails_validation_instead_of_skipping() {
+    let w = World::new(true);
+    write(&w.host.join("app/auth/New.kt"), "legacyCall()\n");
+    w.policy(&BANNED.replace("\"app/**/*.kt\"", "\"mobile:app/**/*.kt\""));
+    w.run(&[], 40);
+    // A one-character typo in the repo qualifier must not disarm the must-not guard.
+    w.policy(&BANNED.replace("\"app/**/*.kt\"", "\"mobil:app/**/*.kt\""));
+    let failed = w.run(&[], 40);
+    assert_eq!(failed["error"]["code"], "VALIDATION_FAILED", "{failed}");
+    assert!(
+        failed["error"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "UNKNOWN_REPO"
+                && d["message"] == "verify: `mobil:app/**/*.kt` names unknown repo `mobil`"),
+        "{failed}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn shipped_commit_msg_hook_preserves_native_verification_exit_codes() {

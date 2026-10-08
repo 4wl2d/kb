@@ -296,6 +296,54 @@ override_owners = ["arch", "ghost-team"]
 }
 
 #[test]
+fn verify_probe_globs_must_name_registered_repos() {
+    let kb = Kb::new();
+    let rules = r#"[[rules]]
+id = "no-print"
+level = "must-not"
+text = "Print to standard output."
+
+[[rules.verify]]
+kind = "banned-api"
+paths = ["mobil:app/**", "mobile:app/**", "app/**"]
+pattern = "println"
+
+[[rules.verify]]
+kind = "naming"
+paths = ["backend:src/**"]
+pattern = "^[a-z]"
+
+[[rules.verify]]
+kind = "forbidden-import"
+from = ["mobile:app/ui/**"]
+to = ["bakend:src/db/**"]
+"#;
+    let text = doc(
+        "acme.p.probes",
+        "policy",
+        "accepted",
+        "arch",
+        "",
+        PRODUCT,
+        rules,
+    )
+    .replacen("schema = 1", "schema = 2", 1);
+    kb.add("probes.md", &text);
+    let messages: Vec<String> = kb
+        .check()
+        .iter()
+        .map(|x| format!("{} {}", x.code, x.message))
+        .collect();
+    assert_eq!(
+        messages,
+        [
+            "UNKNOWN_REPO verify: `bakend:src/db/**` names unknown repo `bakend`",
+            "UNKNOWN_REPO verify: `mobil:app/**` names unknown repo `mobil`",
+        ]
+    );
+}
+
+#[test]
 fn unsatisfiable_scopes_are_errors() {
     let kb = Kb::new();
     kb.registry(
@@ -1213,6 +1261,33 @@ fn templates_validate_records_skeleton_and_examples() {
     let d = validate_templates(&root).unwrap();
     assert!(d.iter().any(|x| x.code == "PROJECT_NOT_INITIALIZED"
         && x.path.as_deref() == Some("core/templates/examples/demo/project/project.toml")));
+}
+
+#[test]
+fn change_types_template_is_parsed_strictly_and_must_declare_schema_two() {
+    let sb = common::Sandbox::new();
+    let root = template_root(&sb);
+    let rel = "core/templates/project/registry/change-types.toml";
+    let shipped = fs::read_to_string(common::repo_root().join(rel)).unwrap();
+    common::write(&root.join(rel), &shipped);
+    let d = validate_templates(&root).unwrap();
+    assert!(d.is_empty(), "{d:#?}");
+    for (text, code) in [
+        (
+            "schema = 2\n[[change_type]]\nid = \"retry\"\ntitle = \"Retries\"\nalias = [\"retry\"]\n",
+            "REGISTRY_PARSE",
+        ),
+        ("schema = 7\n", "UNSUPPORTED_SCHEMA_VERSION"),
+        ("schema = 1\n", "UNSUPPORTED_SCHEMA_VERSION"),
+    ] {
+        common::write(&root.join(rel), text);
+        let d = validate_templates(&root).unwrap();
+        let got: Vec<_> = d
+            .iter()
+            .map(|x| (x.code.as_str(), x.path.as_deref().unwrap_or_default()))
+            .collect();
+        assert_eq!(got, [(code, rel)], "{text}: {d:#?}");
+    }
 }
 
 #[test]

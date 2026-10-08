@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::{Value as Json, json};
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Key, Table, Value};
+use toml_edit::{ArrayOfTables, Document, DocumentMut, Item, Key, Table, Value};
 
 use crate::corpus::{is_record_path, parse_config};
 use crate::diag::Diagnostic;
@@ -85,17 +85,16 @@ pub static MIGRATIONS: &[Migration] = &[
     },
 ];
 
+/// Rewrite only the bytes of the `schema` value: every other byte, including CRLF line
+/// endings, comments and layout, survives exactly.
 fn v1_document(text: &str) -> std::result::Result<String, String> {
-    let mut doc = text.parse::<DocumentMut>().map_err(|e| e.to_string())?;
-    let item = doc.get_mut("schema").ok_or("missing `schema` field")?;
+    let doc = Document::parse(text).map_err(|e| e.to_string())?;
+    let item = doc.get("schema").ok_or("missing `schema` field")?;
     if item.as_integer() != Some(1) {
         return Err("expected schema 1".into());
     }
-    let value = item.as_value_mut().ok_or("invalid `schema` value")?;
-    let decor = value.decor().clone();
-    *value = Value::from(2);
-    *value.decor_mut() = decor;
-    Ok(doc.to_string())
+    let span = item.span().ok_or("invalid `schema` value")?;
+    Ok(format!("{}2{}", &text[..span.start], &text[span.end..]))
 }
 
 fn v1_record(text: &str) -> std::result::Result<String, String> {
@@ -831,8 +830,10 @@ pub fn render_apply(report: &ApplyReport, human: bool) -> String {
 
 /// Minimal unified line diff (3 lines of context) for reviewing migrations.
 pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
-    let a: Vec<&str> = before.lines().collect();
-    let b: Vec<&str> = after.lines().collect();
+    // Lines keep their terminators, so a changed line ending (CRLF, final newline) is a
+    // changed line and the preview shows exactly the bytes that would be written.
+    let a: Vec<&str> = before.split_inclusive('\n').collect();
+    let b: Vec<&str> = after.split_inclusive('\n').collect();
     let ops = diff_ops(&a, &b);
     let mut out = format!("--- a/{path}\n+++ b/{path}\n");
     const CONTEXT: usize = 3;
@@ -858,10 +859,15 @@ pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
             b_start + usize::from(b_len > 0)
         ));
         for op in hunk {
-            match *op {
-                Op::Equal(x, _) => out.push_str(&format!(" {}\n", a[x])),
-                Op::Delete(x) => out.push_str(&format!("-{}\n", a[x])),
-                Op::Insert(y) => out.push_str(&format!("+{}\n", b[y])),
+            let (mark, line) = match *op {
+                Op::Equal(x, _) => (' ', a[x]),
+                Op::Delete(x) => ('-', a[x]),
+                Op::Insert(y) => ('+', b[y]),
+            };
+            out.push(mark);
+            out.push_str(line);
+            if !line.ends_with('\n') {
+                out.push_str("\n\\ No newline at end of file\n");
             }
         }
         i += 1;
@@ -1434,5 +1440,34 @@ text = \"Rotate keys.\"\n";
             "--- a/f\n+++ b/f\n@@ -1,4 +1,5 @@\n a\n-b\n+B\n c\n d\n+e\n"
         );
         assert_eq!(unified_diff("f", "x\n", "x\n"), "--- a/f\n+++ b/f\n");
+    }
+
+    #[test]
+    fn unified_diff_shows_line_ending_changes() {
+        assert_eq!(
+            unified_diff("f", "a\r\nb\r\n", "a\nb\r\n"),
+            "--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-a\r\n+a\n b\r\n"
+        );
+        assert_eq!(
+            unified_diff("f", "x", "x\n"),
+            "--- a/f\n+++ b/f\n@@ -1,1 +1,1 @@\n-x\n\\ No newline at end of file\n+x\n"
+        );
+    }
+
+    #[test]
+    fn v1_to_v2_rewrites_only_the_schema_value_bytes() {
+        let text =
+            "# CRLF \r\nschema   =  1 # keep\r\n\r\n[[owner]]\r\nid = \"arch\"\r\ntitle='A'\r\n";
+        assert_eq!(
+            v1_document(text).unwrap(),
+            text.replacen("=  1 #", "=  2 #", 1)
+        );
+        assert!(v1_document("schema = 2\r\n").is_err());
+        assert!(v1_document("[x]\r\nschema = 1\r\n").is_err());
+        let record = "+++\r\nschema = 1\r\nid = \"acme.gap.x\"\r\nkind = \"gap\"\r\ntitle = \"Synthetic gap\"\r\nstatus = \"draft\"\r\nowner = \"arch\"\r\ngap = \"missing\"\r\ndescription = \"Synthetic.\"\r\n[scope]\r\nproduct = true\r\n+++\r\nBody\r\n";
+        assert_eq!(
+            v1_record(record).unwrap(),
+            record.replacen("schema = 1", "schema = 2", 1)
+        );
     }
 }

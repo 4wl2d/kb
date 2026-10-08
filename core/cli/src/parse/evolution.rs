@@ -145,14 +145,15 @@ pub(super) fn check(record: &Record) -> Vec<Diagnostic> {
                 d.push(Diagnostic::error("ANCHOR_STAMP_INVALID",
                     "stamp needs a path (and repo except for KB docs), a commit, an inclusive nonzero line range and a lowercase SHA-256"));
             }
-            if let Some(commit) = &a.commit
-                && !s.commit.starts_with(commit)
-                && !commit.starts_with(&s.commit)
-            {
-                d.push(Diagnostic::error(
-                    "ANCHOR_STAMP_COMMIT_MISMATCH",
-                    "anchor commit and stamp commit disagree",
-                ));
+            if let Some(commit) = &a.commit {
+                // Both fields accept either hex case; compare case-insensitively.
+                let (stamp, anchor) = (s.commit.to_ascii_lowercase(), commit.to_ascii_lowercase());
+                if !stamp.starts_with(&anchor) && !anchor.starts_with(&stamp) {
+                    d.push(Diagnostic::error(
+                        "ANCHOR_STAMP_COMMIT_MISMATCH",
+                        "anchor commit and stamp commit disagree",
+                    ));
+                }
             }
         }
     }

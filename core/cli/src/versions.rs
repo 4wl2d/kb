@@ -14,7 +14,7 @@ pub const PROTOCOL_ID: &str = "kb.cli.v1";
 pub const INDEX_SCHEMA: u32 = 2;
 pub const SKILL_PROTOCOL: u32 = 2;
 /// Bumped whenever parsing output for identical bytes changes (invalidates parse caches).
-pub const PARSER_VERSION: u32 = 5;
+pub const PARSER_VERSION: u32 = 6;
 
 pub fn supports_document_schema(version: u32) -> bool {
     (OLDEST_READABLE_DOCUMENT_SCHEMA..=DOCUMENT_SCHEMA).contains(&version)

@@ -297,6 +297,7 @@ mod tests {
             }),
             anchors: vec![],
             consumers: vec![],
+            probe_globs: vec![],
             settings: vec![],
             overrides: vec![],
             parties: vec![],

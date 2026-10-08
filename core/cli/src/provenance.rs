@@ -181,7 +181,8 @@ pub fn inspect(
         if let Some(stamp) = &anchor.stamp {
             let selected = match line_span(&bytes, stamp.start_line, stamp.end_line) {
                 Ok(span) => span,
-                Err(error) if !commit.starts_with(&stamp.commit) => {
+                // `commit` is Git's lower-case id; a hand-authored stamp may use upper case.
+                Err(error) if !commit.starts_with(&stamp.commit.to_ascii_lowercase()) => {
                     evidence.status = AnchorStatus::Changed;
                     evidence.stamp_verified = Some(false);
                     evidence.detail = format!("stamped range no longer exists: {}", error.message);

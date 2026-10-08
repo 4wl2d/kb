@@ -4,7 +4,7 @@
 //! expanded by `record_struct!` so that the strict parser, the generated JSON Schema and
 //! serialization share one definition.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -945,6 +945,12 @@ impl Record {
     /// Lightweight metadata used for routing, validation and indexing.
     pub fn meta(&self, sections: Vec<String>) -> RecordMeta {
         let c = self.common();
+        let probe_globs: BTreeSet<&String> = self
+            .normative()
+            .iter()
+            .flat_map(|s| s.verify)
+            .flat_map(VerifyProbe::globs)
+            .collect();
         let mut meta = RecordMeta {
             id: c.id.to_string(),
             kind: c.kind,
@@ -960,6 +966,7 @@ impl Record {
                 Self::Contract(k) => k.consumers.clone(),
                 _ => Vec::new(),
             },
+            probe_globs: probe_globs.into_iter().cloned().collect(),
             settings: Vec::new(),
             overrides: Vec::new(),
             parties: Vec::new(),
@@ -1059,6 +1066,9 @@ pub struct RecordMeta {
     pub anchors: Vec<Anchor>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub consumers: Vec<Consumer>,
+    /// Distinct path globs of the normative statements' verify probes, sorted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub probe_globs: Vec<String>,
     #[serde(default)]
     pub settings: Vec<Setting>,
     #[serde(default)]

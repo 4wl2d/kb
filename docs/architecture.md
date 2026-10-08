@@ -5,7 +5,7 @@ guides in `docs/` explain the same behavior for authors and operators; when they
 disagree, this document and the code win and the guide is a bug.
 
 Versions described here: engine `0.1.0`, document schema `2` (reads `1` and `2`), CLI protocol `1`,
-index schema `2`, skill protocol `2`, bootstrap manifest `1`; parser version `5` (code only,
+index schema `2`, skill protocol `2`, bootstrap manifest `1`; parser version `6` (code only,
 `PARSER_VERSION` in `core/cli/src/versions.rs`).
 
 ## 1. Distribution model and ownership
@@ -235,7 +235,8 @@ A test anchor does not prove the test runs; a valid schema does not prove the te
 
 Schema-2 anchors may add `stamp = {commit,start_line,end_line,sha256}`: an inclusive,
 one-based nonempty span of a Git blob. A stamp needs a repo/path and lowercase SHA-256;
-its commit must agree with the anchor commit when both are supplied.
+its commit must agree with the anchor commit when both are supplied (one is a prefix of the
+other, ignoring hex case).
 
 ### 3.7 Policies, settings and overrides
 

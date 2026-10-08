@@ -184,3 +184,15 @@ pub enum VerifyProbe {
         pattern: String,
     },
 }
+
+impl VerifyProbe {
+    /// Optionally `repo:`-qualified path globs of the probe (`paths`, or import `from`/`to`).
+    pub fn globs(&self) -> impl Iterator<Item = &String> {
+        let (first, second): (&[String], &[String]) = match self {
+            Self::CommitMessage { .. } | Self::BranchName { .. } => (&[], &[]),
+            Self::ForbiddenImport { from, to } => (from, to),
+            Self::Naming { paths, .. } | Self::BannedApi { paths, .. } => (paths, &[]),
+        };
+        first.iter().chain(second)
+    }
+}

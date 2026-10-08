@@ -163,6 +163,27 @@ fn stamp_is_previewable_idempotent_and_preserves_status_comments_body_and_dirty_
 }
 
 #[test]
+fn upper_case_stamp_commit_at_its_own_revision_is_a_broken_stamp_not_drift() {
+    let w = World::new();
+    let path = w.policy("persist");
+    w.stamp();
+    // Hand-authored edit: the same commit in upper case and a span the stamped blob never had.
+    let text = fs::read_to_string(&path).unwrap();
+    let edited = text
+        .replace(&w.base, &w.base.to_ascii_uppercase())
+        .replace("end_line = 4", "end_line = 40");
+    assert_ne!(edited, text);
+    write(&path, &edited);
+    let check = w.run(&["anchors", "check", "--id", "acme.policy.evidence"], 30);
+    let anchor = &check["result"]["anchors"]["anchors"][0];
+    assert_eq!(anchor["status"], "unverifiable", "{check}");
+    assert!(
+        anchor["detail"].as_str().unwrap().contains("line span"),
+        "{check}"
+    );
+}
+
+#[test]
 fn committed_drift_is_grouped_by_owner_and_changes_ledger_support() {
     let w = World::new();
     w.policy("persist");

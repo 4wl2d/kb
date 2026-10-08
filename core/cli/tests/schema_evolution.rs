@@ -135,6 +135,33 @@ fn declarative_probes_are_strict_and_never_commands() {
 }
 
 #[test]
+fn anchor_and_stamp_commits_agree_regardless_of_hex_case() {
+    let stamped = |anchor_commit: &str| {
+        format!(
+            "+++\nschema = 2\nid = \"example.invariant.span\"\nkind = \"invariant\"\ntitle = \"Synthetic\"\nstatus = \"draft\"\nowner = \"architecture\"\n[scope]\nrepos = [\"mobile\"]\n[[statements]]\nid = \"keep\"\nlevel = \"must\"\ntext = \"Keep the synthetic span.\"\n[[anchors]]\nkind = \"source\"\nrepo = \"mobile\"\npath = \"app/Span.rs\"\ncommit = \"{anchor_commit}\"\nstamp = {{ commit = \"abcdef1234567890abcdef1234567890abcdef12\", start_line = 1, end_line = 2, sha256 = \"{}\" }}\n+++\n",
+            "0".repeat(64)
+        )
+    };
+    for same in [
+        "abcdef1",
+        "ABCDEF1",
+        "AbCdEf1234567890ABCDEF1234567890abcdef12",
+    ] {
+        assert!(
+            parse_record("span.md", stamped(same).as_bytes()).is_ok(),
+            "{same} names the stamped commit"
+        );
+    }
+    let errors = parse_record("span.md", stamped("ABCDEF2").as_bytes()).unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|d| d.code == "ANCHOR_STAMP_COMMIT_MISMATCH"),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn calendar_dates_respect_leap_centuries_and_epoch() {
     assert_eq!(date_days("1970-01-01"), Some(0));
     assert_eq!(date_days("1969-12-31"), Some(-1));
