@@ -558,7 +558,9 @@ pub struct CaptureArgs {
     /// Explicit product-wide scope
     #[arg(long)]
     pub product: bool,
-    /// Source provenance, REPO:PATH[@REV][#SYMBOL] (repeatable; default REV is HEAD)
+    /// Source provenance, REPO:PATH[@REV][#SYMBOL] (repeatable; default REV is HEAD). A PATH
+    /// containing '@' is read whole at HEAD unless the text after its last '@' resolves as a
+    /// revision; give such a PATH an explicit @REV (for example @HEAD) to be unambiguous
     #[arg(long = "anchor")]
     pub anchors: Vec<String>,
     /// Test-source provenance, using the same syntax as --anchor

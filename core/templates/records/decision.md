@@ -24,6 +24,8 @@ rejected_because = "Placeholder: why it was not chosen."
 
 [[anchors]]
 kind = "change"
-change = "!1"                               # reviewed change (MR number) or `commit = "<sha>"`
+repo = "mobile"                             # repo where the reviewed change landed
+commit = "0000000"                          # placeholder: its merge commit; submit resolves it
+change = "!1"                               # reviewed change (MR number)
 note = "Placeholder: the merge request where the decision was reviewed."
 +++

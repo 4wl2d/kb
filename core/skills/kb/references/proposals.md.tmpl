@@ -28,8 +28,11 @@ implementation details presented as invariants.
 5. Add evidence in `anchors`, including a real immutable commit where available:
    `{ kind = "source", repo = "<repo>", path = "<path>", symbol = "<symbol>" }`,
    `{ kind = "test", repo = "<repo>", path = "<path>" }`,
-   `{ kind = "doc", path = "<path>" }` or `{ kind = "change", change = "!123" }`.
-   A test anchor does not prove the test runs; say what you actually observed.
+   `{ kind = "doc", path = "<path>" }` or
+   `{ kind = "change", repo = "<repo>", commit = "<sha>", change = "!123" }`.
+   Submission verifies Git evidence, so a change anchor needs its repo and a commit that
+   resolves there. A test anchor does not prove the test runs; say what you actually
+   observed.
 6. Scope it precisely (`scope.repos`, `scope.modules`, `scope.features`, or
    `scope.product = true`). Only ids from `project/registry/*.toml` are valid.
 7. For a new draft, use `{{kb_path}}/kbw propose submit /path/to/draft.md{{snapshot_arg}}`

@@ -134,9 +134,11 @@ STEP 5: WRITE AND CHECK DRAFTS
   in the verified integration's small core. Everything else remains scoped.
 - Declarative verify probes are optional, bounded data. Only declare checks that actually
   establish the statement. Conditions requiring human judgment remain unverifiable.
-- For each draft run propose submit <file> with --host/--repo-root mappings. Inspect anchor
-  and duplicate results before --apply. Reuse existing draft ids; never silently overwrite
-  dirty files. Provider-filled consumers are candidates for review, not accepted facts.
+- For each draft run propose submit <file> --snapshot working-tree --offline with the
+  --host/--repo-root mappings, so it validates against this branch's registries. Inspect
+  anchor and duplicate results before --apply. Reuse existing draft ids; never silently
+  overwrite dirty files. Provider-filled consumers are candidates for review, not accepted
+  facts.
 
 STEP 6: ROUTING AND COVERAGE TARGETS
 Create schema-1 routing fixtures under project/routing-tests. Use real task wording with

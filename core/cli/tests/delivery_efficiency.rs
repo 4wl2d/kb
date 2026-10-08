@@ -317,6 +317,59 @@ fn core_is_omitted_only_after_loaded_source_and_current_content_are_verified() {
 }
 
 #[test]
+fn core_references_in_a_receipt_never_become_unchanged_without_core_proof() {
+    let w = World::new();
+    w.always("Preserve synthetic state.");
+    let probe = w.integrate();
+    let receipt = probe["core_receipt"].as_str().unwrap();
+    let source = probe["core_source"].as_str().unwrap();
+    let referenced = w.context(&["--core-receipt", receipt, "--core-source", source]);
+    let unit = |result: &Value, id: &str| {
+        result["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(unit(&referenced, "acme.policy.core")["delivery"], "core");
+    let path = w.host.join(source);
+    write(
+        &path,
+        &fs::read_to_string(&path)
+            .unwrap()
+            .replace("Preserve synthetic state.", "Do anything."),
+    );
+    assert_eq!(
+        w.run(
+            &[
+                "context",
+                "--path",
+                "app/auth/Client.rs",
+                "--core-receipt",
+                receipt,
+                "--core-source",
+                source
+            ],
+            64
+        )["error"]["code"],
+        "INVALID_INPUT"
+    );
+    let delta = w.context(&[
+        "--since-receipt",
+        referenced["receipt"]["id"].as_str().unwrap(),
+    ]);
+    let core = unit(&delta, "acme.policy.core");
+    assert!(core.get("delivery").is_none(), "{core}");
+    assert!(core.get("content").is_some());
+    assert_eq!(
+        unit(&delta, "acme.contract.token-api")["delivery"],
+        "unchanged"
+    );
+}
+
+#[test]
 fn edited_core_source_and_oversized_core_are_rejected_without_truncation() {
     let w = World::new();
     w.always("Preserve synthetic state.");

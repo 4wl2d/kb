@@ -88,6 +88,11 @@ pub fn load(cache: &Path, id: &str, subject: &str) -> Result<BTreeMap<String, St
             .as_str()
             .filter(|s| hash(s))
             .ok_or_else(|| KbError::invalid_input("receipt unit has no valid content hash"))?;
+        // A core reference was never delivered in full by this response; only its
+        // separately verified core proof covered it, so it cannot ground reuse.
+        if unit["delivery"] == "core" {
+            continue;
+        }
         if result.insert(id.to_string(), digest.to_string()).is_some() {
             return Err(KbError::invalid_input("duplicate receipt unit id"));
         }

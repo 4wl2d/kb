@@ -506,7 +506,8 @@ managed instruction file, installation lock and current accepted always-on core.
 reuse is unavailable with `--as-of`. Neither mechanism infers a receipt from a session id.
 Applicability and dependency closure are recomputed first; eligible unchanged units retain
 their ids/tier/hash and become `delivery` references. New or changed units are delivered in
-full. Missing, corrupt or mismatched proof fails; re-run without reuse instead of silently
+full, and so is a unit that the receipt held only as a `core` reference unless current core
+proof covers it again. Missing, corrupt or mismatched proof fails; re-run without reuse instead of silently
 omitting obligations. Reuse assumes the caller actually retains that content in this task.
 
 Every context call also appends private local delivery metadata, not task/source text, for

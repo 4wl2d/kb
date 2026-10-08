@@ -151,46 +151,83 @@ pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
     }
     let id = parsed.record.id();
     let existing = ctx.view.raw(id, Origin::Accepted)?;
+    // Identity also covers local records that the selected snapshot does not contain yet,
+    // such as unapproved drafts on a proposal branch.
+    let local = load_corpus(&WorkingTreeSource::new(ctx.kb_root), ctx.loc)?;
+    let same_id: Vec<_> = local
+        .records()
+        .filter(|(_, r)| r.record.id() == id)
+        .collect();
     if ctx
         .view
         .metas_by_ids(&[id.into()], Origin::Accepted)?
         .iter()
         .any(|e| e.meta.kind != parsed.record.kind())
+        || same_id
+            .iter()
+            .any(|(_, r)| r.record.kind() != parsed.record.kind())
     {
         return Err(KbError::new(
             ErrorCode::ValidationFailed,
             "a stable record id cannot change its kind",
         ));
     }
-    let path = if let Some(existing) = &existing {
-        existing.path.clone()
-    } else {
-        format!(
+    let local_path = match same_id.as_slice() {
+        [] => None,
+        [(entry, _)] => Some(entry.path.clone()),
+        _ => {
+            return Err(KbError::new(
+                ErrorCode::Conflict,
+                format!("{id} already exists at several local paths; resolve that duplicate first"),
+            ));
+        }
+    };
+    let path = match (&existing, &local_path) {
+        (Some(existing), Some(local)) if existing.path != *local => {
+            return Err(KbError::new(
+                ErrorCode::Conflict,
+                format!(
+                    "{id} is at {local} locally but at {} in the selected snapshot; submission will not create a second copy",
+                    existing.path
+                ),
+            ));
+        }
+        (Some(existing), _) => existing.path.clone(),
+        (None, Some(local)) => local.clone(),
+        (None, None) => format!(
             "{}/drafts/{id}.md",
             ctx.loc
                 .knowledge_roots(ctx.view.config())
                 .first()
                 .ok_or_else(|| KbError::invalid_input("profile has no knowledge root"))?
-        )
+        ),
     };
     let target = safe_join(ctx.kb_root, &path)?;
     let before = current_bytes(&target)?;
     if before.as_deref() != Some(text.as_bytes()) {
-        if let Some(bytes) = &before
+        let committed = if let Some(bytes) = &before
             && let Some(head) = crate::git::Git::new(ctx.kb_root).resolve_commit("HEAD")?
-            && crate::host::facts::blob_at(ctx.kb_root, &head, &path, MAX_RECORD_BYTES as u64)?
+        {
+            if crate::host::facts::blob_at(ctx.kb_root, &head, &path, MAX_RECORD_BYTES as u64)?
                 .as_ref()
                 != Some(bytes)
-        {
-            return Err(KbError::new(
-                ErrorCode::Conflict,
-                format!(
-                    "{path} has uncommitted changes; edit/validate that draft directly instead of overwriting it"
-                ),
-            ));
-        }
+            {
+                return Err(KbError::new(
+                    ErrorCode::Conflict,
+                    format!(
+                        "{path} has uncommitted changes; edit/validate that draft directly instead of overwriting it"
+                    ),
+                ));
+            }
+            true
+        } else {
+            false
+        };
         match (&before, &existing) {
             (Some(bytes), Some(accepted)) if bytes.as_slice() == accepted.text.as_bytes() => {}
+            // A committed local record with this id that the snapshot lacks (an unapproved
+            // draft on a proposal branch) may be revised in place; Git keeps its old bytes.
+            (Some(_), None) if committed && local_path.as_deref() == Some(path.as_str()) => {}
             (None, None) => {}
             _ => {
                 return Err(KbError::new(
@@ -241,7 +278,6 @@ pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
         .with_details(serde_json::json!({"anchors": anchors})));
     }
     let mut records = ctx.view.all_records(Origin::Accepted)?;
-    let local = load_corpus(&WorkingTreeSource::new(ctx.kb_root), ctx.loc)?;
     for (entry, record) in local.records() {
         records.push(RecordEntry {
             path: entry.path.clone(),

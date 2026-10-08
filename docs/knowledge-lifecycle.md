@@ -35,11 +35,15 @@ Added filenames are not a complete test catalog and do not prove a test ran.
 
 Submission validates the candidate against the selected snapshot and local records:
 draft status, stable id/kind, owner authority, scope, links, Git anchor availability and
-exact/near duplicates. It previews a path under the profile's first knowledge root, then
-rechecks byte preconditions on `--apply`. Dirty destinations and conflicting identities
-are refused. `--fill-consumers` with an explicit provider adds reviewable consumer
-candidates to a contract draft and retains the tool/commit/digest evidence. No commit,
-branch move or publication is performed.
+exact/near duplicates. It previews the path of the record that already has the id (in the
+snapshot or, for an unapproved draft, locally), otherwise a path under the profile's first
+knowledge root, then rechecks byte preconditions on `--apply`. Dirty destinations and
+conflicting identities (a kind change, or one id at two paths) are refused; a committed
+local draft may be revised in place. From an unmerged KB proposal branch, such as the
+adaptation branch, pass `--snapshot working-tree --offline` so the branch's own registries
+and records are validated. `--fill-consumers` with an explicit provider adds reviewable
+consumer candidates to a contract draft and retains the tool/commit/digest evidence. No
+commit, branch move or publication is performed.
 
 ```sh
 .kb/kbw capture decision --repo mobile --owner team-mobile \
@@ -53,9 +57,11 @@ branch move or publication is performed.
 
 `capture decision|gap|quirk|scenario` is a shorter draft path. Decisions require prior
 context and reasons; scenarios require one feature, `--given` and `--expect`; quirks are
-descriptive references. An omitted id is derived deterministically from content. Supplied
-test command strings are recorded, never executed or called successful by the engine.
-Use `--apply` only after inspecting the draft. Existing accepted records are edited as
+descriptive references. Anchors are `REPO:PATH[@REV][#SYMBOL]`; a PATH containing `@`
+(such as `icon@2x.png`) is read whole at HEAD unless the text after its last `@` resolves as
+a revision, so give such a PATH an explicit `@REV` to be unambiguous. An omitted id is
+derived deterministically from content. Supplied test command strings are recorded, never
+executed or called successful by the engine. Use `--apply` only after inspecting the draft. Existing accepted records are edited as
 proposals; a new record is always draft.
 
 Confirmed behavior requires a merged fix with a regression test **or** an explicit review

@@ -43,6 +43,10 @@ impl World {
     }
 
     fn run(&self, args: &[&str], expected: i32) -> Value {
+        self.run_on("working-tree", args, expected)
+    }
+
+    fn run_on(&self, snapshot: &str, args: &[&str], expected: i32) -> Value {
         let mut all = vec![
             "--root",
             self.kb.to_str().unwrap(),
@@ -50,7 +54,7 @@ impl World {
             self.host.to_str().unwrap(),
             "--offline",
             "--snapshot",
-            "working-tree",
+            snapshot,
             "--json",
         ];
         all.extend_from_slice(args);
@@ -226,6 +230,178 @@ fn submit_preserves_an_existing_dirty_record() {
         45,
     );
     assert_eq!(fs::read_to_string(existing).unwrap(), dirty);
+}
+
+#[test]
+fn submit_resolves_identity_against_local_drafts_missing_from_the_approved_snapshot() {
+    let w = World::new();
+    // A proposal-branch draft that the approved ref (origin/main) does not contain yet.
+    let local = w.kb.join("project/knowledge/references/beta.md");
+    let original = w.reference(
+        "beta",
+        "draft",
+        "A synthetic beta fact.",
+        "app/auth/Client.rs",
+    );
+    write(&local, &original);
+    let input = w.sb.path().join("beta2.md");
+    let revision = w.reference(
+        "beta",
+        "draft",
+        "A revised synthetic beta fact.",
+        "app/auth/Client.rs",
+    );
+    write(&input, &revision);
+    let submit = |expected| {
+        w.run_on(
+            "latest",
+            &["propose", "submit", input.to_str().unwrap(), "--apply"],
+            expected,
+        )
+    };
+    let refused = submit(45);
+    assert!(
+        refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("project/knowledge/references/beta.md")
+    );
+    assert!(
+        !w.kb
+            .join("project/knowledge/drafts/acme.reference.beta.md")
+            .exists()
+    );
+    assert_eq!(fs::read_to_string(&local).unwrap(), original);
+    w.sb.commit_all(&w.kb, "propose synthetic beta");
+    let revised = submit(0);
+    assert_eq!(revised["result"]["draft"]["action"], "modify");
+    assert_eq!(
+        revised["result"]["draft"]["path"],
+        "project/knowledge/references/beta.md"
+    );
+    assert_eq!(fs::read_to_string(&local).unwrap(), revision);
+    assert!(!w.kb.join("project/knowledge/drafts").exists());
+}
+
+#[test]
+fn submit_refuses_an_id_that_also_exists_at_another_local_path() {
+    let w = World::new();
+    let accepted = w.kb.join("project/knowledge/references/alpha.md");
+    write(
+        &accepted,
+        &w.reference(
+            "alpha",
+            "accepted",
+            "A synthetic alpha fact.",
+            "app/auth/Client.rs",
+        ),
+    );
+    let commit = w.sb.commit_all(&w.kb, "accept synthetic alpha");
+    w.sb.git(&w.kb, &["update-ref", "refs/remotes/origin/main", &commit]);
+    let copy = w.kb.join("project/knowledge/drafts/alpha-copy.md");
+    write(
+        &copy,
+        &w.reference(
+            "alpha",
+            "draft",
+            "A copied synthetic alpha fact.",
+            "app/auth/Client.rs",
+        ),
+    );
+    let input = w.sb.path().join("alpha.md");
+    write(
+        &input,
+        &w.reference(
+            "alpha",
+            "draft",
+            "A revised synthetic alpha fact.",
+            "app/auth/Client.rs",
+        ),
+    );
+    let before = fs::read_to_string(&accepted).unwrap();
+    w.run_on(
+        "latest",
+        &["propose", "submit", input.to_str().unwrap(), "--apply"],
+        45,
+    );
+    assert_eq!(fs::read_to_string(&accepted).unwrap(), before);
+}
+
+#[test]
+fn decision_template_change_anchor_is_verifiable_by_submit() {
+    let w = World::new();
+    let head = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    let template = fs::read_to_string(w.kb.join("core/templates/records/decision.md")).unwrap();
+    let draft = template
+        .replace("example.template.decision", "acme.decision.retry-once")
+        .replace("owner = \"architecture\"", "owner = \"arch\"")
+        .replace("related = [\"example.template.policy\"]", "")
+        .replace("commit = \"0000000\"", &format!("commit = \"{head}\""));
+    assert_ne!(draft, template);
+    let input = w.sb.path().join("decision.md");
+    write(&input, &draft);
+    let plan = w.run(&["propose", "submit", input.to_str().unwrap()], 0);
+    let anchor = &plan["result"]["draft"]["anchors"][0];
+    assert_eq!(anchor["anchor"]["kind"], "change");
+    assert_eq!(anchor["status"], "verified");
+    // Without repo and commit the external reference cannot be verified and is refused.
+    let bare: String = draft
+        .lines()
+        .filter(|l| !l.starts_with("repo = ") && !l.starts_with("commit = "))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    write(&input, &bare);
+    w.run(&["propose", "submit", input.to_str().unwrap()], 40);
+}
+
+#[test]
+fn capture_anchor_paths_may_contain_at_signs() {
+    let w = World::new();
+    let base = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    write(&w.host.join("app/auth/icon@2x.png"), "synthetic asset\n");
+    write(&w.host.join("app/auth/@types/x.ts"), "// synthetic\n");
+    let head = w.sb.commit_all(&w.host, "synthetic at-sign paths");
+    let capture = |anchor: &str, expected| {
+        w.run(
+            &[
+                "capture",
+                "quirk",
+                "--title",
+                "Synthetic asset quirk",
+                "--text",
+                "A synthetic asset is scaled.",
+                "--owner",
+                "arch",
+                "--anchor",
+                anchor,
+            ],
+            expected,
+        )
+    };
+    let with_base = format!("mobile:app/auth/Client.rs@{base}");
+    for (spec, path, commit) in [
+        ("mobile:app/auth/icon@2x.png", "app/auth/icon@2x.png", &head),
+        ("mobile:app/auth/@types/x.ts", "app/auth/@types/x.ts", &head),
+        (
+            "mobile:app/auth/icon@2x.png@HEAD",
+            "app/auth/icon@2x.png",
+            &head,
+        ),
+        (with_base.as_str(), "app/auth/Client.rs", &base),
+    ] {
+        let result = capture(spec, 0);
+        let anchor = &result["result"]["draft"]["anchors"][0];
+        assert_eq!(anchor["anchor"]["path"], path, "{spec}");
+        assert_eq!(anchor["anchor"]["commit"], commit.as_str(), "{spec}");
+        assert_eq!(anchor["status"], "verified", "{spec}");
+    }
+    let missing = capture("mobile:app/auth/Client.rs@no-such-rev", 64);
+    assert!(
+        missing["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("anchor revision no-such-rev is missing")
+    );
 }
 
 #[test]

@@ -94,17 +94,39 @@ fn anchor(spec: &str, kind: AnchorKind, roots: &HostRoots) -> Result<Anchor> {
     let (location, symbol) = spec
         .split_once('#')
         .map_or((spec, None), |(p, s)| (p, Some(s.to_string())));
-    let (location, revision) = location.rsplit_once('@').unwrap_or((location, "HEAD"));
-    let (repo, path) = location
+    let (repo, location) = location
         .split_once(':')
         .ok_or_else(|| KbError::invalid_input("--anchor must be REPO:PATH[@REV][#SYMBOL]"))?;
-    crate::util::check_rel_path(path).map_err(KbError::unsafe_path)?;
     let root = roots
         .get(repo)
         .ok_or_else(|| KbError::invalid_input(format!("no host root for anchor repo {repo}")))?;
-    let commit = Git::new(root)
-        .resolve_commit(revision)?
-        .ok_or_else(|| KbError::invalid_input(format!("anchor revision {revision} is missing")))?;
+    let git = Git::new(root);
+    let resolve = |revision: &str| -> Result<String> {
+        git.resolve_commit(revision)?
+            .ok_or_else(|| KbError::invalid_input(format!("anchor revision {revision} is missing")))
+    };
+    // Paths may contain '@' (icon@2x.png, @types/...). The text after the last '@' is a
+    // revision when it resolves; otherwise the whole text is a path that must exist at HEAD.
+    let (path, commit) = match location.rsplit_once('@') {
+        None => (location, resolve("HEAD")?),
+        Some((path, revision)) => match resolve(revision) {
+            Ok(commit) => (path, commit),
+            Err(missing) => {
+                crate::util::check_rel_path(location).map_err(KbError::unsafe_path)?;
+                let head = resolve("HEAD")?;
+                if !git
+                    .output(&["cat-file", "-e", &format!("{head}:{location}")])?
+                    .ok()
+                {
+                    return Err(missing.with_hint(
+                        "a PATH containing '@' must exist at HEAD or end with an explicit @REV",
+                    ));
+                }
+                (location, head)
+            }
+        },
+    };
+    crate::util::check_rel_path(path).map_err(KbError::unsafe_path)?;
     Ok(Anchor {
         kind,
         repo: Some(repo.into()),
