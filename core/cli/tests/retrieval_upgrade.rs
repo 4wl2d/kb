@@ -570,6 +570,56 @@ fn discovered_paths_are_capped_and_never_count_against_the_path_limit() {
 }
 
 #[test]
+fn discovered_paths_past_the_cap_still_add_their_modules_to_a_known_scope() {
+    let w = World::new();
+    let modules = w.kb.join("project/registry/modules.toml");
+    write(
+        &modules,
+        &format!(
+            "{}\n[[module]]\nid = \"mobile.pay\"\nrepo = \"mobile\"\ntitle = \"Synthetic payments\"\npaths = [\"app/pay/**\"]\n",
+            fs::read_to_string(&modules).unwrap()
+        ),
+    );
+    w.record("pay", &module_policy("pay", "mobile.pay"));
+    let names: Vec<String> = (0..70).map(|n| format!("Synth{n:03}")).collect();
+    for name in &names {
+        write(
+            &w.host.join(format!("app/auth/{name}.kt")),
+            "// synthetic\n",
+        );
+    }
+    // Sorted by path, the payment file comes after every auth file.
+    write(&w.host.join("app/pay/ZetaPay.kt"), "// synthetic\n");
+    w.commit_host("2024-01-02T00:00:00Z");
+    let run = |task: &str| {
+        let result = w.run(&[
+            "--intent",
+            "implement",
+            "--module",
+            "mobile.auth",
+            "--task",
+            task,
+            "--budget",
+            "1000000",
+        ]);
+        assert_eq!(
+            result["scope"]["modules"],
+            serde_json::json!({"state": "known", "values": ["mobile.auth", "mobile.pay"]}),
+            "{task}"
+        );
+        assert!(ids(&result).contains(&"acme.policy.pay"), "{task}");
+        result
+    };
+    run("Rename Synth000 Synth001 and ZetaPay");
+    // Naming more files must not remove the obligation of the file past the cap.
+    let result = run(&format!("Rename {} and ZetaPay", names.join(" ")));
+    assert!(issue(&result, "INFERRED_PATHS_TRUNCATED").contains("71 identifier paths"));
+    let inferred = result["scope"]["inferred_paths"].as_array().unwrap();
+    assert_eq!(inferred.len(), 64);
+    assert!(!inferred.iter().any(|p| p == "app/pay/ZetaPay.kt"));
+}
+
+#[test]
 fn unusual_tracked_names_do_not_fail_identifier_discovery() {
     let w = World::new();
     write(
@@ -645,6 +695,38 @@ fn oversized_patch_text_skips_changed_text_hints() {
     w.commit_host("2024-01-02T00:00:00Z");
     let result = w.run(&["--intent", "review", "--changed", "--base", &base]);
     assert!(codes(&result, "issues").contains(&"CHANGED_TEXT_SKIPPED"));
+    assert_eq!(
+        result["scope"]["modules"],
+        serde_json::json!({"state": "known", "values": ["mobile.auth"]})
+    );
+}
+
+#[test]
+fn noisy_git_diagnostics_skip_changed_text_hints() {
+    let w = World::new();
+    write(&w.host.join(".gitattributes"), "*.txt filter=noisy\n");
+    write(&w.host.join("app/auth/notes.txt"), "synthetic notes\n");
+    w.commit_host("2024-01-02T00:00:00Z");
+    // A local clean filter that writes more than 1 MiB of diagnostics while `git diff` reads
+    // the work tree, like a flood of line-ending warnings.
+    w.sb.git(
+        &w.host,
+        &[
+            "config",
+            "filter.noisy.clean",
+            "head -c 1100000 /dev/zero >&2; cat",
+        ],
+    );
+    write(
+        &w.host.join("app/auth/notes.txt"),
+        "synthetic notes, edited\n",
+    );
+    let result = w.run(&["--intent", "review", "--changed"]);
+    assert!(
+        issue(&result, "CHANGED_TEXT_SKIPPED").contains("MiB of Git diagnostics"),
+        "{}",
+        result["issues"]
+    );
     assert_eq!(
         result["scope"]["modules"],
         serde_json::json!({"state": "known", "values": ["mobile.auth"]})

@@ -86,7 +86,7 @@ fn begin(ctx: &Ctx, args: &ProposeBeginArgs) -> Result<CommandOutput> {
         false,
         host.kb_submodule_path.as_deref(),
     )?;
-    let patch = host::facts::diff_text(&host.root, &diff)?;
+    let patch = host::facts::diff_patch(&host.root, &diff)?;
     let mut session = Session::open(ctx, Some(host.clone()), Options::reading(ctx, false))?;
     let order = session.with_view(|view| {
         let repo = args.hosts.repo.clone().or_else(|| host::identify_repo(&host, view.registry()).map(|(id, _)| id))

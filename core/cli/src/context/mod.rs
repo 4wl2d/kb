@@ -205,16 +205,19 @@ impl TaskEnv {
         }
     }
 
-    /// Use the patch text of the selected host diff as lexical evidence. `None` (the patch
-    /// exceeded the adapter's size limit) skips the changed-text hints with a note: they only
-    /// add change-type candidates, so their absence never prunes an obligation.
-    pub fn set_changed_text(&mut self, text: Option<String>) {
+    /// Use the patch text of the selected host diff as lexical evidence. An error (the patch
+    /// exceeded a bound of the adapter, described by its `Display`) skips the changed-text
+    /// hints with a note: they only add change-type candidates, so their absence never prunes
+    /// an obligation.
+    pub fn set_changed_text(&mut self, text: std::result::Result<String, impl std::fmt::Display>) {
         match text {
-            Some(text) => self.changed_text = text,
-            None => self.notes.push(Diagnostic::info(
+            Ok(text) => self.changed_text = text,
+            Err(limit) => self.notes.push(Diagnostic::info(
                 "CHANGED_TEXT_SKIPPED",
-                "the host patch exceeds the lexical-analysis limit; changed-text identifier \
-                 hints were skipped (pass --change-type for explicit categories)",
+                format!(
+                    "the host patch {limit}; changed-text identifier hints were skipped (pass \
+                     --change-type for explicit categories)"
+                ),
             )),
         }
     }

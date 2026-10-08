@@ -166,13 +166,80 @@ fn tracked_names(git: &Git, revision: Option<&str>) -> Result<Vec<u8>> {
     }
 }
 
-/// Most patch bytes read as lexical evidence for change-type hints.
+/// Most patch bytes read from a host diff (change-type hints and work orders).
 pub const MAX_DIFF_TEXT_BYTES: usize = 8 * 1024 * 1024;
 
-/// Zero-context patch of `diff`, used only for optional change-type hints. `None` when it
-/// exceeds [`MAX_DIFF_TEXT_BYTES`] (a generated lockfile or dump): the hints are skipped
-/// rather than failing the request.
-pub fn diff_text(root: &Path, diff: &crate::impact::HostDiff) -> Result<Option<String>> {
+/// The bound of the Git adapter that a host patch exceeded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchLimit {
+    /// Larger than [`MAX_DIFF_TEXT_BYTES`] (a generated lockfile or dump).
+    Size,
+    /// `git diff` ran past its deadline (e.g. a slow clean filter on a work-tree file).
+    Deadline,
+    /// `git diff` wrote more diagnostics than the stderr cap (e.g. line-ending warnings).
+    Diagnostics,
+}
+
+impl std::fmt::Display for PatchLimit {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PatchLimit::Size => write!(
+                f,
+                "exceeds the {} MiB patch limit",
+                MAX_DIFF_TEXT_BYTES / (1024 * 1024)
+            ),
+            PatchLimit::Deadline => write!(
+                f,
+                "was not produced within the {} s Git deadline",
+                crate::git::LIMITED_TIMEOUT.as_secs()
+            ),
+            PatchLimit::Diagnostics => write!(
+                f,
+                "produced more than {} MiB of Git diagnostics",
+                crate::git::LIMITED_STDERR_BYTES / (1024 * 1024)
+            ),
+        }
+    }
+}
+
+/// Zero-context patch of `diff` for optional change-type hints. A patch beyond a bound of
+/// the adapter is `Ok(Err(limit))`, so the caller skips the hints instead of failing the
+/// request; other Git failures are errors. Work orders use [`diff_patch`].
+pub fn diff_text(
+    root: &Path,
+    diff: &crate::impact::HostDiff,
+) -> Result<std::result::Result<String, PatchLimit>> {
+    match read_patch(root, diff) {
+        Ok(text) => Ok(Ok(text)),
+        Err(e) => match patch_limit(&e) {
+            Some(limit) => Ok(Err(limit)),
+            None => Err(e),
+        },
+    }
+}
+
+/// Zero-context patch of `diff` as the primary input of a work order: a patch beyond a bound
+/// of the adapter fails closed with `INVALID_INPUT` naming the bound.
+pub fn diff_patch(root: &Path, diff: &crate::impact::HostDiff) -> Result<String> {
+    read_patch(root, diff).map_err(|e| match patch_limit(&e) {
+        Some(limit) => KbError::invalid_input(format!(
+            "host patch {limit}; split the change into smaller ranges"
+        ))
+        .with_details(e.details),
+        None => e,
+    })
+}
+
+fn patch_limit(e: &KbError) -> Option<PatchLimit> {
+    match e.details["kind"].as_str()? {
+        "stdout-limit" => Some(PatchLimit::Size),
+        "timeout" => Some(PatchLimit::Deadline),
+        "stderr-limit" => Some(PatchLimit::Diagnostics),
+        _ => None,
+    }
+}
+
+fn read_patch(root: &Path, diff: &crate::impact::HostDiff) -> Result<String> {
     let mut args = vec![
         "diff",
         "--unified=0",
@@ -185,13 +252,9 @@ pub fn diff_text(root: &Path, diff: &crate::impact::HostDiff) -> Result<Option<S
         args.push(head);
     }
     args.push("--");
-    let bytes = match Git::new(root).run_bytes_limited(&args, MAX_DIFF_TEXT_BYTES) {
-        Ok(bytes) => bytes,
-        Err(e) if e.details["kind"] == "stdout-limit" => return Ok(None),
-        Err(e) => return Err(e),
-    };
+    let bytes = Git::new(root).run_bytes_limited(&args, MAX_DIFF_TEXT_BYTES)?;
     // Git's binary-file notices remain lexical text; no binary contents are read.
-    Ok(Some(String::from_utf8_lossy(&bytes).into_owned()))
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
 }
 
 pub fn resolve_as_of(

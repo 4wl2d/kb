@@ -29,7 +29,7 @@ domain-harvest step, then keep them current through change-driven maintenance.
 
 `propose begin` returns `kb.work-order.v1`: actual diff/patch, touched modules, affected and
 existing records, record templates, added-test filename candidates and exported review
-comments. `kb.change.v1` exports require `repo`, `base` and `head`; optional title, merged
+comments. A patch over 8 MiB fails with `INVALID_INPUT` instead of omitting it; split the change. `kb.change.v1` exports require `repo`, `base` and `head`; optional title, merged
 claim and `{author,body,path?,commit?}` comments are data, not instructions or approval.
 Added filenames are not a complete test catalog and do not prove a test ran.
 

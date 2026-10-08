@@ -673,6 +673,37 @@ fn usage_log_preserves_calls_omits_text_and_detects_a_final_scope_change() {
 }
 
 #[test]
+fn usage_report_scopes_diffs_with_more_paths_than_the_path_option_limit() {
+    let w = World::new();
+    write(
+        &w.kb.join("project/knowledge/policies/auth.md"),
+        "+++\nschema = 2\nid = \"acme.policy.auth\"\nkind = \"policy\"\ntitle = \"Synthetic scoped knowledge\"\nstatus = \"accepted\"\nowner = \"arch\"\n[scope]\nmodules = [\"mobile.auth\"]\n[[rules]]\nid = \"state\"\nlevel = \"must\"\ntext = \"Synthetic scoped rule.\"\n+++\n",
+    );
+    let first = w.context(&[]);
+    let id = first["receipt"]["id"].as_str().unwrap();
+    for n in 0..520 {
+        write(
+            &w.host.join(format!("app/auth/generated/G{n}.rs")),
+            "// synthetic generated file\n",
+        );
+    }
+    // Diff paths are bounded by the diff, not by the 512 `--path` values of context.
+    let result = w.run(&["usage", "report", "--receipt", id], 0);
+    let report = &result["result"]["usage"];
+    assert_eq!(report["calls"], 1);
+    assert!(
+        report["delivered_but_irrelevant"]
+            .get("acme.policy.auth")
+            .is_none(),
+        "{report}"
+    );
+    assert_eq!(
+        result["result"]["diff"]["files"].as_array().unwrap().len(),
+        520
+    );
+}
+
+#[test]
 fn identical_receipts_are_stored_separately_for_distinct_host_checkouts() {
     let w = World::new();
     let first = w.context(&[]);

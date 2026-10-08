@@ -148,7 +148,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
     };
     let changed_text = match (&host, &diff) {
         (Some(h), Some(diff)) => host::facts::diff_text(&h.root, diff)?,
-        _ => Some(String::new()),
+        _ => Ok(String::new()),
     };
 
     let mut s = Session::open(ctx, host, Options::reading(ctx, args.include_proposals))?;

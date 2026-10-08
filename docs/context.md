@@ -96,17 +96,21 @@ candidates: they feed path candidates, ranking and change-type hints, and add th
 features of the files they name to a scope that explicit paths, modules or a diff made known.
 On their own they never make the module or feature scope known, so module-scoped obligations
 stay undetermined. An identifier that names more than 8 files is skipped
-(`IDENTIFIER_AMBIGUOUS`); at most 64 discovered paths are used, sorted by path
-(`INFERRED_PATHS_TRUNCATED`), and they never count against the `--path` limit. Tracked names
+(`IDENTIFIER_AMBIGUOUS`); at most 64 discovered paths, sorted by path, are listed and used for
+ranking and change-type hints (`INFERRED_PATHS_TRUNCATED`). The rest still add the modules and
+features of their files, so the cap never narrows a known scope, and discovered paths never
+count against the `--path` limit. Tracked names
 that are not UTF-8 or not safe relative paths are skipped (`TRACKED_NAMES_SKIPPED`). Diagnose
 also consults feature/gap aliases, but remains partial with `DIAGNOSE_SCOPE_PROVISIONAL`
 until explicit paths, modules or a real diff establish scope. Discovery is not a substitute
 for a scoped pre-edit query.
 
 An explicit empty diff is known-empty; old/deleted/renamed paths retain their applicability.
-Diff paths are bounded by the diff, not by the `--path` limit. A patch larger than 8 MiB (a
-generated lockfile or dump) skips the changed-text identifier hints (`CHANGED_TEXT_SKIPPED`)
-instead of failing.
+Diff paths are bounded by the diff, not by the `--path` limit (also in `verify` and
+`usage report`). A patch Git cannot produce within the adapter's bounds (larger than 8 MiB,
+such as a generated lockfile or dump; not finished within 30 s, such as a slow clean filter;
+or more than 1 MiB of Git diagnostics) skips the changed-text identifier hints
+(`CHANGED_TEXT_SKIPPED`, also in `eval history`) instead of failing.
 `change-types.toml` aliases/path/symbol hints can add candidates. Such lexical hints cannot
 prune unknown categories. Explicit `--change-type` supplies that knowledge; exclusions are
 reported in `pruned_change_types` and required dependencies remain reachable.

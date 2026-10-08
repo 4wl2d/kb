@@ -442,6 +442,30 @@ fn conditions_and_exceptions_need_explicit_applicability_before_enforcement() {
 }
 
 #[test]
+fn diffs_with_more_paths_than_the_path_option_limit_are_still_verified() {
+    let w = World::new(true);
+    w.scoped_policy(
+        "modules = [\"mobile.auth\"]",
+        &BANNED.replace("app/**/*.kt", "app/auth/Client.kt"),
+    );
+    for n in 0..520 {
+        write(
+            &w.host.join(format!("app/auth/generated/G{n}.kt")),
+            "// synthetic generated file\n",
+        );
+    }
+    write(
+        &w.host.join("app/auth/Client.kt"),
+        "// Synthetic fixture\nlegacyCall()\nlegacyCall()\n",
+    );
+    // Diff paths are bounded by the diff, not by the 512 `--path` values of context.
+    let failed = w.run(&[], 40);
+    let probe = &failed["result"]["verification"]["probes"][0];
+    assert_eq!(probe["state"], "failed", "{failed}");
+    assert_eq!(probe["evidence"][0]["line"], 3);
+}
+
+#[test]
 fn invalid_knowledge_cannot_turn_into_a_successful_empty_probe_set() {
     let w = World::new(true);
     w.policy(&BANNED.replace("pattern = 'legacyCall\\('", "command = 'touch dangerous'"));

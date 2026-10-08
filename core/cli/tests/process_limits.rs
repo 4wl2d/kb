@@ -33,6 +33,13 @@ fn process_fixture_child() {
                 }
             }
         }
+        "noisy" => {
+            for _ in 0..64 {
+                if std::io::stderr().write_all(&[b'x'; 16384]).is_err() {
+                    break;
+                }
+            }
+        }
         "sleep" => std::thread::sleep(Duration::from_secs(60)),
         "descendant" => {
             let _child = child("sleep").spawn().unwrap();
@@ -63,6 +70,9 @@ fn refuses_excess_output() {
     let error = capture(&mut child("large"), b"", limits()).err().unwrap();
     assert!(error.message.contains("stdout exceeds"), "{error}");
     assert_eq!(error.details["kind"], "stdout-limit");
+    let error = capture(&mut child("noisy"), b"", limits()).err().unwrap();
+    assert!(error.message.contains("stderr exceeds"), "{error}");
+    assert_eq!(error.details["kind"], "stderr-limit");
 }
 
 #[test]

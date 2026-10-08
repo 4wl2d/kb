@@ -16,6 +16,11 @@ use crate::error::{ErrorCode, KbError, Result};
 /// Protocols accepted in transport policies.
 pub const KNOWN_PROTOCOLS: [&str; 5] = ["https", "ssh", "git", "file", "http"];
 
+/// Deadline of [`Git::run_bytes_limited`].
+pub const LIMITED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Diagnostic (stderr) bytes accepted by [`Git::run_bytes_limited`].
+pub const LIMITED_STDERR_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct Git {
     /// Directory passed with `-C`.
@@ -143,7 +148,8 @@ impl Git {
         Ok(o.stdout)
     }
 
-    /// Read bounded command output for potentially large patches and history exports.
+    /// Read bounded command output for potentially large patches and history exports, within
+    /// [`LIMITED_TIMEOUT`] and [`LIMITED_STDERR_BYTES`].
     pub fn run_bytes_limited(&self, args: &[&str], max_bytes: usize) -> Result<Vec<u8>> {
         let mut command = self.command(&[]);
         command.args(args);
@@ -151,9 +157,9 @@ impl Git {
             &mut command,
             &[],
             crate::process::Limits {
-                timeout: std::time::Duration::from_secs(30),
+                timeout: LIMITED_TIMEOUT,
                 stdout: max_bytes,
-                stderr: 1024 * 1024,
+                stderr: LIMITED_STDERR_BYTES,
             },
         )?;
         if output.exit_code != 0 {

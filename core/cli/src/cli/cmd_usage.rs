@@ -53,7 +53,8 @@ fn report(ctx: &Ctx, args: &UsageReportArgs) -> Result<CommandOutput> {
             .iter()
             .map(|s| crate::context::parse_host_version(s))
             .collect::<Result<Vec<_>>>()?;
-        request.paths = diff
+        // Diff paths are bounded by the diff, not by the `--path` limit.
+        request.changed_paths = diff
             .files
             .iter()
             .flat_map(|f| std::iter::once(f.path.clone()).chain(f.old_path.clone()))
@@ -61,7 +62,8 @@ fn report(ctx: &Ctx, args: &UsageReportArgs) -> Result<CommandOutput> {
         let mut env = TaskEnv::new(info.clone());
         env.host_repo = Some(repo.clone());
         env.changed_scope = true;
-        env.known_files.extend(request.paths.iter().cloned());
+        env.known_files
+            .extend(request.changed_paths.iter().cloned());
         if let Some(head) = &diff.head {
             if let Some(path) = view
                 .registry()

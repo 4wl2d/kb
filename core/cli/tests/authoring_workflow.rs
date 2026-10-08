@@ -442,6 +442,30 @@ fn work_order_contains_real_change_tests_templates_and_exported_reviews() {
 }
 
 #[test]
+fn work_order_fails_closed_when_the_patch_exceeds_its_limit() {
+    let w = World::new();
+    let base = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    // About 9 MB of generated text: above the 8 MiB patch limit.
+    let line = format!("{}\n", "x".repeat(99));
+    write(
+        &w.host.join("app/auth/package-lock.json"),
+        &line.repeat(90_000),
+    );
+    let head = w.sb.commit_all(&w.host, "add synthetic lockfile");
+    let range = format!("{base}..{head}");
+    let failed = w.run(&["propose", "begin", "--from-change", &range], 64);
+    assert_eq!(failed["error"]["code"], "INVALID_INPUT");
+    assert!(
+        failed["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("exceeds the 8 MiB patch limit"),
+        "{failed}"
+    );
+    assert!(failed["result"].is_null(), "{failed}");
+}
+
+#[test]
 fn coverage_counts_tracked_files_history_and_draft_exclusions() {
     let w = World::new();
     write(

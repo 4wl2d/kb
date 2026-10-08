@@ -75,7 +75,8 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
         let mut request = ContextRequest::new(Intent::Review);
         request.repos = vec![repo.clone()];
         request.change_types = args.change_types.clone();
-        request.paths = diff
+        // Diff paths are bounded by the diff, not by the `--path` limit.
+        request.changed_paths = diff
             .files
             .iter()
             .flat_map(|f| std::iter::once(f.path.clone()).chain(f.old_path.clone()))
@@ -89,7 +90,8 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
         env.host_repo = Some(repo.clone());
         env.host_head = diff.head.clone().or(host.head.clone());
         env.changed_scope = true;
-        env.known_files.extend(request.paths.iter().cloned());
+        env.known_files
+            .extend(request.changed_paths.iter().cloned());
         if let Some(path) = view
             .registry()
             .repo(&repo)
@@ -144,7 +146,7 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
                 input.diff.head.as_deref().unwrap(),
                 CodeOperation::Refs,
             )?;
-            code.paths = request.paths.clone();
+            code.paths = request.changed_paths.clone();
             input.code = Some(provider.load(&code)?);
         }
         crate::verify::evaluate(
