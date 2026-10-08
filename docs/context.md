@@ -441,6 +441,8 @@ The overall status is the worst of all reasons (`complete` < `partial` < `confli
 | `NOT_APPROVED` | partial | the selected revision is not reachable from the approved tip |
 | `APPROVAL_UNKNOWN` | partial | no approved tip is known, so approval cannot be decided |
 | `REPO_UNKNOWN` | partial | no `--repo` and no identified host repo |
+| `DIAGNOSE_SCOPE_PROVISIONAL` | partial | path-free `--intent diagnose` without `--path`/`--module` or a diff: candidates only, not a scoped pre-edit query |
+| `AS_OF_UNDATED` | partial | `--as-of` withheld accepted records without a verifiable `introduced` bound |
 | `AS_OF_BOUND_UNRESOLVED` | partial | `--as-of` withheld accepted records scoped to other repositories whose commit bounds cannot be resolved in this host |
 | `UNDETERMINED_OBLIGATIONS` | partial | obligations whose applicability is undetermined |
 | `DEPENDENCY_VERSION_UNDETERMINED` | partial | a required record's version constraint cannot be checked |

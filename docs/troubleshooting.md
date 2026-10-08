@@ -160,6 +160,8 @@ Two different causes share this code; `details` tells them apart.
 | `NOT_APPROVED` | the selected revision is not reachable from the approved tip; merge it through review or select `latest`/`pinned` |
 | `APPROVAL_UNKNOWN` | no approved tip is known to compare with; run once online (`./kbw sync`) |
 | `REPO_UNKNOWN` | pass `--repo <id>`, or make the host identifiable: a registry `remotes` entry matching the host's remote URL, or `repo = "<id>"` in the host's `.kbw.toml` |
+| `DIAGNOSE_SCOPE_PROVISIONAL` | path-free diagnosis only proposes candidate knowledge; confirm the files involved and re-run `context` with `--path`/`--module` or `--changed` before editing |
+| `AS_OF_UNDATED` | `--as-of` withheld accepted records without an `introduced` bound (`--explain` lists them); add `introduced` dates or commits through review, or treat the slice as partial |
 | `AS_OF_BOUND_UNRESOLVED` | `--as-of` withheld accepted records scoped to other repositories, because their commit bounds cannot be resolved in this host (`--explain` lists the temporal exclusions); replay from the repository those records name, or give cross-repository knowledge date bounds in the KB through review |
 | `UNDETERMINED_OBLIGATIONS` | name what you change: `--path <file>` (a directory that maps to no module gives the warning `PATH_SCOPE_UNKNOWN`), `--module`, `--feature`, or `--changed`; filenames and symbols named in `--task` (reported in `scope.inferred_paths`) never establish module scope on their own; `undetermined[]` lists the obligations that may apply |
 | `DEPENDENCY_VERSION_UNDETERMINED` | pass `--host-version <repo>=<x.y.z>` for the repo named in the message (only the identified host repo's version is read automatically, from its registry `version_file`) |

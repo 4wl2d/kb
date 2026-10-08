@@ -59,7 +59,7 @@ Pending draft expectations stay comments until review. Use Tier A to check order
 and response-size limits, not as proof of agent solution quality.
 
 4. VERIFY THE ACTUAL FINAL SCOPE
-Run <.kb>/kbw impact --changed --base <target>.
+Run <.kb>/kbw impact --base <target> --working-tree.
 Run <.kb>/kbw verify --diff <target> for declared probes; committed changes may use
 --head <commit>, and the commit hook uses --staged plus the pending message file.
 A probe with unavailable provider facts or unevaluated conditions stays unverifiable.

@@ -70,7 +70,7 @@ reported budget; mandatory statements are never truncated. See
 
 ## 5. Check impact and capture learning before finishing
 
-1. Run `{{kb_path}}/kbw impact --changed --base <target>{{snapshot_arg}}`. Address affected records
+1. Run `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}`. Address affected records
    and unknown coverage. `--deep` requires a configured, commit-bound provider.
 2. Run applicable declarative probes with `{{kb_path}}/kbw verify --diff <target>{{snapshot_arg}}`.
    These check declared regex/import/naming/API conditions; they do not execute record text.

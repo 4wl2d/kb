@@ -11,7 +11,7 @@ At task start:
 Path-free diagnosis is provisional. Before the first edit, request `--intent implement`
 with the actual `--path` values (or `--changed --base <target>` for review). Apply all
 mandatory knowledge; resolve missing scope and conflicts. Before finishing, run
-`{{kb_path}}/kbw impact --changed --base <target>{{snapshot_arg}}` and applicable `verify`
+`{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}` and applicable `verify`
 probes. Capture learned decisions, gaps, quirks or scenarios with evidence as drafts.
 Acceptance requires review and merge into the approved ref.
 

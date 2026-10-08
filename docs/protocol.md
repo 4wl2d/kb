@@ -308,6 +308,8 @@ stderr and in `meta.diagnostics`. Recovery is never silent.
 | `PROPOSAL_*` and proposal parse diagnostics | warning/error | problems of the proposal overlay (`PROPOSAL_NOT_APPLIED`, `PROPOSAL_REPLACES_RECORD`, `PROPOSAL_UNREADABLE`); with `--include-proposals` also the parse diagnostics of each changed file (for example `FRONT_MATTER_INVALID`) |
 | `HOST_BINDING_REPO_UNKNOWN` | warning | `.kbw.toml` names a `repo` the registry does not define; the host repo is identified by its remotes instead |
 | `HOST_REPO_UNKNOWN` | warning | `impact`: the host repository is not identified in the registry; only repo-independent path selectors were evaluated |
+| `RECEIPT_NOT_SAVED` | warning | `context`: the receipt could not be stored under `.cache`; a later `--since-receipt` or `--core-receipt` naming it fails and full context is needed |
+| `USAGE_NOT_LOGGED` | warning | `context`: the private usage log could not be appended; `usage report` will not include this call |
 
 Example (`kbw --json --offline show <id>` after the index file was overwritten with garbage;
 the path is shortened):

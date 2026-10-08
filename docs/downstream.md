@@ -122,7 +122,11 @@ selection = "pinned"      # default for --snapshot auto: auto | latest | pinned
 Run the KB's launcher from inside the host (`<kb-checkout>/kbw context ...`) or pass
 `--host <dir>`. The generated skill and instruction blocks tell agents to run
 `<kb_path>/kbw`, where `kb_path` is host-relative and may not contain `..`. If the checkout
-is not at that path, `kbw integrate` warns `KB_PATH_MISMATCH`; the simplest layout is a
+is not at that path, `kbw integrate` warns `KB_PATH_MISMATCH`. It also warns
+`BUNDLE_STALE` when the committed bundle differs from what `kbw integrate --generate`
+renders now (it installs the committed, reviewed bundle; regenerate it through review) and
+`BUNDLE_UNVERIFIED` when the bundle cannot be re-rendered to check it (the message gives
+the cause). The simplest layout is a
 plain clone at `kb_path` inside the host, excluded from the host's Git (for example in
 `.git/info/exclude`), with the pin in `.kbw.toml`.
 

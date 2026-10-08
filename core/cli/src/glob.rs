@@ -82,14 +82,20 @@ pub fn split_repo(spec: &str) -> (Option<&str>, &str) {
 /// [`split_repo`] only recognizes registry-id-shaped qualifiers, so `Mobile:app/**` parses
 /// as a literal pattern that never matches; validation checks this text against the registry.
 pub fn written_qualifier(spec: &str) -> Option<&str> {
-    let (mut class, mut groups) = (false, 0usize);
+    // `class` holds the index where a class body starts; a `]` there (after an optional
+    // `!`/`^`) is a member, as in `[]:]`, not the end of the class.
+    let (mut class, mut groups) = (None, 0usize);
     for (i, c) in spec.char_indices() {
-        match c {
-            '[' if !class => class = true,
-            ']' if class => class = false,
-            '{' if !class => groups += 1,
-            '}' if !class && groups > 0 => groups -= 1,
-            ':' | '/' if !class && groups == 0 => return (c == ':').then(|| &spec[..i]),
+        match (c, class) {
+            ('/', _) => return None,
+            ('[', None) => {
+                let body = &spec[i + 1..];
+                class = Some(i + 1 + usize::from(body.starts_with(['!', '^'])));
+            }
+            (']', Some(start)) if i > start => class = None,
+            ('{', None) => groups += 1,
+            ('}', None) if groups > 0 => groups -= 1,
+            (':', None) if groups == 0 => return Some(&spec[..i]),
             _ => {}
         }
     }
@@ -160,6 +166,12 @@ mod tests {
             Some("{mobile,backend}")
         );
         assert_eq!(written_qualifier("[mb]obile:app/**"), Some("[mb]obile"));
+        // A `]` first in a class is a member; a `/` anywhere before the `:` (even inside a
+        // group) leaves the glob unqualified.
+        for spec in ["[]:]/x.md", "[!]:]/x.md", "{a/b,c}:x.md"] {
+            assert_eq!(written_qualifier(spec), None, "{spec}");
+        }
+        assert_eq!(written_qualifier("[]a]x:y/z"), Some("[]a]x"));
         // A `:` inside a class or brace group is pattern text: the glob stays unqualified.
         for spec in ["[a:b]/x.md", "{a:b,c}/x.md", "x[:]y.md"] {
             assert_eq!(written_qualifier(spec), None, "{spec}");

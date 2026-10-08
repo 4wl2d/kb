@@ -898,10 +898,11 @@ impl Op {
 }
 
 /// Longest-common-subsequence edit script after trimming the common prefix and suffix.
-/// Very large middles fall back to a greedy alignment with bounded look-ahead to bound
-/// memory: still a valid script that keeps runs of unchanged lines equal, not a minimal one.
+/// Larger middles use Myers' shortest edit script, whose memory grows with the number of
+/// changed lines rather than the file size; only a middle with more than
+/// [`MAX_MYERS_EDITS`] changes falls back to delete-all/insert-all. Within each run of
+/// changes, deletions precede insertions, as in conventional unified diffs.
 pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
-    const LOOKAHEAD: usize = 256;
     let pre = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let suf = a[pre..]
         .iter()
@@ -913,18 +914,17 @@ pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
     let mut ops: Vec<Op> = (0..pre).map(|i| Op::Equal(i, i)).collect();
     let (n, m) = (am.len(), bm.len());
     if n.saturating_mul(m) > 4_000_000 {
-        let mut i = 0;
-        for (j, line) in bm.iter().enumerate() {
-            match (i..n.min(i + LOOKAHEAD)).find(|&k| am[k] == *line) {
-                Some(k) => {
-                    ops.extend((i..k).map(|d| Op::Delete(pre + d)));
-                    ops.push(Op::Equal(pre + k, pre + j));
-                    i = k + 1;
-                }
-                None => ops.push(Op::Insert(pre + j)),
+        match myers(am, bm, MAX_MYERS_EDITS) {
+            Some(middle) => ops.extend(middle.into_iter().map(|op| match op {
+                Op::Equal(x, y) => Op::Equal(pre + x, pre + y),
+                Op::Delete(x) => Op::Delete(pre + x),
+                Op::Insert(y) => Op::Insert(pre + y),
+            })),
+            None => {
+                ops.extend((0..n).map(|i| Op::Delete(pre + i)));
+                ops.extend((0..m).map(|j| Op::Insert(pre + j)));
             }
         }
-        ops.extend((i..n).map(|d| Op::Delete(pre + d)));
     } else {
         // lcs[i][j] = LCS length of am[i..] and bm[j..].
         let mut lcs = vec![0u32; (n + 1) * (m + 1)];
@@ -954,7 +954,93 @@ pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
         }
     }
     ops.extend((0..suf).map(|k| Op::Equal(a.len() - suf + k, b.len() - suf + k)));
+    deletions_first(ops)
+}
+
+/// Most changed lines [`myers`] traces; its memory grows with the square of this bound.
+const MAX_MYERS_EDITS: usize = 1000;
+
+/// Myers' O((N+M)D) shortest edit script with indices local to `a` and `b`, or `None` when
+/// more than `max_d` lines change.
+fn myers<T: PartialEq>(a: &[T], b: &[T], max_d: usize) -> Option<Vec<Op>> {
+    let (n, m) = (a.len() as isize, b.len() as isize);
+    let limit = max_d.min(a.len() + b.len()) as isize;
+    let off = limit + 1;
+    let mut v = vec![0isize; 2 * limit as usize + 3];
+    // trace[d] holds the furthest x on each diagonal k in -d..=d after step d.
+    let mut trace: Vec<Vec<isize>> = Vec::new();
+    for d in 0..=limit {
+        for k in (-d..=d).step_by(2) {
+            let down = k == -d || (k != d && v[(off + k - 1) as usize] < v[(off + k + 1) as usize]);
+            let mut x = if down {
+                v[(off + k + 1) as usize]
+            } else {
+                v[(off + k - 1) as usize] + 1
+            };
+            let mut y = x - k;
+            while x < n && y < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            v[(off + k) as usize] = x;
+            if x >= n && y >= m {
+                return Some(myers_path(&trace, d, n, m));
+            }
+        }
+        trace.push(v[(off - d) as usize..=(off + d) as usize].to_vec());
+    }
+    None
+}
+
+/// Walks the trace of [`myers`] back from `(n, m)`, reached after `last` edits.
+fn myers_path(trace: &[Vec<isize>], last: isize, n: isize, m: isize) -> Vec<Op> {
+    let mut ops = Vec::new();
+    let (mut x, mut y) = (n, m);
+    for d in (1..=last).rev() {
+        let prev = &trace[(d - 1) as usize];
+        let at = |k: isize| prev[(k + d - 1) as usize];
+        let k = x - y;
+        let down = k == -d || (k != d && at(k - 1) < at(k + 1));
+        let pk = if down { k + 1 } else { k - 1 };
+        let (px, py) = (at(pk), at(pk) - pk);
+        let (sx, sy) = if down { (px, py + 1) } else { (px + 1, py) };
+        while x > sx && y > sy {
+            x -= 1;
+            y -= 1;
+            ops.push(Op::Equal(x as usize, y as usize));
+        }
+        ops.push(if down {
+            Op::Insert(py as usize)
+        } else {
+            Op::Delete(px as usize)
+        });
+        (x, y) = (px, py);
+    }
+    while x > 0 && y > 0 {
+        x -= 1;
+        y -= 1;
+        ops.push(Op::Equal(x as usize, y as usize));
+    }
+    ops.reverse();
     ops
+}
+
+/// Lists each run's deletions before its insertions without reordering either side.
+fn deletions_first(ops: Vec<Op>) -> Vec<Op> {
+    let mut out = Vec::with_capacity(ops.len());
+    let mut inserts = Vec::new();
+    for op in ops {
+        match op {
+            Op::Insert(_) => inserts.push(op),
+            Op::Delete(_) => out.push(op),
+            Op::Equal(..) => {
+                out.append(&mut inserts);
+                out.push(op);
+            }
+        }
+    }
+    out.append(&mut inserts);
+    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1452,6 +1538,79 @@ text = \"Rotate keys.\"\n";
             "--- a/f\n+++ b/f\n@@ -1,4 +1,5 @@\n a\n-b\n+B\n c\n d\n+e\n"
         );
         assert_eq!(unified_diff("f", "x\n", "x\n"), "--- a/f\n+++ b/f\n");
+    }
+
+    /// Applies an edit script to `a`; `None` unless every index is in order and in range.
+    fn apply_ops<'s>(a: &[&'s str], b: &[&'s str], ops: &[Op]) -> Option<Vec<&'s str>> {
+        let (mut i, mut j, mut out) = (0, 0, Vec::new());
+        for op in ops {
+            match *op {
+                Op::Equal(x, y) if x == i && y == j && a[x] == b[y] => {
+                    out.push(a[x]);
+                    (i, j) = (i + 1, j + 1);
+                }
+                Op::Delete(x) if x == i => i += 1,
+                Op::Insert(y) if y == j => {
+                    out.push(b[y]);
+                    j += 1;
+                }
+                _ => return None,
+            }
+        }
+        (i == a.len() && j == b.len()).then_some(out)
+    }
+
+    #[test]
+    fn myers_finds_a_shortest_script_like_the_lcs_table() {
+        let cases: [(&str, &str); 6] = [
+            ("abcabba", "cbabac"),
+            ("xaxbxc", "abc"),
+            ("", "abc"),
+            ("abc", ""),
+            ("aaaa", "aaba"),
+            ("kitten", "sitting"),
+        ];
+        for (a, b) in cases {
+            let a: Vec<&str> = a.split("").filter(|s| !s.is_empty()).collect();
+            let b: Vec<&str> = b.split("").filter(|s| !s.is_empty()).collect();
+            let lcs = diff_ops(&a, &b);
+            let fast = myers(&a, &b, 100).unwrap();
+            assert_eq!(
+                apply_ops(&a, &b, &fast).as_deref(),
+                Some(&b[..]),
+                "{a:?} {b:?}"
+            );
+            let equal = |ops: &[Op]| ops.iter().filter(|o| matches!(o, Op::Equal(..))).count();
+            assert_eq!(equal(&fast), equal(&lcs), "{a:?} {b:?}");
+        }
+        assert!(myers(&["a", "b"], &["c", "d"], 3).is_none());
+    }
+
+    #[test]
+    fn large_diffs_align_duplicates_and_list_deletions_first() {
+        // Edits at both ends exceed the LCS table; a replaced line equal to a later one
+        // must not pull the untouched lines in between out of alignment.
+        let body: Vec<String> = (0..2100).map(|i| format!("k{i}")).collect();
+        let mut a = vec!["top", "commit = old", "note"];
+        a.extend(body.iter().map(String::as_str));
+        a.extend(["commit = C", "bottom"]);
+        let mut b = vec!["TOP", "commit = C", "note"];
+        b.extend(body.iter().map(String::as_str));
+        b.extend(["commit = C", "BOTTOM"]);
+        let ops = diff_ops(&a, &b);
+        assert_eq!(apply_ops(&a, &b, &ops).as_deref(), Some(&b[..]));
+        let changed = ops.iter().filter(|o| !matches!(o, Op::Equal(..))).count();
+        assert_eq!(changed, 6, "{ops:?}");
+        // Each run lists its deletion before its insertion.
+        assert!(
+            matches!(
+                ops[..4],
+                [Op::Delete(0), Op::Delete(1), Op::Insert(0), Op::Insert(1)]
+            ),
+            "{ops:?}"
+        );
+        let tail = &ops[ops.len() - 2..];
+        assert!(matches!(tail, [Op::Delete(_), Op::Insert(_)]), "{tail:?}");
     }
 
     #[test]
