@@ -914,8 +914,8 @@ pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
     let (n, m) = (am.len(), bm.len());
     if n.saturating_mul(m) > 4_000_000 {
         let mut i = 0;
-        for j in 0..m {
-            match (i..n.min(i + LOOKAHEAD)).find(|&k| am[k] == bm[j]) {
+        for (j, line) in bm.iter().enumerate() {
+            match (i..n.min(i + LOOKAHEAD)).find(|&k| am[k] == *line) {
                 Some(k) => {
                     ops.extend((i..k).map(|d| Op::Delete(pre + d)));
                     ops.push(Op::Equal(pre + k, pre + j));
