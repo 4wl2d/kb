@@ -78,8 +78,8 @@ impl ProfileLocation {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ProfileConfig {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     pub project: ProjectSection,
     pub source: SourceSection,
@@ -232,6 +232,9 @@ pub enum Harness {
     Claude,
     Codex,
     Cursor,
+    Grok,
+    Copilot,
+    Junie,
 }
 
 impl Harness {
@@ -240,6 +243,9 @@ impl Harness {
             Harness::Claude => "claude",
             Harness::Codex => "codex",
             Harness::Cursor => "cursor",
+            Harness::Grok => "grok",
+            Harness::Copilot => "copilot",
+            Harness::Junie => "junie",
         }
     }
 }

@@ -1,0 +1,143 @@
+#!/bin/sh
+# Host-repository template. Connect to an existing hook rather than overwriting it.
+# KB_PATH is the host-relative KB checkout. KB_SNAPSHOT, when set, is passed as-is.
+# Otherwise the hook passes `auto` if .kbw.toml declares `selection` (the engine honors
+# it), `pinned` if the host pins the KB (a gitlink at KB_PATH in HEAD, or a .kbw.toml
+# `pin`), else `auto` (the approved tip). KB_OFFLINE=1 skips the remote freshness check,
+# which host CI still performs. The hook checks the index Git is committing and the
+# message as Git will commit it. With GIT_EDITOR=: it cannot tell whether Git strips
+# comments, so it rejects only a message that fails both with and without them, or that
+# is all comments and fails with them (CI on the committed message stays authoritative);
+# to skip the editor use GIT_EDITOR=true. A `git commit --cleanup=<mode>` flag is
+# invisible to hooks. No record text is executed.
+set -eu
+
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' 'usage: commit-msg MESSAGE_FILE' >&2
+    exit 2
+fi
+kb_hook_message=$1
+case "$kb_hook_message" in
+    /*) ;;
+    *) kb_hook_message="$(pwd)/$kb_hook_message" ;;
+esac
+# `commit -a` and pathspec commits stage into an index that only GIT_INDEX_FILE names;
+# Git may pass it relative to the directory it runs the hook in.
+kb_hook_index=${GIT_INDEX_FILE:-}
+case "$kb_hook_index" in
+    ''|/*) ;;
+    *) kb_hook_index="$(pwd)/$kb_hook_index" ;;
+esac
+kb_hook_root=$(git rev-parse --show-toplevel)
+cd "$kb_hook_root"
+kb_hook_path=${KB_PATH:-.kb}
+case "$kb_hook_path" in
+    ''|/*|*[!A-Za-z0-9._/-]*)
+        printf '%s\n' 'KB_PATH must be a safe host-relative path' >&2
+        exit 2
+        ;;
+esac
+case "/$kb_hook_path/" in
+    */../*|*/./*)
+        printf '%s\n' 'KB_PATH must not contain dot or parent segments' >&2
+        exit 2
+        ;;
+esac
+
+# HEAD is detached while a rebase rewords or squashes; branch-name probes check the
+# branch being rebased.
+kb_hook_branch=
+if ! git symbolic-ref --quiet HEAD >/dev/null; then
+    for kb_hook_state in rebase-merge rebase-apply; do
+        kb_hook_head=$(git rev-parse --git-path "$kb_hook_state/head-name")
+        if [ -f "$kb_hook_head" ]; then
+            kb_hook_branch=$(sed -n '1s|^refs/heads/||p' "$kb_hook_head")
+            break
+        fi
+    done
+fi
+
+# Git runs this hook before it cleans the message up. Check what Git will commit (and CI
+# will read): cut at the scissors line, then strip comments when Git would. Git strips
+# them by default only from a message opened in an editor and sets GIT_EDITOR=: otherwise,
+# but GIT_EDITOR=: set by a user skips an editor Git still strips comments for.
+kb_hook_cut=$(printf '%s\n' '------------------------ >8 ------------------------' |
+    git stripspace --comment-lines)
+case "$(git config --get commit.cleanup || :)" in
+    verbatim) kb_hook_cleanup=none ;;
+    whitespace|scissors) kb_hook_cleanup=space ;;
+    strip) kb_hook_cleanup=comments ;;
+    *)
+        if [ "${GIT_EDITOR-}" = : ]; then
+            kb_hook_cleanup=either
+        else
+            kb_hook_cleanup=comments
+        fi
+        ;;
+esac
+kb_hook_tmp=$(mktemp -d "${TMPDIR:-/tmp}/kb-commit-msg.XXXXXX")
+trap 'rm -f "$kb_hook_tmp"/*; rmdir "$kb_hook_tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+KB_HOOK_CUT=$kb_hook_cut awk '$0 == ENVIRON["KB_HOOK_CUT"] { exit } { print }' \
+    "$kb_hook_message" >"$kb_hook_tmp/cut"
+case "$kb_hook_cleanup" in
+    none) cp "$kb_hook_tmp/cut" "$kb_hook_tmp/message" ;;
+    space|either) git stripspace <"$kb_hook_tmp/cut" >"$kb_hook_tmp/message" ;;
+    *) git stripspace --strip-comments <"$kb_hook_tmp/cut" >"$kb_hook_tmp/message" ;;
+esac
+if [ "$kb_hook_cleanup" = either ]; then
+    git stripspace --strip-comments <"$kb_hook_tmp/cut" >"$kb_hook_tmp/stripped"
+    # Git aborts a message that is empty after cleanup (unless --allow-empty-message,
+    # which hooks cannot see), so a message of only comment lines is checked
+    # whitespace-cleaned.
+    if cmp -s "$kb_hook_tmp/message" "$kb_hook_tmp/stripped" ||
+        [ ! -s "$kb_hook_tmp/stripped" ]; then
+        kb_hook_cleanup=space
+    fi
+fi
+
+# Whether the host's .kbw.toml declares the top-level key $1 (its keys are all top-level).
+kb_hook_declares() {
+    [ -f .kbw.toml ] &&
+        grep -Eq "^[[:space:]]*($1|\"$1\"|'$1')[[:space:]]*=" .kbw.toml
+}
+kb_hook_snapshot=${KB_SNAPSHOT:-}
+if [ -z "$kb_hook_snapshot" ]; then
+    # Like host CI, read the KB revision the host pins, unless the host binding selects
+    # one. A host without a pin (a separate checkout, or the commit that first adds the
+    # KB gitlink) uses the approved tip.
+    kb_hook_snapshot=auto
+    if kb_hook_declares selection; then
+        :
+    elif kb_hook_declares pin ||
+        git ls-tree HEAD -- "${kb_hook_path%/}" 2>/dev/null | grep -q '^160000 '; then
+        kb_hook_snapshot=pinned
+    fi
+fi
+
+set -- verify --diff HEAD --staged --only commit-message --only branch-name \
+    --snapshot "$kb_hook_snapshot" --quiet
+if [ "${KB_OFFLINE:-}" = 1 ]; then
+    set -- "$@" --offline
+fi
+if [ -n "$kb_hook_index" ]; then
+    set -- "$@" --index-file "$kb_hook_index"
+fi
+if [ -n "$kb_hook_branch" ]; then
+    set -- "$@" --branch "$kb_hook_branch"
+fi
+kb_hook_status=0
+if [ "$kb_hook_cleanup" = either ]; then
+    # A failed check (exit 40) of the whitespace-cleaned message is retried without
+    # comment lines; any other outcome is final.
+    "$kb_hook_path/kbw" "$@" --commit-message "$kb_hook_tmp/message" \
+        2>"$kb_hook_tmp/stderr" || kb_hook_status=$?
+    if [ "$kb_hook_status" -ne 40 ]; then
+        cat "$kb_hook_tmp/stderr" >&2
+        exit "$kb_hook_status"
+    fi
+    kb_hook_status=0
+    cp "$kb_hook_tmp/stripped" "$kb_hook_tmp/message"
+fi
+"$kb_hook_path/kbw" "$@" --commit-message "$kb_hook_tmp/message" || kb_hook_status=$?
+exit "$kb_hook_status"

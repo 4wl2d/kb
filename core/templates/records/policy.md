@@ -2,7 +2,7 @@
 # Record template: policy (rules and/or named settings). PLACEHOLDER TEXT: replace every value.
 # Ids, owners, repos, modules, features and concepts below come from the synthetic example
 # registry (namespace `example`); use your own namespace and registry ids.
-schema = 1
+schema = 2
 id = "example.template.policy"              # `<namespace>.<segment>(.<segment>)*`, stable forever
 kind = "policy"
 title = "Placeholder: one-line policy title"

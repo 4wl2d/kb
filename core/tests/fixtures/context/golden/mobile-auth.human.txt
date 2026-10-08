@@ -1,5 +1,5 @@
 KB CONTEXT (intent: implement)
-engine 0.1.0, protocol kb.cli.v1, skill protocol 1
+engine 0.1.0, protocol kb.cli.v1, skill protocol 2
 
 snapshot: 111111111111 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=file:///synthetic/acme-kb; latest=111111111111; key=sha256:22222
 host: repo=unknown; head=unknown; versions=mobile=2.3.0
@@ -127,7 +127,7 @@ effective settings:
    sources:
    - RFC 6749: The OAuth 2.0 Authorization Framework <https://www.rfc-editor.org/rfc/rfc6749>
 
-receipt: sha256:ca579e753c8870e6b324c3ec33931fde11cd7fbb549f233eefa4c972ba573fa7
+receipt: sha256:0c917e3e6356618c8a6cf16d6fa054871d87989c23044831440bc991937cf08f
 included: mandatory 6, dependencies 1, proposals 0, supplementary 4, sections 0
 excluded by budget: none
 other exclusions: 3 (use --explain)

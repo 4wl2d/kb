@@ -3,7 +3,7 @@
 # credentials and `.git` are ignored). Never identified by folder name.
 # `version_file` (optional, host-relative) holds the host code version (first line, semver)
 # used for `applicability.versions` in records.
-schema = 1
+schema = 2
 
 # [[repo]]
 # id = "mobile"

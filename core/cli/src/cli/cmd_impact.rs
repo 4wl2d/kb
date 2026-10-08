@@ -19,6 +19,20 @@ use crate::util::read_file_limited;
 const MAX_STATEMENT_BYTES: u64 = 1024 * 1024;
 
 pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
+    let provider = super::code_options::provider(ctx, &args.code);
+    if args.deep && !provider.configured() {
+        return Err(KbError::invalid_input(
+            "--deep needs --provider or pinned --provider-file responses",
+        ));
+    }
+    if !args.deep && provider.configured() {
+        return Err(KbError::invalid_input(
+            "provider options on impact require --deep",
+        ));
+    }
+    if !(1..=4).contains(&args.depth) {
+        return Err(KbError::invalid_input("deep impact depth must be 1..4"));
+    }
     let base = match (&args.base, args.working_tree) {
         (Some(b), _) => b.clone(),
         (None, true) => "HEAD".to_string(),
@@ -52,14 +66,31 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
     ));
 
     let mut s = Session::open(ctx, Some(host.clone()), Options::reading(ctx, false))?;
-    let report = s.with_view(|view| {
+    let (report, deep) = s.with_view(|view| {
         let metas = view.metas_by_kind(&Kind::ALL, Origin::Accepted)?;
-        let repo = host::identify_repo(&host, view.registry()).map(|(r, _)| r);
-        Ok(impact::analyze(
-            &diff,
-            repo.as_deref(),
-            view.registry(),
-            &metas,
+        let repo = args
+            .repo
+            .clone()
+            .or_else(|| host::identify_repo(&host, view.registry()).map(|(r, _)| r));
+        if repo
+            .as_ref()
+            .is_some_and(|id| view.registry().repo(id).is_none())
+        {
+            return Err(KbError::invalid_input("unknown impact --repo"));
+        }
+        let deep = if args.deep {
+            let repo = repo
+                .as_deref()
+                .ok_or_else(|| KbError::invalid_input("deep impact needs an identified --repo"))?;
+            Some(deep_report(
+                &provider, &host, &diff, repo, view, args.depth,
+            )?)
+        } else {
+            None
+        };
+        Ok((
+            impact::analyze(&diff, repo.as_deref(), view.registry(), &metas),
+            deep,
         ))
     })?;
     if report.repo.is_none() {
@@ -71,13 +102,17 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
     }
     let verdict =
         (args.check || statement.is_some()).then(|| impact::check(&report, statement.as_ref()));
+    let mut result = impact::to_json(&report, verdict.as_ref());
+    let mut text = impact::render(&report, verdict.as_ref(), ctx.format);
+    if let Some(deep) = &deep {
+        result["deep"] = deep.clone();
+        text.push_str("\nCode dependents (static provider evidence):\n");
+        text.push_str(&serde_json::to_string_pretty(deep)?);
+        text.push('\n');
+    }
     let mut out = CommandOutput::new(
-        with_snapshot(impact::to_json(&report, verdict.as_ref()), &s.info),
-        with_snapshot_line(
-            impact::render(&report, verdict.as_ref(), ctx.format),
-            &s.info,
-            ctx.format,
-        ),
+        with_snapshot(result, &s.info),
+        with_snapshot_line(text, &s.info, ctx.format),
     );
     if args.check
         && let Some(v) = &verdict
@@ -95,8 +130,103 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
                      (see core/templates/mr) and pass it with --statement",
                 ),
         );
+    } else if args.check && deep.as_ref().is_some_and(|d| d["complete"] == false) {
+        out = out.with_failure(KbError::new(
+            ErrorCode::ContextIncomplete,
+            "deep impact has incomplete provider evidence",
+        ));
     }
     Ok(s.finish(out))
+}
+
+fn deep_report(
+    provider: &crate::code::Provider,
+    host: &host::HostContext,
+    diff: &impact::HostDiff,
+    repo: &str,
+    view: &dyn KnowledgeView,
+    depth: u32,
+) -> Result<serde_json::Value> {
+    use std::collections::{BTreeMap, BTreeSet};
+    let changed: BTreeSet<_> = diff
+        .files
+        .iter()
+        .flat_map(|f| std::iter::once(f.path.clone()).chain(f.old_path.clone()))
+        .collect();
+    let head = diff
+        .head
+        .as_deref()
+        .or(host.head.as_deref())
+        .ok_or_else(|| KbError::invalid_input("host has no HEAD"))?;
+    let points: BTreeSet<_> = [diff.merge_base.as_str(), head].into_iter().collect();
+    let mut sources = Vec::new();
+    let mut dependents = Vec::new();
+    let mut grouped: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
+    let metas = view.metas_by_kind(&Kind::ALL, Origin::Accepted)?;
+    let mut complete = true;
+    let mut limitations = Vec::new();
+    if diff.head.is_none() && !diff.files.is_empty() {
+        complete = false;
+        limitations.push("The work-tree diff is seeded against committed graphs; new uncommitted definitions and edges are not indexed.");
+    }
+    for point in points {
+        let mut request = crate::code::request(
+            &host.root,
+            repo,
+            point,
+            crate::model::CodeOperation::Dependents,
+        )?;
+        request.depth = depth;
+        request.paths = changed.iter().cloned().collect();
+        let response = provider.load(&request)?;
+        complete &= response.complete;
+        let found = crate::code::dependents(&response, &changed, depth);
+        let mut indirect = diff.clone();
+        indirect.files = found
+            .iter()
+            .map(|d| impact::ChangedFile {
+                path: d.path.clone(),
+                old_path: None,
+                status: impact::ChangeStatus::Modified,
+            })
+            .collect();
+        indirect.files.sort();
+        indirect.files.dedup();
+        let coverage = impact::analyze(&indirect, Some(repo), view.registry(), &metas);
+        for dependent in found {
+            let modules: Vec<_> = view
+                .registry()
+                .modules_for_path(repo, &dependent.path)
+                .into_iter()
+                .map(|m| m.id.clone())
+                .collect();
+            let records: Vec<_> = coverage
+                .affected
+                .iter()
+                .filter(|r| r.files.contains(&dependent.path))
+                .map(|r| r.id.clone())
+                .collect();
+            for module in &modules {
+                grouped
+                    .entry(module.clone())
+                    .or_default()
+                    .insert(dependent.path.clone());
+            }
+            if modules.is_empty() {
+                grouped
+                    .entry("<unmapped>".into())
+                    .or_default()
+                    .insert(dependent.path.clone());
+            }
+            dependents.push(json!({"at": response.commit, "dependent": dependent, "modules": modules, "records": records}));
+        }
+        sources.push(json!({"commit": response.commit, "tool": response.tool, "complete": response.complete, "limitations": response.limitations}));
+    }
+    dependents.sort_by_key(crate::context::canonical_json);
+    Ok(
+        json!({"depth":depth, "complete":complete, "limitations":limitations, "sources":sources, "dependents":dependents, "by_module":grouped,
+        "note":"Static dependents outside the diff; possible and file-level relationships remain suggestions, not runtime proof."}),
+    )
 }
 
 /// Read and parse `--statement`. A malformed block is `IMPACT_UNACKNOWLEDGED` under

@@ -10,15 +10,15 @@ manifest = 1
 engine_version = "0.1.0"
 
 # Independently versioned contracts.
-document_schema = 1
+document_schema = 2
 protocol = 1
-index_schema = 1
-skill_protocol = 1
+index_schema = 2
+skill_protocol = 2
 
 # Document schema versions the engine can migrate from (see `kb migrate`).
 # Version 0 is a synthetic pre-release format used only to exercise the migration
 # machinery; it was never published.
-migrates_from = [0]
+migrates_from = [0, 1]
 
 # Toolchain used for source bootstrap (must equal rust-toolchain.toml `channel`).
 rust_toolchain = "1.98.1"

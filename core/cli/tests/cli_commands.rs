@@ -1217,8 +1217,11 @@ fn usage_and_protocol_errors() {
     let v = json(&o);
     assert_eq!(v["error"]["code"], "SKILL_OUTDATED");
     assert_eq!(v["ok"], false);
-    let o = w.kb(&["--json", "--skill-protocol", "1", "search", "token"]);
+    let current = kb::versions::SKILL_PROTOCOL.to_string();
+    let o = w.kb(&["--json", "--skill-protocol", &current, "search", "token"]);
     assert_exit(&o, 0);
+    let o = w.kb(&["--json", "--skill-protocol", "1", "search", "token"]);
+    assert_exit(&o, 23);
 }
 
 #[test]

@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.reference.api-v1"
 kind = "reference"
 title = "Public API v1 (deprecated)"

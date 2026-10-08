@@ -39,3 +39,16 @@ reason = ""
 
 Merging two repositories is never atomic: until the pin update lands, the host runs with the
 previous KB revision.
+
+## Knowledge learned
+
+Decisions and reasons; platform/integration quirks; failure and recovery scenarios;
+canonical tests or reusable precedents. Link draft records or explain why there is no
+durable knowledge. Name the reviewer for a confirmed-behavior claim and link the merged
+fix/regression test or explicit review decision. Never auto-accept generated knowledge.
+
+Optional human evaluation labels inside the kb-impact block:
+`applicable = ["project.area.record"]`, `not_applicable = [...]`,
+`applicability_reviewed = true`. The last flag means every delivered mandatory id was
+reviewed; omit it when that review has not happened. Labels feed `eval history`, not merge
+authorization. Missing labels are unknown, not a perfect score.

@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.mobile.token-storage"
 kind = "policy"
 title = "Refresh tokens live only in the platform keystore"

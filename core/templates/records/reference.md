@@ -1,13 +1,14 @@
 +++
 # Record template: reference (explanations and pointers to sources; never mandatory).
 # PLACEHOLDER TEXT: replace every value.
-schema = 1
+schema = 2
 id = "example.template.reference"
 kind = "reference"
 title = "Placeholder: topic of the reference"
 status = "draft"
 owner = "architecture"
 summary = "Placeholder: what the reader learns here and when it is useful."
+terms = [{ term = "Confirmed", meaning = "Placeholder: the precise product meaning agreed in review.", source = "docs/placeholder.md" }]
 
 [scope]
 features = ["login"]

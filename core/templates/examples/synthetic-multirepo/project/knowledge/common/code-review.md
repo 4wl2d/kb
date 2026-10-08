@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.common.code-review"
 kind = "policy"
 title = "Code review and knowledge impact for every change"

@@ -1,6 +1,6 @@
 +++
 # Record template: invariant. PLACEHOLDER TEXT: replace every value.
-schema = 1
+schema = 2
 id = "example.template.invariant"
 kind = "invariant"
 title = "Placeholder: condition every change preserves"

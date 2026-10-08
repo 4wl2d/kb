@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.backend.migration-compat"
 kind = "invariant"
 title = "Database migrations stay compatible with the previous release"

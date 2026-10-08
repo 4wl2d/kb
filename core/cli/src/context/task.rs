@@ -6,9 +6,16 @@
 //!   repo explicitly: a `repo:path` qualifier, the repo of an explicit `--module`, or the only
 //!   repo of an explicit `--feature` declared in exactly one repo. Explicit `--repo` values
 //!   take precedence over the host repo; explicitly named repos are added to either.
-//! * modules: Known when `--path` or `--module` is given (paths map through registry globs).
-//! * features: Known when `--feature`, `--path` or `--module` is given (explicit features,
-//!   features of resolved modules, features whose `paths` match).
+//! * modules: Known when `--path`, `--module` or a host diff is given (paths map through
+//!   registry globs).
+//! * features: Known when `--feature`, `--path`, `--module` or a host diff is given (explicit
+//!   features, features of resolved modules, features whose `paths` match).
+//!
+//! Identifier-discovered paths (tracked filenames or code symbols named in the task) are
+//! candidates: they add their modules and features to a Known dimension but never make a
+//! dimension Known on their own. Paths beyond [`MAX_INFERRED_PATHS`] are neither listed nor
+//! ranked, but still add their modules, features and concept hints: the cap never narrows
+//! a Known dimension.
 //!
 //! A `--path` may name a file or a directory, and context assembly cannot look at the disk.
 //! A path therefore maps to the modules (features) whose globs match it as given, match its
@@ -48,6 +55,10 @@ use super::{ContextRequest, TaskEnv};
 pub const MAX_TASK_BYTES: usize = 8 * 1024;
 /// Maximum number of `--path` values.
 pub const MAX_PATHS: usize = 512;
+/// Identifier-discovered paths listed in the scope and used for ranking and change-type hints
+/// per task; more are left out of those (sorted by path) with a warning, but still map to
+/// modules and features. They never count against the `--path` limit.
+pub const MAX_INFERRED_PATHS: usize = 64;
 /// Maximum number of values in any other repeatable scope option.
 pub const MAX_SCOPE_IDS: usize = 512;
 
@@ -127,6 +138,10 @@ pub struct TaskScope {
     pub repos: DimScope,
     pub modules: DimScope,
     pub features: DimScope,
+    pub change_types: DimScope,
+    pub change_type_hints: BTreeMap<String, BTreeSet<String>>,
+    pub inferred_paths: Vec<String>,
+    pub inferred_features: Vec<String>,
     /// Resolved concepts and how each was resolved (`explicit`, `alias <key>`, ...).
     pub concepts: BTreeMap<String, BTreeSet<String>>,
     pub paths: Vec<ResolvedPath>,
@@ -151,7 +166,11 @@ pub struct TaskScope {
 /// `UNKNOWN_SCOPE` for explicit ids that are not in the registry.
 pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Result<TaskScope> {
     check_limits(req)?;
-    let mut notes = Vec::new();
+    for id in &req.change_types {
+        crate::model::ids::check_local_id(id)
+            .map_err(|e| KbError::invalid_input(format!("--change-type {id}: {e}")))?;
+    }
+    let mut notes = env.notes.clone();
 
     let mut unknown: BTreeMap<&'static str, BTreeSet<String>> = BTreeMap::new();
     let mut note_unknown = |dim: &'static str, id: &str, exists: bool| {
@@ -171,11 +190,39 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
     for c in &req.concepts {
         note_unknown("concepts", c, registry.concept(c).is_some());
     }
+    for c in &req.change_types {
+        note_unknown("change_types", c, registry.change_type(c).is_some());
+    }
     for (r, _) in &req.host_versions {
         note_unknown("repos", r, registry.repo(r).is_some());
     }
-    let mut specs: Vec<(Option<String>, String)> = Vec::new();
-    for spec in &req.paths {
+    let mut inferred_paths = env.inferred_paths.clone();
+    inferred_paths.sort();
+    inferred_paths.dedup();
+    // Paths past the cap are not listed, ranked or used for change-type hints, but they still
+    // map to modules, features and concept hints: dropping them could narrow a known scope.
+    let mut unlisted_paths = Vec::new();
+    if inferred_paths.len() > MAX_INFERRED_PATHS {
+        notes.push(Diagnostic::warning(
+            "INFERRED_PATHS_TRUNCATED",
+            format!(
+                "{} identifier paths were discovered; only the first {MAX_INFERRED_PATHS} by \
+                 path are listed and ranked, all of them add their modules and features to \
+                 the scope (name the files with --path)",
+                inferred_paths.len()
+            ),
+        ));
+        unlisted_paths = inferred_paths.split_off(MAX_INFERRED_PATHS);
+    }
+    // (repo, path, listed in `paths`)
+    let mut specs: Vec<(Option<String>, String, bool)> = Vec::new();
+    let given = req
+        .paths
+        .iter()
+        .chain(&req.changed_paths)
+        .chain(&inferred_paths)
+        .map(|spec| (spec, true));
+    for (spec, listed) in given.chain(unlisted_paths.iter().map(|spec| (spec, false))) {
         let (repo, path) = split_repo(spec);
         let path = strip_dot_slash(path);
         check_rel_path(path.trim_end_matches('/'))
@@ -183,7 +230,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         if let Some(r) = repo {
             note_unknown("repos", r, registry.repo(r).is_some());
         }
-        specs.push((repo.map(str::to_string), path.to_string()));
+        specs.push((repo.map(str::to_string), path.to_string(), listed));
     }
     if !unknown.is_empty() {
         let list: Vec<String> = unknown
@@ -217,7 +264,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
     {
         repos.insert(h.clone());
     }
-    for (r, _) in &specs {
+    for (r, _, _) in &specs {
         if let Some(r) = r {
             repos.insert(r.clone());
         }
@@ -229,7 +276,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
             repos.insert(module.repo.clone());
         }
     }
-    for f in &req.features {
+    for f in req.features.iter().chain(&env.inferred_features) {
         if let Some(feature) = registry.feature(f)
             && let [only] = feature.repos.as_slice()
         {
@@ -254,9 +301,10 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         GlobPrefixes::of(registry)
     };
     let mut paths = Vec::new();
+    let mut unlisted = Vec::new();
     let mut hint_concepts: BTreeSet<String> = BTreeSet::new();
     let mut unresolved = Vec::new();
-    for (repo, path) in specs {
+    for (repo, path, listed) in specs {
         let repo = repo.or_else(|| default_repo.clone());
         let lookup: Vec<String> = match &repo {
             Some(r) => vec![r.clone()],
@@ -264,7 +312,7 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         };
         // The path as given and, when it differs, its directory form `path/`.
         let as_dir = format!("{}/", path.trim_end_matches('/'));
-        let dir_like = !is_file_like(&path);
+        let dir_like = !is_file_like(&path) && !env.known_files.contains(&path);
         let mut forms = vec![path.as_str()];
         if as_dir != path {
             forms.push(as_dir.as_str());
@@ -312,7 +360,11 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         if resolved.modules.is_empty() && dir_like {
             unresolved.push(resolved.display());
         }
-        paths.push(resolved);
+        if listed {
+            paths.push(resolved);
+        } else {
+            unlisted.push(resolved);
+        }
     }
     paths.sort_by(|a, b| (&a.repo, &a.path).cmp(&(&b.repo, &b.path)));
     paths.dedup();
@@ -328,35 +380,47 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         ));
     }
 
-    let modules_dim = if (req.paths.is_empty() && req.modules.is_empty()) || !unresolved.is_empty()
-    {
+    // Identifier-discovered paths are candidates: they add the modules and features of the
+    // files they name (listed or not) to a scope made known by explicit paths, modules or a
+    // diff, but never make an unknown scope known (obligations stay undetermined, not dropped).
+    let explicit_paths =
+        !req.paths.is_empty() || !req.changed_paths.is_empty() || env.changed_scope;
+    let modules_dim = if (!explicit_paths && req.modules.is_empty()) || !unresolved.is_empty() {
         DimScope::Unknown
     } else {
         let mut set: BTreeSet<String> = req.modules.iter().cloned().collect();
-        for p in &paths {
+        for p in paths.iter().chain(&unlisted) {
             set.extend(p.modules.iter().cloned());
         }
         DimScope::Known(set)
     };
-    let features_dim =
-        if (req.features.is_empty() && req.paths.is_empty() && req.modules.is_empty())
-            || !unresolved.is_empty()
-        {
-            DimScope::Unknown
-        } else {
-            let mut set: BTreeSet<String> = req.features.iter().cloned().collect();
-            if let Some(mods) = modules_dim.known() {
-                for m in mods {
-                    if let Some(module) = registry.module(m) {
-                        set.extend(module.features.iter().cloned());
-                    }
+    let features_dim = if (req.features.is_empty()
+        && env.inferred_features.is_empty()
+        && !explicit_paths
+        && req.modules.is_empty())
+        || !unresolved.is_empty()
+    {
+        DimScope::Unknown
+    } else {
+        let mut set: BTreeSet<String> = req.features.iter().cloned().collect();
+        set.extend(
+            env.inferred_features
+                .iter()
+                .filter(|id| registry.feature(id).is_some())
+                .cloned(),
+        );
+        if let Some(mods) = modules_dim.known() {
+            for m in mods {
+                if let Some(module) = registry.module(m) {
+                    set.extend(module.features.iter().cloned());
                 }
             }
-            for p in &paths {
-                set.extend(p.features.iter().cloned());
-            }
-            DimScope::Known(set)
-        };
+        }
+        for p in paths.iter().chain(&unlisted) {
+            set.extend(p.features.iter().cloned());
+        }
+        DimScope::Known(set)
+    };
 
     let (foreign_modules, foreign_features) = match repos_dim.known() {
         Some(known) => (
@@ -391,6 +455,12 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
             .insert("explicit".into());
     }
     let ambiguities = match_concepts(registry, &tokens, &hint_concepts, &mut concepts);
+    let change_type_hints = super::discovery::change_type_hints(
+        registry,
+        req.task.as_deref().unwrap_or_default(),
+        &paths,
+        &env.changed_text,
+    );
 
     let mut host_versions = env.host_versions.clone();
     for (r, v) in &req.host_versions {
@@ -401,6 +471,14 @@ pub fn resolve(req: &ContextRequest, env: &TaskEnv, registry: &Registry) -> Resu
         repos: repos_dim,
         modules: modules_dim,
         features: features_dim,
+        change_types: if req.change_types.is_empty() {
+            DimScope::Unknown
+        } else {
+            DimScope::Known(req.change_types.iter().cloned().collect())
+        },
+        change_type_hints,
+        inferred_paths,
+        inferred_features: env.inferred_features.clone(),
         concepts,
         paths,
         host_repo,
@@ -435,6 +513,7 @@ fn check_limits(req: &ContextRequest) -> Result<()> {
         ("--module", req.modules.len()),
         ("--feature", req.features.len()),
         ("--concept", req.concepts.len()),
+        ("--change-type", req.change_types.len()),
         ("--host-version", req.host_versions.len()),
     ] {
         if n > MAX_SCOPE_IDS {

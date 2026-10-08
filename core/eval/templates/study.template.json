@@ -1,0 +1,60 @@
+{
+  "protocol": "kb.eval.study.v1",
+  "id": "synthetic-placeholder-replace-before-registration",
+  "tasks": [
+    {"id":"synthetic-task-replace-me","file":"tasks/task.json","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}
+  ],
+  "arms": [
+    {"id":"kb-now","instructions":"Replace with the exact preregistered baseline treatment.","overlays":[]},
+    {"id":"kb-next","instructions":"Replace with the exact preregistered candidate treatment.","overlays":[
+      {"repository":"../frozen-kb-next","commit":"2222222222222222222222222222222222222222","target":".local/kb","as_of":"0000000000000000000000000000000000000000"}
+    ]}
+  ],
+  "blocks": [{
+    "id":"pinned-harness-model-block",
+    "agent": {
+      "family":"codex","program":"/path/to/pinned/codex",
+      "binary_sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+      "version":"REPLACE_WITH_EXACT_VERSION_OUTPUT","model":"REPLACE_WITH_PINNED_MODEL_ID",
+      "effort":null,"timeout_seconds":1800,"secret_env":["OPENAI_API_KEY"],
+      "usage_basis":"incremental","input_convention":"input-includes-cache"
+    },
+    "judges": [{
+      "family":"claude","program":"/path/to/pinned/claude",
+      "binary_sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+      "version":"REPLACE_WITH_EXACT_VERSION_OUTPUT","model":"REPLACE_WITH_PINNED_JUDGE_MODEL_ID",
+      "effort":null,"timeout_seconds":600,"secret_env":["ANTHROPIC_API_KEY"],
+      "usage_basis":"incremental","input_convention":"input-excludes-cache"
+    },{
+      "family":"grok","program":"/path/to/pinned/grok",
+      "binary_sha256":"0000000000000000000000000000000000000000000000000000000000000000",
+      "version":"REPLACE_WITH_EXACT_VERSION_OUTPUT","model":"REPLACE_WITH_INDEPENDENT_JUDGE_MODEL_ID",
+      "effort":null,"timeout_seconds":600,"secret_env":["XAI_API_KEY"],
+      "usage_basis":"incremental","input_convention":"input-excludes-cache"
+    }]
+  }],
+  "repetitions":2,"seed":20261007,"draws":10000,"alpha":0.05,"minimum_tasks":40,
+  "metrics": {
+    "Q":{"direction":"higher","sesoi":5.0},
+    "resolved":{"direction":"higher","sesoi":0.10},
+    "rule_compliance":{"direction":"higher","sesoi":0.01},
+    "edge_cases":{"direction":"higher","sesoi":0.05},
+    "cost_usd":{"direction":"lower","sesoi":0.05},
+    "tokens":{"direction":"lower","sesoi":1000.0},
+    "wall_seconds":{"direction":"lower","sesoi":60.0}
+  },
+  "comparisons": [
+    {"id":"quality","baseline":"kb-now","candidate":"kb-next","metric":"Q"},
+    {"id":"resolution","baseline":"kb-now","candidate":"kb-next","metric":"resolved"},
+    {"id":"rules","baseline":"kb-now","candidate":"kb-next","metric":"rule_compliance"},
+    {"id":"edge-cases","baseline":"kb-now","candidate":"kb-next","metric":"edge_cases"},
+    {"id":"cost","baseline":"kb-now","candidate":"kb-next","metric":"cost_usd"},
+    {"id":"tokens","baseline":"kb-now","candidate":"kb-next","metric":"tokens"},
+    {"id":"wall-time","baseline":"kb-now","candidate":"kb-next","metric":"wall_seconds"}
+  ],
+  "isolation": {
+    "read_roots":[],"environment":{},
+    "api_hosts":["api.openai.com","api.anthropic.com","api.x.ai"]
+  },
+  "decision_rules":"SYNTHETIC PLACEHOLDER: replace proposed margins with the approved preregistration, complete the 40-task pool and baseline/candidate artifacts, define exclusions and retry costs, fix the monetary stop and missing-cell rule, and require the targeted gain plus non-regression of quality, resolved, rule compliance and cost on matching cohorts. These placeholders authorize no model jobs."
+}

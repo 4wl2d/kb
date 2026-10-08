@@ -18,9 +18,13 @@ use serde_json::{Map, Value, json};
 
 use crate::cli::args::Cli;
 use crate::error::{ErrorCode, KbError, Result};
-use crate::model::registry::{ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile};
+use crate::model::registry::{
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile,
+};
 use crate::model::routing::RoutingTestFile;
-use crate::model::{HostBinding, ProfileConfig, Record, SkillConfig, UpstreamConfig};
+use crate::model::{
+    CodeRequest, CodeResponse, HostBinding, ProfileConfig, Record, SkillConfig, UpstreamConfig,
+};
 use crate::util::{atomic_write, read_file_limited, safe_join};
 use crate::versions::{PROTOCOL_ID, ReleaseManifest};
 
@@ -45,7 +49,7 @@ fn model_schema<T: JsonSchema>() -> Value {
 
 /// All generated schemas: file name → pretty JSON text with a trailing newline.
 pub fn generate() -> BTreeMap<String, String> {
-    let specs: [(&str, &str, &str, Value); 13] = [
+    let specs: [(&str, &str, &str, Value); 16] = [
         (
             "record",
             "Knowledge record front matter (document schema 1)",
@@ -113,6 +117,24 @@ pub fn generate() -> BTreeMap<String, String> {
             model_schema::<UpstreamConfig>(),
         ),
         (
+            "registry-change-types",
+            "Change category registry (registry/change-types.toml)",
+            "Explicit task categories and conservative lexical/path detection signals.",
+            model_schema::<ChangeTypesFile>(),
+        ),
+        (
+            "code-request",
+            "Code provider request",
+            "One-shot stdin request bound to a host commit.",
+            model_schema::<CodeRequest>(),
+        ),
+        (
+            "code-response",
+            "Code provider response",
+            "Versioned, stamped static code facts; never accepted KB knowledge.",
+            model_schema::<CodeResponse>(),
+        ),
+        (
             "release-manifest",
             "Bootstrap and compatibility manifest (core/release.toml)",
             "Engine and contract versions, toolchain pin and path ownership.",
@@ -125,17 +147,102 @@ pub fn generate() -> BTreeMap<String, String> {
             envelope_schema(),
         ),
     ];
-    specs
-        .into_iter()
-        .map(|(name, title, description, schema)| {
-            let text = finish(schema, name, title, description);
-            (format!("{name}.v1{SCHEMA_SUFFIX}"), text)
-        })
-        .collect()
+    let mut out = BTreeMap::new();
+    for (name, title, description, schema) in specs {
+        let versioned = name == "record" || name == "project" || name.starts_with("registry-");
+        let versions: &[u32] = if name == "registry-change-types" {
+            &[2]
+        } else if versioned {
+            &[1, 2]
+        } else {
+            &[1]
+        };
+        for &version in versions {
+            let mut schema = schema.clone();
+            if versioned {
+                document_schema(&mut schema, version);
+            }
+            let title = if name == "record" {
+                format!("Knowledge record front matter (document schema {version})")
+            } else {
+                title.to_string()
+            };
+            let text = finish(schema, name, &title, description, version);
+            out.insert(format!("{name}.v{version}{SCHEMA_SUFFIX}"), text);
+        }
+    }
+    out
+}
+
+/// The version-1 vocabulary remains available to editors and conformance tests. Both
+/// exports derive from the same model; optional version-2 fields are removed for v1.
+fn document_schema(value: &mut Value, version: u32) {
+    match value {
+        Value::Object(map) => {
+            if let Some(props) = map.get_mut("properties").and_then(Value::as_object_mut) {
+                if let Some(schema) = props.get_mut("schema").and_then(Value::as_object_mut) {
+                    schema.remove("enum");
+                    schema.insert("const".into(), json!(version));
+                }
+                if version == 1 {
+                    for key in [
+                        "introduced",
+                        "retired",
+                        "verified_at",
+                        "review_by",
+                        "delivery",
+                        "change_types",
+                        "states",
+                        "transitions",
+                        "scenarios",
+                        "clocks",
+                        "data_sources",
+                        "consumers",
+                        "terms",
+                        "stamp",
+                        "verify",
+                    ] {
+                        props.remove(key);
+                    }
+                }
+            }
+            if version == 1
+                && let Some(defs) = map.get_mut("$defs").and_then(Value::as_object_mut)
+            {
+                if let Some(values) = defs
+                    .get_mut("Intent")
+                    .and_then(|d| d.get_mut("enum"))
+                    .and_then(Value::as_array_mut)
+                {
+                    values.retain(|v| v.as_str() != Some("diagnose"));
+                }
+                for name in [
+                    "Delivery",
+                    "Scenario",
+                    "Transition",
+                    "Consumer",
+                    "Term",
+                    "AnchorStamp",
+                    "VerifyProbe",
+                ] {
+                    defs.remove(name);
+                }
+            }
+            for v in map.values_mut() {
+                document_schema(v, version);
+            }
+        }
+        Value::Array(items) => {
+            for item in items {
+                document_schema(item, version);
+            }
+        }
+        _ => {}
+    }
 }
 
 /// Add identity and provenance keywords and render deterministically (sorted keys).
-fn finish(schema: Value, name: &str, title: &str, description: &str) -> String {
+fn finish(schema: Value, name: &str, title: &str, description: &str, version: u32) -> String {
     let mut root = match schema {
         Value::Object(m) => m,
         other => {
@@ -145,7 +252,7 @@ fn finish(schema: Value, name: &str, title: &str, description: &str) -> String {
         }
     };
     root.insert("$schema".into(), json!(DRAFT_2020_12));
-    root.insert("$id".into(), json!(format!("kb:schema/{name}/v1")));
+    root.insert("$id".into(), json!(format!("kb:schema/{name}/v{version}")));
     root.insert("$comment".into(), json!(GENERATED_NOTE));
     root.insert("title".into(), json!(title));
     root.insert("description".into(), json!(description));

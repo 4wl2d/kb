@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.contract.token-refresh"
 kind = "contract"
 title = "Token refresh API between mobile and backend"

@@ -5,7 +5,7 @@ strict TOML front matter between `+++` lines. This guide covers the fields, the 
 kinds, scope and selectors, links, policies and overrides, registries, and every diagnostic
 that `kb validate` can report.
 
-The normative contract is [architecture.md §3–§4](architecture.md#3-record-format-document-schema-1);
+The normative contract is [architecture.md §3–§4](architecture.md#3-record-format-document-schemas-1-and-2);
 the design decision is [ADR 0002](adr/0002-record-format.md). How records are selected for a
 task is described in [context.md](context.md); where they are read from and why they can be
 trusted is in [snapshots-and-trust.md](snapshots-and-trust.md).
@@ -36,7 +36,7 @@ Rules for files under a knowledge root:
 
 ```text
 +++                      <- first line, exactly `+++` (a UTF-8 BOM and CRLF are tolerated)
-schema = 1               <- TOML front matter: typed, normative content
+schema = 2               <- TOML front matter: typed, normative content
 ...
 +++                      <- closing line
 Optional Markdown body.  <- non-normative explanation, split into sections at `## ` headings
@@ -72,7 +72,7 @@ is set to the same line, so compact output prints `path:line` and human output
 
 | Field | Type | Required | Rules |
 |---|---|---|---|
-| `schema` | integer | yes | must be `1`; another integer is `UNSUPPORTED_SCHEMA_VERSION` (see `kb migrate`) |
+| `schema` | integer | yes | `1` or `2`; use `2` for new fields, migrate existing records with `kb migrate` |
 | `id` | string | yes | `<namespace>.<segment>(.<segment>)*`, see [Identifiers](#identifiers) |
 | `kind` | string | yes | `policy`, `feature`, `invariant`, `contract`, `decision`, `procedure`, `reference`, `gap` |
 | `title` | string | yes | one non-blank line, 1–200 characters |
@@ -105,6 +105,56 @@ removed or reused; retire a record with `status = "deprecated"` or supersede it
 (checked with `kb validate --base <rev>`).
 
 ## Kinds
+
+### Schema 2 additions
+
+Schema 1 remains readable with its original fields and defaults. Schema 2 adds optional
+structured domain knowledge; migration only updates declarations and preserves content.
+The examples below that use schema 1 remain valid. Versioned editor schemas are shipped as
+`core/schemas/record.v1.schema.json` and `record.v2.schema.json`.
+
+| Field | Record kind | Meaning |
+|---|---|---|
+| `introduced`, `retired` | all | `YYYY-MM-DD` or host commit id; start inclusive, end exclusive; both bounds use the same kind |
+| `verified_at`, `review_by` | all | real calendar dates, with the review deadline at or after verification |
+| `scope.change_types` | all | change categories such as migration or retry |
+| `delivery` | policy, invariant | scoped (default) or always; always needs unconditional product scope |
+| `states`, `transitions`, `clocks`, `data_sources`, `scenarios` | feature | subsystem model; transition endpoints must be declared states |
+| `scenarios`, `consumers` | contract | test cases and `{repo,path,symbol?}` consumers, using registered repos |
+| `terms` | reference | `{term,meaning,source}` glossary; normalized terms must be unique |
+| `verify` | statement, obligation | declarative probes; never a shell command |
+| `anchors.stamp` | anchor | `{commit,start_line,end_line,sha256}` over a Git source span |
+
+A scenario has `id`, `given` and `expect` strings. A transition has `id`, `from`, `to` and
+`when`. Feature states use the same `{id,text}` item format as behaviors. Freshness and
+validity are distinct: verification does not introduce or retire knowledge. Dates have no
+implicit timezone; commit ancestry is resolved by the host adapter, never by the parser.
+
+Probe kinds: `commit-message`/`branch-name` with `pattern`; `forbidden-import` with nonempty
+`from`/`to` globs; `naming`/`banned-api` with nonempty `paths` and a regex `pattern`. Unknown
+fields, invalid regexes and unsafe globs are errors. A probe glob (`paths`, `from`, `to`)
+with a `:` before any `/`, outside a `[...]` class or `{...}` group, is `repo:`-qualified
+(a `:` inside a class or group, as in `[a:b]/x.md`, is pattern text, while
+`{mobile,web}:app/**` is qualified), and the text before that `:` must
+name a registry repo exactly (`UNKNOWN_REPO`, message ``verify: `<glob>` names unknown repo
+`<repo>` ``). A typo or a case change such as `Mobile:app/**` would never match, so
+validation and `kb verify` fail instead of skipping the probe. A probe declaration is not
+evidence that it ran. A synthetic probe on a rule of the example's
+`example.mobile.token-storage` policy:
+
+```toml
+[[rules]]
+id = "no-plaintext"
+level = "must-not"
+text = "Write refresh tokens to logs, preferences, files or crash reports."
+
+[[rules.verify]]
+kind = "banned-api"
+paths = ["mobile:app/auth/**"]   # repo-relative globs, optionally "repo:glob"
+pattern = 'Log\.[a-z]+\(.*refreshToken'
+```
+
+### Original kind fields
 
 Normative content is typed and atomic. A **statement** is
 `{ id, level, text, conditions = [..], exceptions = [{ id, text }] }` with `level` one of
@@ -352,7 +402,10 @@ applicable obligation and never make a record mandatory.
   `[...]` a class. They are repo-relative and `/`-separated; absolute paths, `.`/`..`
   segments, backslashes and control characters are rejected (`SELECTOR_PATH_INVALID`). An
   unqualified glob matches in any repo; `repo:glob` only in that repo (`UNKNOWN_REPO` for an
-  unknown qualifier).
+  unknown qualifier). The qualifier is the text before the first `:` that precedes any `/`
+  and lies outside a `[...]` class or `{...}` group, checked as written: `Mobile:app/**`
+  names the unknown repo `Mobile`, `{mobile,web}:app/**` the unknown repo `{mobile,web}`,
+  while `[a:b]/x.md` is unqualified.
 * `concepts` must exist in `registry/concepts.toml` (`UNKNOWN_CONCEPT`).
 * `intents` are `implement`, `refactor`, `debug`, `review`, `explain`.
 * `aliases` are matched against the normalized task text with the rules in
@@ -480,9 +533,16 @@ symbol = "TokenStore"
 `path` must be a safe relative path (`ANCHOR_PATH_INVALID`), `commit` 7–64 hex characters
 (`ANCHOR_COMMIT_INVALID`), `repo` a registry repo (`UNKNOWN_REPO`). Anchors are listed in the
 `--explain` receipt, and `kb impact` matches changed host files against `source`, `test` and
-`doc` anchor paths. They record where knowledge came from; kb never runs or verifies what they
-point to. **A test anchor does not prove that the test exists or runs, and a valid schema does
-not prove that the text is true.**
+`doc` anchor paths. Schema validation records provenance without running anything.
+`anchors stamp` and `anchors check` separately inspect immutable Git bytes and optional
+definition spans; a matching stamp does not prove the statement's truth or a test run.
+`propose submit` verifies every anchor of the draft, so a submitted `change` anchor needs a
+`repo` and a `commit` that resolves in it (or a `path` that exists there); an external
+reference alone (`change = "!42"`) is not locally verifiable and the submission is refused.
+`anchors stamp` never rewrites or adds a `change` anchor's `commit`: one with a commit is
+stamped only `--at` that commit, and one without a `path` has no span to stamp.
+**A test anchor alone does not prove that the test exists or runs, and a valid schema does
+not prove that the text is true.** See [knowledge-lifecycle.md](knowledge-lifecycle.md).
 
 ## Body sections
 
@@ -500,7 +560,8 @@ must not hide there: a body line (outside code blocks) containing the uppercase 
 
 ## Registries
 
-Each registry file has `schema = 1` and an array of tables. Unknown fields are errors.
+Existing registries read `schema = 1` or `2`; new projects use `2`. Each has an array of
+tables and rejects unknown fields. `change-types.toml` is a schema-2 addition.
 
 | File | Entry | Fields |
 |---|---|---|
@@ -509,6 +570,7 @@ Each registry file has `schema = 1` and an array of tables. Unknown fields are e
 | `modules.toml` | `[[module]]` | `id`, `repo`, `title`, `paths = [..]`, `features = [..]` |
 | `features.toml` | `[[feature]]` | `id`, `title`, `repos = [..]`, `paths = [..]` |
 | `concepts.toml` | `[[concept]]` | `id`, `title`, `aliases = [..]`, `paths = [..]` |
+| `change-types.toml` | `[[change_type]]` | `id`, `title`, aliases and optional path/symbol hints for change-category discovery |
 
 * Owner authority: an owner with non-empty `repos` may own only records whose implied repos
   lie within them; product-wide records need an owner with `product = true`
@@ -541,9 +603,11 @@ is an implicit alias. An alias shared by several concepts produces an
 
 `core/schemas/*.schema.json` (draft 2020-12) are generated from the Rust model and
 drift-checked (`kb schema --check`, exit 42 `DRIFT_DETECTED` on drift; `kb schema --write`
-regenerates). `record.v1.schema.json` describes the front matter; the others describe
+regenerates). `record.v1.schema.json` and `record.v2.schema.json` describe the respective
+front-matter vocabularies; the others describe
 `project.toml`, the registries, routing fixtures, `skill.toml`, `.kbw.toml`, `upstream.toml`,
-`core/release.toml` and the `kb.cli.v1` envelope.
+`core/release.toml`, the `kb.cli.v1` envelope and `kb.code.v1` provider requests/responses.
+Routing fixtures, host bindings and skill configuration retain their independent schema 1.
 
 A schema-valid document can still be rejected by `kb validate`. Runtime-only rules include
 uniqueness of local ids inside arrays of tables, section slugs, self links and override self
@@ -561,15 +625,25 @@ links, cycles, lifecycle, overrides) and the `--base` checks. The complete list 
 ./kbw validate --base <rev>     # also check that ids at <rev> still exist with the same kind
 ./kbw validate --no-routing     # skip routing fixtures
 ./kbw validate --templates      # also check core/templates (upstream check)
+./kbw validate --stale 90 --on 2026-10-07  # explicit calendar reference for an audit
 ```
+
+`--templates` parses every project template as its destination file. Registry templates
+are parsed strictly (`REGISTRY_PARSE`) and must declare a `schema` a loaded corpus accepts
+(`UNSUPPORTED_SCHEMA_VERSION`); `registry/change-types.toml` must declare `schema = 2` and
+gets the change-type checks of `kb validate` (ids, duplicates, globs, aliases and symbols).
+Id-shaped repo qualifiers name the downstream's repos and are checked there; a qualifier
+that is not a registry id (such as `Mobile:`) can never resolve and is reported as
+`REGISTRY_UNKNOWN_REPO` in the template itself.
 
 With `--templates`, the text report says that the templates were checked, with their own
 counts, which are also included in the totals: compact `templates: checked (shipped templates
 and examples): 0 error(s), 0 warning(s)`, human `Shipped templates and examples were validated
 (--templates): 0 error(s), 0 warning(s)`; JSON has `result.templates = true`.
 
-`kb validate` reads the KB working tree without Git or network access unless `--snapshot`
-selects another snapshot. It exits 40 (`VALIDATION_FAILED`) when there are errors (or
+`kb validate` reads the KB working tree without network access unless `--snapshot`
+selects another snapshot; Git can supply a deterministic freshness reference. Explicit
+`--on` is required when an audit means today's calendar age. It exits 40 (`VALIDATION_FAILED`) when there are errors (or
 warnings with `--strict`), else 41 (`ROUTING_TESTS_FAILED`) when a routing case fails.
 Diagnostics are sorted by severity, path, record, line, code and message. Compact output:
 
@@ -605,7 +679,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `FRONT_MATTER_SYNTAX` | TOML syntax error, including duplicate keys |
 | `FRONT_MATTER_INVALID` | strict typed parse failed: unknown field, wrong type, unknown enum value, missing required field (also a top-level key written after a table) |
 | `SCHEMA_FIELD_MISSING` / `SCHEMA_FIELD_INVALID` | `schema` is absent / not an integer |
-| `UNSUPPORTED_SCHEMA_VERSION` | `schema` is not `1` (records, registry files, routing fixtures) |
+| `UNSUPPORTED_SCHEMA_VERSION` | `schema` is not readable by this engine: records and registry files accept `1` or `2`, `registry/change-types.toml` requires `2`, routing fixtures require `1` |
 | `KIND_MISSING` / `KIND_INVALID` / `KIND_UNKNOWN` | `kind` is absent / not a string / not one of the eight kinds |
 | `BODY_INVALID` | duplicate section slug, or a `## ` heading with an empty slug |
 | `NON_RECORD_FILE` (warning) | a non-`.md` file under a knowledge root is ignored |
@@ -653,7 +727,7 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `DUPLICATE_ID` | the same id is defined in more than one file (reported for every file; context serves the first file by path) |
 | `OWNER_UNKNOWN` | the owner, or an `override_owners` entry, is not in `owners.toml` |
 | `OWNER_NOT_AUTHORIZED` | the owner has no authority over the record's scope |
-| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or the feature field does not exist |
+| `UNKNOWN_REPO` / `UNKNOWN_MODULE` / `UNKNOWN_FEATURE` / `UNKNOWN_CONCEPT` | a registry id in scope, selectors, applicability, anchors, contract parties or consumers, the `repo:` qualifier of a `selectors.paths` or `verify` probe glob (`paths`, `from`, `to`; the text before the first `:` that precedes any `/` outside a `[...]` class or `{...}` group, as written, so `Mobile:` is unknown), or the feature field does not exist |
 | `SCOPE_UNSATISFIABLE` | no task can match every scope dimension |
 | `CONTRACT_PARTY_OUT_OF_SCOPE` | a party's repo is outside the contract's scope, so the contract would not reach that party |
 | `CONTRACT_PARTY_MODULE_MISMATCH` | a party lists a module of another repo |
@@ -674,14 +748,50 @@ Severity is `error` unless noted. "Where" names the source file that emits the c
 | `REGISTRY_PARSE` | a registry file is not UTF-8 or fails the strict TOML parse |
 | `REGISTRY_ID_INVALID` | a registry id does not match the registry id pattern or exceeds 64 bytes |
 | `REGISTRY_DUPLICATE_ID` | an id repeats within one registry file |
-| `REGISTRY_UNKNOWN_REPO` | an owner, module, feature or `repo:` glob qualifier names an unknown repo |
+| `REGISTRY_UNKNOWN_REPO` | an owner, module, feature or `repo:` glob qualifier (as written, so `Mobile:` is unknown) names an unknown repo |
 | `REGISTRY_UNKNOWN_FEATURE` | a module lists an unknown feature |
-| `REGISTRY_GLOB_INVALID` | a module, feature or concept glob is invalid |
+| `REGISTRY_GLOB_INVALID` | a module, feature, concept or change-type glob is invalid |
 | `REGISTRY_PATH_INVALID` | a repo `version_file` is not a safe relative path |
-| `REGISTRY_ALIAS_INVALID` | a concept alias normalizes to nothing |
+| `REGISTRY_ALIAS_INVALID` | a concept alias, or a change-type alias or symbol, normalizes to nothing |
 
 Problems in `project.toml` are not diagnostics: they stop every command with
-`CONFIG_INVALID` (exit 11), or `UNSUPPORTED_SCHEMA_VERSION` (exit 13) for another `schema`.
+`CONFIG_INVALID` (exit 11), or `UNSUPPORTED_SCHEMA_VERSION` (exit 13) for a `schema` other
+than `1` or `2`.
+
+### Schema-2 fields (`parse.rs`, `parse/evolution.rs`, `validate.rs`, `model/registry.rs`, `freshness.rs`)
+
+The fields are described in [Schema 2 additions](#schema-2-additions). Their lists, local ids
+and texts also use the generic `LIST_TOO_LONG`, `LIST_DUPLICATE`, `LOCAL_ID_INVALID`,
+`LOCAL_ID_DUPLICATE`, `TEXT_EMPTY` and `TEXT_TOO_LONG` codes above.
+
+| Code | Meaning |
+|---|---|
+| `SCHEMA_FIELD_UNAVAILABLE` | a `schema = 1` record uses a schema-2 field (for example `introduced`, `delivery`, `scope.change_types`, `verify`, `anchors.stamp` or the `diagnose` intent); run `kb migrate` |
+| `TEMPORAL_INVALID` | `introduced`/`retired` is neither an ISO calendar date nor a 7–64 hex commit id, or `verified_at`/`review_by` is not an ISO calendar date |
+| `TEMPORAL_ORDER` | a date `retired` is not after `introduced` (the upper bound is exclusive) |
+| `TEMPORAL_KIND_MISMATCH` | `introduced` and `retired` mix a date and a commit id |
+| `FRESHNESS_ORDER` | `review_by` precedes `verified_at` |
+| `CHANGE_TYPE_INVALID` | a `scope.change_types` entry, or an id in `registry/change-types.toml`, is not a valid local id |
+| `UNKNOWN_CHANGE_TYPE` | a `scope.change_types` entry is not in `registry/change-types.toml` |
+| `DELIVERY_SCOPE_INVALID` | `delivery = "always"` without unconditional product scope (`product = true`, no `change_types`, no `applicability`) |
+| `ANCHOR_STAMP_INVALID` | an `anchors.stamp` lacks a path (and a repo, except on `doc` anchors), a commit id, a nonzero inclusive line range or a lowercase hex SHA-256 |
+| `ANCHOR_STAMP_COMMIT_MISMATCH` | the anchor's `commit` and its stamp's `commit` disagree |
+| `TRANSITION_STATE_UNKNOWN` | a feature transition's `from` or `to` is not a declared state |
+| `CONSUMER_INVALID` / `CONSUMER_DUPLICATE` | a contract consumer lacks a registry repo id or a safe repo-relative path / repeats the same repo, path and symbol |
+| `TERM_DUPLICATE` | two glossary `terms` normalize to the same term |
+| `VERIFY_INVALID` | a `forbidden-import` probe has empty `from` or `to`, or a `naming`/`banned-api` probe has empty `paths` |
+| `VERIFY_GLOB_INVALID` | a probe glob is unsafe or not valid glob syntax |
+| `VERIFY_REGEX_INVALID` | a probe `pattern` is not a valid regex or exceeds the 1 MiB compiled-size limit |
+| `FRESHNESS_DATE_UNKNOWN` (warning) | no reference date: no `--on` and no commit date to read; freshness is not evaluated |
+| `REVIEW_OVERDUE` (warning) | `review_by` is before the reference date |
+| `VERIFIED_AT_FUTURE` (warning) | `verified_at` is after the reference date |
+| `KNOWLEDGE_STALE` (warning) | (`--stale <days>`) `verified_at` is older than the allowed age |
+| `VERIFIED_AT_MISSING` (warning) | (`--stale <days>`) the record has no `verified_at` |
+
+The five freshness warnings concern accepted records only, and only those with
+`verified_at` or `review_by` unless `--stale` is given. The reference date is `--on`, else
+the commit date of the host `HEAD` (outside a host, of the validated KB revision).
+`kb context` reports the same warnings for the records it delivers.
 
 ### Routing fixtures, templates and informational notes (`context/routing.rs`, `validate.rs`, `cli/cmd_validate.rs`)
 

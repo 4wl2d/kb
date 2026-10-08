@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.gap.offline-checkout"
 kind = "gap"
 title = "Checkout behavior when the device goes offline is undefined"

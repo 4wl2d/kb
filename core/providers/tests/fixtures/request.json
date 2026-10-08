@@ -1,0 +1,1 @@
+{"protocol":"kb.code.v1","operation":"dependents","root":"/synthetic","repo":"example","commit":"1111111111111111111111111111111111111111","paths":["src/store.rs"],"identifiers":[],"task":"change save behavior","depth":2}

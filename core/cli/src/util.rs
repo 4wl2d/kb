@@ -157,7 +157,7 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     })
 }
 
-fn unique_suffix() -> u64 {
+pub(crate) fn unique_suffix() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);
     let t = std::time::SystemTime::now()

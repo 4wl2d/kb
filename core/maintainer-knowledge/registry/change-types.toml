@@ -1,0 +1,34 @@
+# Synthetic starter categories. Adapt aliases and paths to the host; matching is a hint,
+# never proof that all other categories are irrelevant.
+schema = 2
+
+[[change_type]]
+id = "migration"
+title = "Schema or data migration"
+aliases = ["migration", "migrate", "schema change", "миграци*"]
+paths = ["**/migrations/**", "**/migration/**", "**/*.schema.json"]
+symbols = ["Migration"]
+
+[[change_type]]
+id = "error-mapping"
+title = "Mapping failures across boundaries"
+aliases = ["error mapping", "error handling", "обработка ошибок"]
+symbols = ["ErrorMapper", "ErrorMapping"]
+
+[[change_type]]
+id = "protocol-gate"
+title = "Protocol and compatibility gates"
+aliases = ["protocol version", "compatibility gate", "версия протокола"]
+paths = ["**/protocol/**", "**/protocols/**"]
+
+[[change_type]]
+id = "retry"
+title = "Retries and recovery"
+aliases = ["retry", "retries", "backoff", "повторная попытка"]
+symbols = ["RetryPolicy", "Backoff"]
+
+[[change_type]]
+id = "ui-test"
+title = "User-interface tests"
+aliases = ["ui test", "ui tests", "interface test", "тест интерфейса"]
+paths = ["**/ui-tests/**", "**/uitests/**"]

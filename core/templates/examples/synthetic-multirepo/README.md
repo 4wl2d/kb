@@ -31,7 +31,7 @@ Use a scratch clone of the upstream repository so that no real downstream is tou
 ```sh
 git clone <upstream repository> kb-demo && cd kb-demo
 ./kbw init --example synthetic-multirepo            # dry-run: prints the plan
-./kbw init --example synthetic-multirepo --apply    # writes project/ and the CI workflow
+./kbw init --example synthetic-multirepo --apply    # writes project/, GitHub/GitLab KB CI and review templates
 ./kbw validate                                      # records, links, policies, routing tests
 ```
 

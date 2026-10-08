@@ -33,8 +33,19 @@ jobs:
       - name: Bootstrap the kb runtime of this checkout (explicit; source build or cache hit)
         run: ./kbw --kbw-bootstrap
 
-      - name: Validate records, links, policies, registries and routing tests
-        run: ./kbw validate
+      # Add read-only host checkouts at the SHAs declared in project/ci/hosts.tsv.
+      # Missing source evidence fails explicitly; it is not a skipped success.
+      - name: Strict validation, routing metrics, anchors, drift queue and ledger
+        run: sh core/templates/ci/check-knowledge.sh
+
+      - name: Preserve knowledge reports and native exit statuses
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: knowledge-evidence
+          path: .cache/knowledge-ci/
+          include-hidden-files: true
+          if-no-files-found: error
 
       - name: Historical ids stay addressable (against the target branch)
         if: github.event_name == 'pull_request'

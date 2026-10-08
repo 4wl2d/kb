@@ -122,7 +122,7 @@ fn fixture_migration_matches_expected_byte_for_byte_and_is_idempotent() {
     assert_exit(&out, 0);
     assert_eq!(v["result"]["written"].as_array().unwrap().len(), 13);
     let migrated = tree(&root.join("project"));
-    let expected = tree(&fixture("v1-expected"));
+    let expected = tree(&fixture("v2-expected"));
     assert_eq!(
         migrated.keys().collect::<Vec<_>>(),
         expected.keys().collect::<Vec<_>>()
@@ -151,6 +151,60 @@ fn fixture_migration_matches_expected_byte_for_byte_and_is_idempotent() {
         "{}",
         stdout(&text)
     );
+}
+
+#[test]
+fn crlf_profile_migrates_byte_for_byte_with_a_faithful_preview() {
+    let crlf = |bytes: &[u8]| {
+        String::from_utf8(bytes.to_vec())
+            .unwrap()
+            .replace('\n', "\r\n")
+    };
+    let sb = Sandbox::new();
+    let root = kb_with_fixture(&sb, "v1-expected");
+    let project = root.join("project");
+    for (path, bytes) in tree(&project) {
+        fs::write(project.join(path), crlf(&bytes)).unwrap();
+    }
+    let before = tree(&project);
+
+    let (out, v) = kb_json(&sb, &root, &["migrate"]);
+    assert_exit(&out, 0);
+    let files = v["result"]["files"].as_array().unwrap();
+    let migrating: Vec<_> = files.iter().filter(|f| f["status"] == "migrate").collect();
+    assert_eq!(migrating.len(), 13, "{v}");
+    for f in migrating {
+        let diff = f["diff"].as_str().unwrap();
+        let changed: Vec<&str> = diff
+            .split_inclusive('\n')
+            .skip(2)
+            .filter(|l| l.starts_with('-') || l.starts_with('+'))
+            .collect();
+        assert_eq!(
+            changed,
+            ["-schema = 1\r\n", "+schema = 2\r\n"],
+            "{}: {diff}",
+            f["path"]
+        );
+    }
+    assert_eq!(tree(&project), before, "dry-run must not write");
+
+    let (out, v) = kb_json(&sb, &root, &["migrate", "--apply"]);
+    assert_exit(&out, 0);
+    assert_eq!(v["result"]["written"].as_array().unwrap().len(), 13);
+    let migrated = tree(&project);
+    let expected = tree(&fixture("v2-expected"));
+    assert_eq!(
+        migrated.keys().collect::<Vec<_>>(),
+        expected.keys().collect::<Vec<_>>()
+    );
+    for (path, bytes) in &expected {
+        assert_eq!(
+            String::from_utf8_lossy(&migrated[path]),
+            crlf(bytes),
+            "{path} must keep CRLF line endings and change only the schema value"
+        );
+    }
 }
 
 #[test]
@@ -212,7 +266,7 @@ fn unsupported_schema_versions_fail_and_write_nothing() {
     assert_eq!(files[0]["schema"], 99);
     assert_eq!(tree(&root), before);
 
-    let (out, v) = kb_json(&sb, &root, &["migrate", "--to", "2"]);
+    let (out, v) = kb_json(&sb, &root, &["migrate", "--to", "3"]);
     assert_exit(&out, 13);
     assert_eq!(v["error"]["code"], "UNSUPPORTED_SCHEMA_VERSION");
     assert_eq!(tree(&root), before);
@@ -236,7 +290,10 @@ fn invalid_transform_results_fail_and_write_nothing() {
     fs::write(&path, text.replace("\"proposed\"", "\"someday\"")).unwrap();
     let before = tree(&root);
 
-    for args in [&["migrate"][..], &["migrate", "--apply"][..]] {
+    for args in [
+        &["migrate", "--to", "1"][..],
+        &["migrate", "--to", "1", "--apply"][..],
+    ] {
         let (out, v) = kb_json(&sb, &root, args);
         assert_exit(&out, 52);
         assert_eq!(v["error"]["code"], "MIGRATION_FAILED");
@@ -438,7 +495,7 @@ fn update_check_reports_versions_schema_and_predicted_conflicts() {
     assert_eq!(res["upstream"]["commit"], r.target.as_str());
     assert_eq!(res["upstream"]["url"], r.upstream.to_str().unwrap());
     assert_eq!(res["versions"]["engine_version"]["changed"], false);
-    assert_eq!(res["versions"]["document_schema"]["target"], "1");
+    assert_eq!(res["versions"]["document_schema"]["target"], "2");
     assert_eq!(res["schema"]["project_schemas"], serde_json::json!([0]));
     assert_eq!(res["schema"]["migration_required"], true);
     assert_eq!(res["merge"]["clean"], false);
@@ -516,7 +573,7 @@ fn update_check_clean_merge_transport_policy_and_unsupported_schema() {
     let text = fs::read_to_string(&manifest).unwrap();
     fs::write(
         &manifest,
-        text.replace("migrates_from = [0]", "migrates_from = []"),
+        text.replace("migrates_from = [0, 1]", "migrates_from = []"),
     )
     .unwrap();
     r.sb.commit_all(&r.upstream, "drop legacy migrations (synthetic)");
@@ -997,7 +1054,7 @@ fn update_prepare_happy_path_produces_a_validated_reviewable_branch() {
 
     // The branch holds the migrated knowledge, byte-identical to the expected fixture.
     let project = tree(&wt.join("project"));
-    for (path, bytes) in tree(&fixture("v1-expected")) {
+    for (path, bytes) in tree(&fixture("v2-expected")) {
         assert_eq!(project.get(&path), Some(&bytes), "{path}");
     }
     let upstream_text = fs::read_to_string(wt.join("project/upstream.toml")).unwrap();

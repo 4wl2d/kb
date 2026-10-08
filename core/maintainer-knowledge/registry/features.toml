@@ -34,3 +34,13 @@ repos = ["kb"]
 id = "coordinated-updates"
 title = "Migrations and coordinated upstream updates"
 repos = ["kb"]
+
+[[feature]]
+id = "knowledge-production"
+title = "Evidence-backed domain knowledge production"
+repos = ["kb"]
+
+[[feature]]
+id = "evaluation"
+title = "Deterministic routing metrics and isolated agent replay"
+repos = ["kb"]

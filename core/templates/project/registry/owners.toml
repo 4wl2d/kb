@@ -2,7 +2,7 @@
 # Authority: an owner with non-empty `repos` may only own records whose repositories are
 # within that list; product-wide records (`scope.product = true`) need `product = true`.
 # Ids: `^[a-z0-9]+([-_.][a-z0-9]+)*$`, at most 64 bytes, unique in this file.
-schema = 1
+schema = 2
 
 # [[owner]]
 # id = "architecture"

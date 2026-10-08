@@ -1,5 +1,5 @@
 # SYNTHETIC EXAMPLE repositories. `.invalid` hosts never resolve.
-schema = 1
+schema = 2
 
 [[repo]]
 id = "mobile"

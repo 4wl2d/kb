@@ -4,6 +4,8 @@
 //! Everything here is read-only: host files are read through [`crate::util`] safe readers
 //! (no symlinks) and Git is only queried (`rev-parse`, `ls-tree`, `config --get`).
 
+pub mod facts;
+
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -306,13 +308,13 @@ fn read_binding(root: &Path) -> Result<Option<HostBinding>> {
             format!("host binding `{shown}`: {e}"),
         )
     })?;
-    if binding.schema != crate::versions::DOCUMENT_SCHEMA {
+    // Host binding has its own stable format; record migrations do not rewrite hosts.
+    if binding.schema != 1 {
         return Err(KbError::new(
             ErrorCode::UnsupportedSchemaVersion,
             format!(
                 "host binding `{shown}` has schema {}; this engine supports {}",
-                binding.schema,
-                crate::versions::DOCUMENT_SCHEMA
+                binding.schema, 1
             ),
         ));
     }

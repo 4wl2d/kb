@@ -42,6 +42,19 @@ pub struct ShowResult {
     pub proposals: Vec<(String, String)>,
 }
 
+/// All deferred Markdown, preserving section text and explicitly naming status.
+pub fn render_sections(result: &ShowResult) -> String {
+    let mut text = format!(
+        "{} [{}] — deferred sections\n",
+        result.id,
+        result.record.record.status().as_str()
+    );
+    for section in &result.record.sections {
+        text.push_str(&format!("\n## {}\n{}\n", section.heading, section.markdown));
+    }
+    safe_text(text)
+}
+
 /// Look up `target` (`id` or `id#section`). Errors: `INVALID_INPUT` for malformed ids or
 /// conflicting options, `NOT_FOUND` for unknown records or sections.
 pub fn show(

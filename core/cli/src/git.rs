@@ -4,6 +4,8 @@
 //! (`GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `LC_ALL=C`), disable fsmonitor, never
 //! recurse into submodules, and redact credentials from any error text. Network operations
 //! pass an explicit transport policy (`protocol.allow=never` + allowed protocols).
+//! Inherited repository variables (`GIT_DIR`, `GIT_INDEX_FILE`, ...) are removed; only an
+//! explicit [`Git::with_index_file`] names another index.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
@@ -14,12 +16,19 @@ use crate::error::{ErrorCode, KbError, Result};
 /// Protocols accepted in transport policies.
 pub const KNOWN_PROTOCOLS: [&str; 5] = ["https", "ssh", "git", "file", "http"];
 
+/// Deadline of [`Git::run_bytes_limited`].
+pub const LIMITED_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+/// Diagnostic (stderr) bytes accepted by [`Git::run_bytes_limited`].
+pub const LIMITED_STDERR_BYTES: usize = 1024 * 1024;
+
 #[derive(Debug, Clone)]
 pub struct Git {
     /// Directory passed with `-C`.
     pub dir: PathBuf,
     /// Explicit `--git-dir` (for bare mirrors).
     pub git_dir: Option<PathBuf>,
+    /// Explicit `GIT_INDEX_FILE` (the pending index a commit hook checks).
+    pub index_file: Option<PathBuf>,
 }
 
 /// Output of a Git command that may legitimately fail.
@@ -44,6 +53,7 @@ impl Git {
         Git {
             dir: dir.into(),
             git_dir: None,
+            index_file: None,
         }
     }
 
@@ -52,7 +62,15 @@ impl Git {
         Git {
             dir: g.clone(),
             git_dir: Some(g),
+            index_file: None,
         }
+    }
+
+    /// Read the index at `index_file` instead of the repository's default index. Used only
+    /// for host staged reads; KB and mirror commands never inherit a caller's index.
+    pub fn with_index_file(mut self, index_file: Option<&Path>) -> Git {
+        self.index_file = index_file.map(Path::to_path_buf);
+        self
     }
 
     fn command(&self, extra_config: &[String]) -> Command {
@@ -85,6 +103,9 @@ impl Git {
             .env_remove("GIT_NAMESPACE")
             .env_remove("GIT_CEILING_DIRECTORIES")
             .stdin(Stdio::null());
+        if let Some(index) = &self.index_file {
+            c.env("GIT_INDEX_FILE", index);
+        }
         c
     }
 
@@ -125,6 +146,33 @@ impl Git {
             return Err(git_failure(args, &o));
         }
         Ok(o.stdout)
+    }
+
+    /// Read bounded command output for potentially large patches and history exports, within
+    /// [`LIMITED_TIMEOUT`] and [`LIMITED_STDERR_BYTES`].
+    pub fn run_bytes_limited(&self, args: &[&str], max_bytes: usize) -> Result<Vec<u8>> {
+        let mut command = self.command(&[]);
+        command.args(args);
+        let output = crate::process::capture(
+            &mut command,
+            &[],
+            crate::process::Limits {
+                timeout: LIMITED_TIMEOUT,
+                stdout: max_bytes,
+                stderr: LIMITED_STDERR_BYTES,
+            },
+        )?;
+        if output.exit_code != 0 {
+            return Err(git_failure(
+                args,
+                &GitOutput {
+                    code: output.exit_code,
+                    stdout: output.stdout,
+                    stderr: redact(&String::from_utf8_lossy(&output.stderr)),
+                },
+            ));
+        }
+        Ok(output.stdout)
     }
 
     /// Run a network operation (fetch/ls-remote) under an explicit transport policy.

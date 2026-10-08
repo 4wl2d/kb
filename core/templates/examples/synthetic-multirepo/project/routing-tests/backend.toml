@@ -3,6 +3,11 @@ schema = 1
 
 [[case]]
 name = "payment code: stricter review override, payment contract, known gap"
+relevant = ["example.contract.payment-intent", "example.gap.offline-checkout", "example.feature.checkout"]
+recall_k = 6
+min_recall_percent = 100
+expect_order = ["example.contract.payment-intent", "example.feature.checkout"]
+max_tokens = 2000
 intent = "implement"
 task = "Add a retry to the charge call"
 repos = ["backend"]

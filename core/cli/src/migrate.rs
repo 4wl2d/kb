@@ -1,9 +1,8 @@
 //! Schema migrations (`kb migrate`): a registry of transforms between adjacent document
 //! schema versions for records, the profile config and registry files.
 //!
-//! The only historical step is 0 → 1 from `kb-legacy-synthetic-v0`, a synthetic
-//! pre-release format that was never published; it exists to exercise the machinery with
-//! real transformations (see `core/migrations/README.md`).
+//! The synthetic pre-release 0 → 1 step exercises structural transforms; 1 → 2 adds
+//! optional domain knowledge without inventing content (see `core/migrations/README.md`).
 //!
 //! Migration reads the working tree directly, so it also works when
 //! [`crate::corpus::load_config`] rejects a legacy profile config. Every file is transformed
@@ -16,14 +15,14 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde_json::{Value as Json, json};
-use toml_edit::{ArrayOfTables, DocumentMut, Item, Key, Table, Value};
+use toml_edit::{ArrayOfTables, Document, DocumentMut, Item, Key, Table, Value};
 
 use crate::corpus::{is_record_path, parse_config};
 use crate::diag::Diagnostic;
 use crate::error::{ErrorCode, KbError, Result};
 use crate::model::registry::{
-    ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, REGISTRY_FILES, ReposFile,
-    parse_registry_file,
+    ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, REGISTRY_FILES,
+    ReposFile, parse_registry_file,
 };
 use crate::model::{Profile, ProfileConfig, ProfileLocation};
 use crate::parse::{parse_record, split_front_matter};
@@ -62,18 +61,60 @@ impl Migration {
 }
 
 /// The migration registry, ordered by `from`.
-pub static MIGRATIONS: &[Migration] = &[Migration {
-    from: 0,
-    to: 1,
-    name: "v0-to-v1",
-    description: "kb-legacy-synthetic-v0 to document schema 1: `type` -> `kind`, `state` -> \
+pub static MIGRATIONS: &[Migration] = &[
+    Migration {
+        from: 0,
+        to: 1,
+        name: "v0-to-v1",
+        description: "kb-legacy-synthetic-v0 to document schema 1: `type` -> `kind`, `state` -> \
                   `status`, `[applies_to]` -> `[scope]`, tags/depends_on/see_also/replaces -> \
                   selectors/links, policy `[[rule]]` -> `[[rules]]`, config `[kb]`/`[origin]` \
                   -> `[project]`/`[source]`, registry schema bump",
-    record: v0::record,
-    config: v0::config,
-    registry: v0::registry,
-}];
+        record: v0::record,
+        config: v0::config,
+        registry: v0::registry,
+    },
+    Migration {
+        from: 1,
+        to: 2,
+        name: "v1-to-v2",
+        description: "document schema 2: optional domain, provenance, temporal and delivery fields; preserves content and defaults",
+        record: v1_record,
+        config: v1_document,
+        registry: v1_document,
+    },
+];
+
+/// Rewrite only the bytes of the `schema` value: every other byte, including CRLF line
+/// endings, comments and layout, survives exactly.
+fn v1_document(text: &str) -> std::result::Result<String, String> {
+    let doc = Document::parse(text).map_err(|e| e.to_string())?;
+    let item = doc.get("schema").ok_or("missing `schema` field")?;
+    if item.as_integer() != Some(1) {
+        return Err("expected schema 1".into());
+    }
+    let span = item.span().ok_or("invalid `schema` value")?;
+    Ok(format!("{}2{}", &text[..span.start], &text[span.end..]))
+}
+
+fn v1_record(text: &str) -> std::result::Result<String, String> {
+    // Validate before changing the declaration: mislabeled v2 fields must not gain trust.
+    parse_record("migration-input", text.as_bytes()).map_err(|d| {
+        d.iter()
+            .map(|d| format!("{}: {}", d.code, d.message))
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    let (fm, _, _) = split_front_matter(text)?;
+    let start = fm.as_ptr() as usize - text.as_ptr() as usize;
+    let end = start + fm.len();
+    Ok(format!(
+        "{}{}{}",
+        &text[..start],
+        v1_document(fm)?,
+        &text[end..]
+    ))
+}
 
 /// Oldest schema version this engine can migrate from.
 pub fn oldest_supported() -> u32 {
@@ -625,8 +666,8 @@ fn verify(
     target: u32,
 ) -> std::result::Result<(), (Vec<String>, Vec<Diagnostic>)> {
     let fail = |m: String| Err((vec![m], Vec::new()));
-    if target != DOCUMENT_SCHEMA {
-        // Intermediate targets cannot be parsed by this engine; check the declared schema.
+    if !crate::versions::supports_document_schema(target) {
+        // Unreadable intermediate targets can only be checked for the declared schema.
         let schema = match kind {
             FileKind::Record => record_schema(text),
             _ => toml::from_str::<toml::Table>(text)
@@ -665,6 +706,9 @@ fn verify(
                 }
                 "concepts.toml" => {
                     parse_registry_file::<ConceptsFile>(path, text).map(|f| f.schema)
+                }
+                "change-types.toml" => {
+                    parse_registry_file::<ChangeTypesFile>(path, text).map(|f| f.schema)
                 }
                 _ => return fail(format!("`{name}` is not a registry file")),
             };
@@ -786,8 +830,10 @@ pub fn render_apply(report: &ApplyReport, human: bool) -> String {
 
 /// Minimal unified line diff (3 lines of context) for reviewing migrations.
 pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
-    let a: Vec<&str> = before.lines().collect();
-    let b: Vec<&str> = after.lines().collect();
+    // Lines keep their terminators, so a changed line ending (CRLF, final newline) is a
+    // changed line and the preview shows exactly the bytes that would be written.
+    let a: Vec<&str> = before.split_inclusive('\n').collect();
+    let b: Vec<&str> = after.split_inclusive('\n').collect();
     let ops = diff_ops(&a, &b);
     let mut out = format!("--- a/{path}\n+++ b/{path}\n");
     const CONTEXT: usize = 3;
@@ -813,10 +859,15 @@ pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
             b_start + usize::from(b_len > 0)
         ));
         for op in hunk {
-            match *op {
-                Op::Equal(x, _) => out.push_str(&format!(" {}\n", a[x])),
-                Op::Delete(x) => out.push_str(&format!("-{}\n", a[x])),
-                Op::Insert(y) => out.push_str(&format!("+{}\n", b[y])),
+            let (mark, line) = match *op {
+                Op::Equal(x, _) => (' ', a[x]),
+                Op::Delete(x) => ('-', a[x]),
+                Op::Insert(y) => ('+', b[y]),
+            };
+            out.push(mark);
+            out.push_str(line);
+            if !line.ends_with('\n') {
+                out.push_str("\n\\ No newline at end of file\n");
             }
         }
         i += 1;
@@ -825,7 +876,7 @@ pub fn unified_diff(path: &str, before: &str, after: &str) -> String {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Op {
+pub(crate) enum Op {
     Equal(usize, usize),
     Delete(usize),
     Insert(usize),
@@ -847,8 +898,11 @@ impl Op {
 }
 
 /// Longest-common-subsequence edit script after trimming the common prefix and suffix.
-/// Very large middles fall back to delete-all/insert-all to bound memory.
-fn diff_ops(a: &[&str], b: &[&str]) -> Vec<Op> {
+/// Larger middles use Myers' shortest edit script, whose memory grows with the number of
+/// changed lines rather than the file size; only a middle with more than
+/// [`MAX_MYERS_EDITS`] changes falls back to delete-all/insert-all. Within each run of
+/// changes, deletions precede insertions, as in conventional unified diffs.
+pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
     let pre = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let suf = a[pre..]
         .iter()
@@ -860,8 +914,17 @@ fn diff_ops(a: &[&str], b: &[&str]) -> Vec<Op> {
     let mut ops: Vec<Op> = (0..pre).map(|i| Op::Equal(i, i)).collect();
     let (n, m) = (am.len(), bm.len());
     if n.saturating_mul(m) > 4_000_000 {
-        ops.extend((0..n).map(|i| Op::Delete(pre + i)));
-        ops.extend((0..m).map(|j| Op::Insert(pre + j)));
+        match myers(am, bm, MAX_MYERS_EDITS) {
+            Some(middle) => ops.extend(middle.into_iter().map(|op| match op {
+                Op::Equal(x, y) => Op::Equal(pre + x, pre + y),
+                Op::Delete(x) => Op::Delete(pre + x),
+                Op::Insert(y) => Op::Insert(pre + y),
+            })),
+            None => {
+                ops.extend((0..n).map(|i| Op::Delete(pre + i)));
+                ops.extend((0..m).map(|j| Op::Insert(pre + j)));
+            }
+        }
     } else {
         // lcs[i][j] = LCS length of am[i..] and bm[j..].
         let mut lcs = vec![0u32; (n + 1) * (m + 1)];
@@ -891,7 +954,93 @@ fn diff_ops(a: &[&str], b: &[&str]) -> Vec<Op> {
         }
     }
     ops.extend((0..suf).map(|k| Op::Equal(a.len() - suf + k, b.len() - suf + k)));
+    deletions_first(ops)
+}
+
+/// Most changed lines [`myers`] traces; its memory grows with the square of this bound.
+const MAX_MYERS_EDITS: usize = 1000;
+
+/// Myers' O((N+M)D) shortest edit script with indices local to `a` and `b`, or `None` when
+/// more than `max_d` lines change.
+fn myers<T: PartialEq>(a: &[T], b: &[T], max_d: usize) -> Option<Vec<Op>> {
+    let (n, m) = (a.len() as isize, b.len() as isize);
+    let limit = max_d.min(a.len() + b.len()) as isize;
+    let off = limit + 1;
+    let mut v = vec![0isize; 2 * limit as usize + 3];
+    // trace[d] holds the furthest x on each diagonal k in -d..=d after step d.
+    let mut trace: Vec<Vec<isize>> = Vec::new();
+    for d in 0..=limit {
+        for k in (-d..=d).step_by(2) {
+            let down = k == -d || (k != d && v[(off + k - 1) as usize] < v[(off + k + 1) as usize]);
+            let mut x = if down {
+                v[(off + k + 1) as usize]
+            } else {
+                v[(off + k - 1) as usize] + 1
+            };
+            let mut y = x - k;
+            while x < n && y < m && a[x as usize] == b[y as usize] {
+                x += 1;
+                y += 1;
+            }
+            v[(off + k) as usize] = x;
+            if x >= n && y >= m {
+                return Some(myers_path(&trace, d, n, m));
+            }
+        }
+        trace.push(v[(off - d) as usize..=(off + d) as usize].to_vec());
+    }
+    None
+}
+
+/// Walks the trace of [`myers`] back from `(n, m)`, reached after `last` edits.
+fn myers_path(trace: &[Vec<isize>], last: isize, n: isize, m: isize) -> Vec<Op> {
+    let mut ops = Vec::new();
+    let (mut x, mut y) = (n, m);
+    for d in (1..=last).rev() {
+        let prev = &trace[(d - 1) as usize];
+        let at = |k: isize| prev[(k + d - 1) as usize];
+        let k = x - y;
+        let down = k == -d || (k != d && at(k - 1) < at(k + 1));
+        let pk = if down { k + 1 } else { k - 1 };
+        let (px, py) = (at(pk), at(pk) - pk);
+        let (sx, sy) = if down { (px, py + 1) } else { (px + 1, py) };
+        while x > sx && y > sy {
+            x -= 1;
+            y -= 1;
+            ops.push(Op::Equal(x as usize, y as usize));
+        }
+        ops.push(if down {
+            Op::Insert(py as usize)
+        } else {
+            Op::Delete(px as usize)
+        });
+        (x, y) = (px, py);
+    }
+    while x > 0 && y > 0 {
+        x -= 1;
+        y -= 1;
+        ops.push(Op::Equal(x as usize, y as usize));
+    }
+    ops.reverse();
     ops
+}
+
+/// Lists each run's deletions before its insertions without reordering either side.
+fn deletions_first(ops: Vec<Op>) -> Vec<Op> {
+    let mut out = Vec::with_capacity(ops.len());
+    let mut inserts = Vec::new();
+    for op in ops {
+        match op {
+            Op::Insert(_) => inserts.push(op),
+            Op::Delete(_) => out.push(op),
+            Op::Equal(..) => {
+                out.append(&mut inserts);
+                out.push(op);
+            }
+        }
+    }
+    out.append(&mut inserts);
+    out
 }
 
 // ---------------------------------------------------------------------------------------
@@ -1375,7 +1524,9 @@ text = \"Rotate keys.\"\n";
         assert_eq!(chain(0, 1).unwrap().len(), 1);
         assert!(chain(1, 1).unwrap().is_empty());
         assert!(chain(1, 0).is_none());
-        assert!(chain(0, 2).is_none());
+        assert_eq!(chain(0, 2).unwrap().len(), 2);
+        assert_eq!(chain(1, 2).unwrap().len(), 1);
+        assert!(chain(0, 3).is_none());
         assert_eq!(oldest_supported(), 0);
     }
 
@@ -1387,5 +1538,107 @@ text = \"Rotate keys.\"\n";
             "--- a/f\n+++ b/f\n@@ -1,4 +1,5 @@\n a\n-b\n+B\n c\n d\n+e\n"
         );
         assert_eq!(unified_diff("f", "x\n", "x\n"), "--- a/f\n+++ b/f\n");
+    }
+
+    /// Applies an edit script to `a`; `None` unless every index is in order and in range.
+    fn apply_ops<'s>(a: &[&'s str], b: &[&'s str], ops: &[Op]) -> Option<Vec<&'s str>> {
+        let (mut i, mut j, mut out) = (0, 0, Vec::new());
+        for op in ops {
+            match *op {
+                Op::Equal(x, y) if x == i && y == j && a[x] == b[y] => {
+                    out.push(a[x]);
+                    (i, j) = (i + 1, j + 1);
+                }
+                Op::Delete(x) if x == i => i += 1,
+                Op::Insert(y) if y == j => {
+                    out.push(b[y]);
+                    j += 1;
+                }
+                _ => return None,
+            }
+        }
+        (i == a.len() && j == b.len()).then_some(out)
+    }
+
+    #[test]
+    fn myers_finds_a_shortest_script_like_the_lcs_table() {
+        let cases: [(&str, &str); 6] = [
+            ("abcabba", "cbabac"),
+            ("xaxbxc", "abc"),
+            ("", "abc"),
+            ("abc", ""),
+            ("aaaa", "aaba"),
+            ("kitten", "sitting"),
+        ];
+        for (a, b) in cases {
+            let a: Vec<&str> = a.split("").filter(|s| !s.is_empty()).collect();
+            let b: Vec<&str> = b.split("").filter(|s| !s.is_empty()).collect();
+            let lcs = diff_ops(&a, &b);
+            let fast = myers(&a, &b, 100).unwrap();
+            assert_eq!(
+                apply_ops(&a, &b, &fast).as_deref(),
+                Some(&b[..]),
+                "{a:?} {b:?}"
+            );
+            let equal = |ops: &[Op]| ops.iter().filter(|o| matches!(o, Op::Equal(..))).count();
+            assert_eq!(equal(&fast), equal(&lcs), "{a:?} {b:?}");
+        }
+        assert!(myers(&["a", "b"], &["c", "d"], 3).is_none());
+    }
+
+    #[test]
+    fn large_diffs_align_duplicates_and_list_deletions_first() {
+        // Edits at both ends exceed the LCS table; a replaced line equal to a later one
+        // must not pull the untouched lines in between out of alignment.
+        let body: Vec<String> = (0..2100).map(|i| format!("k{i}")).collect();
+        let mut a = vec!["top", "commit = old", "note"];
+        a.extend(body.iter().map(String::as_str));
+        a.extend(["commit = C", "bottom"]);
+        let mut b = vec!["TOP", "commit = C", "note"];
+        b.extend(body.iter().map(String::as_str));
+        b.extend(["commit = C", "BOTTOM"]);
+        let ops = diff_ops(&a, &b);
+        assert_eq!(apply_ops(&a, &b, &ops).as_deref(), Some(&b[..]));
+        let changed = ops.iter().filter(|o| !matches!(o, Op::Equal(..))).count();
+        assert_eq!(changed, 6, "{ops:?}");
+        // Each run lists its deletion before its insertion.
+        assert!(
+            matches!(
+                ops[..4],
+                [Op::Delete(0), Op::Delete(1), Op::Insert(0), Op::Insert(1)]
+            ),
+            "{ops:?}"
+        );
+        let tail = &ops[ops.len() - 2..];
+        assert!(matches!(tail, [Op::Delete(_), Op::Insert(_)]), "{tail:?}");
+    }
+
+    #[test]
+    fn unified_diff_shows_line_ending_changes() {
+        assert_eq!(
+            unified_diff("f", "a\r\nb\r\n", "a\nb\r\n"),
+            "--- a/f\n+++ b/f\n@@ -1,2 +1,2 @@\n-a\r\n+a\n b\r\n"
+        );
+        assert_eq!(
+            unified_diff("f", "x", "x\n"),
+            "--- a/f\n+++ b/f\n@@ -1,1 +1,1 @@\n-x\n\\ No newline at end of file\n+x\n"
+        );
+    }
+
+    #[test]
+    fn v1_to_v2_rewrites_only_the_schema_value_bytes() {
+        let text =
+            "# CRLF \r\nschema   =  1 # keep\r\n\r\n[[owner]]\r\nid = \"arch\"\r\ntitle='A'\r\n";
+        assert_eq!(
+            v1_document(text).unwrap(),
+            text.replacen("=  1 #", "=  2 #", 1)
+        );
+        assert!(v1_document("schema = 2\r\n").is_err());
+        assert!(v1_document("[x]\r\nschema = 1\r\n").is_err());
+        let record = "+++\r\nschema = 1\r\nid = \"acme.gap.x\"\r\nkind = \"gap\"\r\ntitle = \"Synthetic gap\"\r\nstatus = \"draft\"\r\nowner = \"arch\"\r\ngap = \"missing\"\r\ndescription = \"Synthetic.\"\r\n[scope]\r\nproduct = true\r\n+++\r\nBody\r\n";
+        assert_eq!(
+            v1_record(record).unwrap(),
+            record.replacen("schema = 1", "schema = 2", 1)
+        );
     }
 }

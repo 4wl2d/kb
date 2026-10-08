@@ -13,6 +13,7 @@ use crate::versions::PROTOCOL_ID;
 #[serde(rename_all = "kebab-case")]
 pub enum Format {
     Compact,
+    Terse,
     Human,
     Json,
 }

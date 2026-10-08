@@ -8,7 +8,9 @@ in downstream forks under `project/` and never comes back here.
 
 * Rust toolchain pinned in `rust-toolchain.toml` (rustup picks it up automatically).
 * Git ≥ 2.38 (`git merge-tree --write-tree` is used by `kb update check`).
-* `shellcheck` for the launcher.
+* `shellcheck` for the launcher and the CI/hook shell templates
+  (`shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`, as in
+  `AGENTS.md`).
 
 ```sh
 cargo test --workspace --locked

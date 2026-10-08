@@ -15,19 +15,23 @@ is a valid JSON Schema draft 2020-12 document, and checks that the strict runtim
 the record schema agree on the fixtures in `core/tests/fixtures/validate/records/`.
 
 All schemas use draft 2020-12 and identify themselves with a non-resolvable URI of the form
-`kb:schema/<name>/v1`. No schema refers to a web location.
+`kb:schema/<name>/v1` or `/v2`. No schema refers to a web location.
 
 | File | Describes |
 |---|---|
 | `record.v1.schema.json` | TOML front matter of a knowledge record (document schema 1), one branch per `kind` |
+| `record.v2.schema.json` | schema-2 records, including temporal/domain/evidence/probe fields |
 | `project.v1.schema.json` | `project/project.toml` (and the maintainer `profile.toml`) |
 | `registry-{owners,repos,modules,features,concepts}.v1.schema.json` | `project/registry/*.toml` |
+| `project.v2.schema.json`, `registry-{owners,repos,modules,features,concepts}.v2.schema.json` | schema-2 project/config registries |
+| `registry-change-types.v2.schema.json` | schema-2 change-category aliases/path/symbol hints |
 | `routing-test.v1.schema.json` | `project/routing-tests/*.toml` |
 | `skill-config.v1.schema.json` | `project/skill-config/skill.toml` |
 | `host-binding.v1.schema.json` | `.kbw.toml` in a host repository |
 | `upstream.v1.schema.json` | `project/upstream.toml` |
 | `release-manifest.v1.schema.json` | `core/release.toml` |
 | `cli-envelope.v1.schema.json` | the `kb.cli.v1` JSON document printed by every command with `--json` |
+| `code-request.v1.schema.json`, `code-response.v1.schema.json` | separate `kb.code.v1` provider protocol |
 
 ## Applying a schema to TOML
 
@@ -45,7 +49,7 @@ parser), UTF-8 and size limits (`RECORD_TOO_LARGE`, `FRONT_MATTER_TOO_LARGE`).
 
 Everything the strict parser checks on a single record that JSON Schema can express:
 unknown fields (`additionalProperties: false` everywhere), types, enumerations, required
-fields, `schema = 1`, `kind` (one branch per kind), id patterns (record ids, local ids,
+fields, the file's exact schema version, `kind` (one branch per kind), id patterns (record ids, local ids,
 override targets), title shape (single non-blank line of 1..=200 characters), non-blank
 text fields, required non-empty lists (`behaviors`, `statements`, `obligations`, `reasons`,
 `steps`, `expected`, at least two `parties`, a non-empty policy), list length limits (500),
@@ -74,6 +78,9 @@ Single record (parser):
 * Aliases must normalize to at least one token (Unicode NFKC normalization,
   `SELECTOR_ALIAS_INVALID`).
 * `applicability.versions` values are semver requirements (`APPLICABILITY_INVALID`).
+* Schema-2 calendar validity/order, transition endpoints, normalized glossary uniqueness,
+  consumer paths/identities, unconditional always-on scope and regex/glob probe syntax.
+  Schema-1 parsing rejects every explicitly written schema-2 field, including empty values.
 * Text limits are measured in UTF-8 bytes (16 KiB); the schema's `maxLength` counts
   characters and is therefore looser for non-ASCII text. The length limits of the two
   halves of an override target (`<record id ≤ 128>#<setting ≤ 64>`) are runtime-only.
@@ -98,7 +105,7 @@ Across records and against the profile (`kb validate`):
 Configuration and registries: registry ids are unique per file (`REGISTRY_DUPLICATE_ID`),
 references between registries exist, globs and `version_file` paths are safe, aliases
 normalize to tokens; in `project.toml`, knowledge roots are safe paths that do not overlap
-reserved profile directories. The schemas only check the id shapes, `schema = 1`, the
+reserved profile directories. The schemas check the id shapes, their declared schema version, the
 namespace, remote name, `approved_ref` shape, the allowed protocol names, a non-empty
 `knowledge.roots` and a positive `context.default_budget`.
 

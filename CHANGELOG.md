@@ -10,6 +10,34 @@ schema, skill protocol) are independent integers in `core/release.toml`.
 First complete version of the upstream repository. No release has been published yet;
 the release workflow builds archives when an owner pushes a `v0.1.0` tag.
 
+### Knowledge upgrade (unreleased)
+
+- Document schema 2 with lossless adjacent migration, structured subsystem/scenario and
+  contract-consumer fields, glossary, temporal validity, freshness, stamps and probes.
+  Schema-1 content remains readable; CLI protocol stays 1, index/skill protocols become 2.
+- Coverage, change work orders, validated draft submission/capture, domain harvest and
+  evidence ladder in adaptation/maintenance v2; optional CI accrual and review templates.
+- Provisional path-free diagnosis, tracked identifier discovery, diff/change-category
+  scope and `--as-of`; explicit provider facts, deep impact and consumer suggestions.
+- Verified always-on core and receipt deltas, terse/outline output, one shared full skill
+  and native targets for six harnesses with installation/load-probe boundaries.
+- Anchor checks, owner-grouped drift, ledger audits, dated freshness, declarative
+  verification, optional Git hook/CI checks and private local delivery observations.
+- Tier A routing/history metrics and the separate Rust Tier B replay kit with frozen Git
+  inputs, OS isolation, pinned native adapters, blinded judging, complete segment accounting
+  and paired cluster/Holm/SESOI analysis.
+- Pre-merge audit hardening: repo qualifiers of verify-probe, selector and registry globs
+  must name registry repos as written (parser version 6); migration and stamping keep line
+  endings; discovered identifiers and over-limit patches never narrow obligations or fail
+  context; core-only receipt references are never reused; the commit-msg hook checks the
+  index and cleaned message Git commits and selects its snapshot from the host layout;
+  provider deadlines end nested commands; replay egress works under Seatbelt and the Linux
+  CI smoke grants bubblewrap user namespaces through a binary-scoped AppArmor profile.
+
+These changes are implementation work, not a tagged 0.2/0.3/0.4 release or a claim of
+better agent quality. ADR review, complete validation and preregistered empirical/release
+gates are recorded in `docs/upstream-upgrade.md`; optional extensions stay gated.
+
 ### Added
 
 - `kb` engine (Rust library + executable) with commands `init`, `doctor`, `validate`,

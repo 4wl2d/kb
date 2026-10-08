@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.mobile.state-hoisting"
 kind = "policy"
 title = "Screens are composed of stateless components"

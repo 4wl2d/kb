@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.backend.payments-review"
 kind = "policy"
 title = "Stricter review and money handling for payment code"

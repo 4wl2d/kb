@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["core/cli", "core/benchmarks"]
+members = ["core/cli", "core/benchmarks", "core/providers", "core/eval"]
 default-members = ["core/cli"]
 
 [workspace.package]
@@ -13,6 +13,8 @@ publish = false
 [workspace.dependencies]
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "suggestions"] }
 globset = { version = "0.4", default-features = false }
+regex = { version = "1", default-features = false, features = ["std", "perf", "unicode"] }
+libc = "0.2"
 rusqlite = { version = "0.40", features = ["bundled"] }
 schemars = "1"
 semver = "1"

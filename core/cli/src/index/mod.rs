@@ -17,7 +17,7 @@
 mod build;
 mod proposals;
 mod schema;
-mod text;
+use crate::context::lexical as text;
 mod view;
 
 use std::cell::Cell;

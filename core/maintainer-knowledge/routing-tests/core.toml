@@ -2,6 +2,11 @@ schema = 1
 
 [[case]]
 name = "changing the index pulls determinism and completeness obligations"
+relevant = ["kb.invariant.deterministic-context", "kb.invariant.mandatory-completeness"]
+recall_k = 6
+min_recall_percent = 100
+expect_order = ["kb.policy.engine-changes-upstream", "kb.invariant.deterministic-context", "kb.invariant.mandatory-completeness"]
+max_tokens = 1800
 intent = "implement"
 repos = ["kb"]
 paths = ["core/cli/src/index/mod.rs"]

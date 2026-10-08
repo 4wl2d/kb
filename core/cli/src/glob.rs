@@ -76,6 +76,32 @@ pub fn split_repo(spec: &str) -> (Option<&str>, &str) {
     (None, spec)
 }
 
+/// The qualifier as written: the text before the first `:` outside any `[...]` class or
+/// `{...}` group, when no `/` precedes it (a `:` inside a class or group, as in
+/// `[a:b]/x.md`, is part of the pattern; `{mobile,web}:app/**` is qualified).
+/// [`split_repo`] only recognizes registry-id-shaped qualifiers, so `Mobile:app/**` parses
+/// as a literal pattern that never matches; validation checks this text against the registry.
+pub fn written_qualifier(spec: &str) -> Option<&str> {
+    // `class` holds the index where a class body starts; a `]` there (after an optional
+    // `!`/`^`) is a member, as in `[]:]`, not the end of the class.
+    let (mut class, mut groups) = (None, 0usize);
+    for (i, c) in spec.char_indices() {
+        match (c, class) {
+            ('/', _) => return None,
+            ('[', None) => {
+                let body = &spec[i + 1..];
+                class = Some(i + 1 + usize::from(body.starts_with(['!', '^'])));
+            }
+            (']', Some(start)) if i > start => class = None,
+            ('{', None) => groups += 1,
+            ('}', None) if groups > 0 => groups -= 1,
+            (':', None) if groups == 0 => return Some(&spec[..i]),
+            _ => {}
+        }
+    }
+    None
+}
+
 fn literal_prefix(p: &str) -> &str {
     let end = p.find(['*', '?', '[', '{']).unwrap_or(p.len());
     &p[..end]
@@ -129,6 +155,39 @@ mod tests {
         assert!(!q.matches(Some("mobile"), "src/a/b.rs"));
         assert!(RepoGlob::parse("../x").is_err());
         assert!(RepoGlob::parse("/x").is_err());
+        assert_eq!(written_qualifier("backend:src/**"), Some("backend"));
+        assert_eq!(written_qualifier("Mobile:app/**"), Some("Mobile"));
+        assert_eq!(RepoGlob::parse("Mobile:app/**").unwrap().repo, None);
+        assert_eq!(written_qualifier("docs/a:b.md"), None);
+        assert_eq!(written_qualifier("app/**"), None);
+        // A class or group that closes before the `:` is part of the written qualifier.
+        assert_eq!(
+            written_qualifier("{mobile,backend}:app/**"),
+            Some("{mobile,backend}")
+        );
+        assert_eq!(written_qualifier("[mb]obile:app/**"), Some("[mb]obile"));
+        // A `]` first in a class is a member; a `/` anywhere before the `:` (even inside a
+        // group) leaves the glob unqualified.
+        for spec in ["[]:]/x.md", "[!]:]/x.md", "{a/b,c}:x.md"] {
+            assert_eq!(written_qualifier(spec), None, "{spec}");
+        }
+        assert_eq!(written_qualifier("[]a]x:y/z"), Some("[]a]x"));
+        // A `:` inside a class or brace group is pattern text: the glob stays unqualified.
+        for spec in ["[a:b]/x.md", "{a:b,c}/x.md", "x[:]y.md"] {
+            assert_eq!(written_qualifier(spec), None, "{spec}");
+            let g = RepoGlob::parse(spec).unwrap();
+            assert_eq!(g.repo, None, "{spec}");
+        }
+        assert!(
+            RepoGlob::parse("[a:b]/x.md")
+                .unwrap()
+                .matches(Some("mobile"), "b/x.md")
+        );
+        assert!(
+            RepoGlob::parse("{a:b,c}/x.md")
+                .unwrap()
+                .matches(None, "c/x.md")
+        );
     }
 
     #[test]

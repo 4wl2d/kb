@@ -128,6 +128,7 @@ fn origin_str(o: Origin) -> &'static str {
 fn format_str(f: Format) -> &'static str {
     match f {
         Format::Compact => "compact",
+        Format::Terse => "terse",
         Format::Human => "human",
         Format::Json => "json",
     }
@@ -155,14 +156,19 @@ fn diag_text(d: &Diagnostic) -> String {
 
 /// `product` or `repos=a,b; modules=m; features=f`.
 pub(super) fn scope_text(s: &Scope) -> String {
-    if s.product {
+    if s.product && s.change_types.is_empty() {
         return "product".into();
     }
-    let mut parts = Vec::new();
+    let mut parts = if s.product {
+        vec!["product".to_string()]
+    } else {
+        Vec::new()
+    };
     for (name, v) in [
         ("repos", &s.repos),
         ("modules", &s.modules),
         ("features", &s.features),
+        ("change_types", &s.change_types),
     ] {
         if !v.is_empty() {
             parts.push(format!("{name}={}", v.join(",")));
@@ -216,6 +222,7 @@ pub(super) fn header(h: &Header, format: Format) -> String {
             s
         }
         Format::Compact => safe_text(header_text(h, false)),
+        Format::Terse => safe_text(terse_header(h)),
         Format::Human => safe_text(header_text(h, true)),
     }
 }
@@ -308,6 +315,43 @@ fn header_text(h: &Header, human: bool) -> String {
             concepts.join(", ")
         }
     );
+    if s.change_types.is_known() {
+        w!(o, "change types: {}", s.change_types.label());
+    }
+    if !s.change_type_hints.is_empty() {
+        w!(
+            o,
+            "change type hints: {} (positive evidence; unmentioned categories stay unresolved)",
+            s.change_type_hints
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+    }
+    if !s.inferred_paths.is_empty() {
+        w!(o, "identifier paths: {}", s.inferred_paths.join(", "));
+    }
+    if !s.inferred_features.is_empty() {
+        w!(o, "candidate features: {}", s.inferred_features.join(", "));
+    }
+    if let Some(point) = &h.request.as_of {
+        w!(
+            o,
+            "as-of: {} (UTC date {}; host revision {})",
+            point.requested,
+            point.date,
+            point.host_revision.as_deref().unwrap_or("none")
+        );
+    }
+    if let Some(change) = &h.request.change {
+        w!(
+            o,
+            "change: merge-base {}; head {}",
+            change.merge_base,
+            change.head.as_deref().unwrap_or("working-tree")
+        );
+    }
     for p in &s.paths {
         let modules = if p.modules.is_empty() {
             "no registry module".to_string()
@@ -395,6 +439,37 @@ fn header_text(h: &Header, human: bool) -> String {
             w!(o, "{item}{}", diag_text(d));
         }
     }
+    if h.delivery.core_receipt.is_some() || h.delivery.since_receipt.is_some() {
+        w!(
+            o,
+            "delivery: core={}; since={}",
+            h.delivery.core_receipt.as_deref().unwrap_or("none"),
+            h.delivery.since_receipt.as_deref().unwrap_or("none")
+        );
+    }
+    if let Some(date) = &h.reference_date {
+        w!(o, "freshness reference: {} ({})", date.date, date.source);
+    }
+    if !h.pruned_change_types.is_empty() {
+        w!(
+            o,
+            "not applicable to the declared change types: {}",
+            h.pruned_change_types.join(", ")
+        );
+    }
+    if let Some(code) = &h.code_info {
+        w!(
+            o,
+            "code provider: {} {} at {} (static query complete={}); facts are non-normative",
+            code.tool.name,
+            code.tool.version,
+            code.commit,
+            code.complete
+        );
+        for limitation in &code.limitations {
+            w!(o, "code limitation: {limitation}");
+        }
+    }
     for n in &h.notes {
         w!(o, "note: {n}");
     }
@@ -414,6 +489,21 @@ pub(super) fn header_json(h: &Header) -> Map<String, Value> {
         .filter(|d| d.severity == Severity::Warning)
         .count();
     let mut m = Map::new();
+    if h.delivery.core_receipt.is_some() || h.delivery.since_receipt.is_some() {
+        m.insert("delivery".into(), json!({"core_receipt": h.delivery.core_receipt, "since_receipt": h.delivery.since_receipt}));
+    }
+    if let Some(date) = &h.reference_date {
+        m.insert(
+            "freshness_reference".into(),
+            json!({"on":date, "max_age_days":h.request.stale}),
+        );
+    }
+    if !h.pruned_change_types.is_empty() {
+        m.insert("pruned_change_types".into(), json!(h.pruned_change_types));
+    }
+    if let Some(code) = &h.code_info {
+        m.insert("code".into(), json!(code));
+    }
     m.insert("engine_version".into(), json!(ENGINE_VERSION));
     m.insert("skill_protocol".into(), json!(SKILL_PROTOCOL));
     m.insert("protocol".into(), json!(PROTOCOL_ID));
@@ -423,7 +513,7 @@ pub(super) fn header_json(h: &Header) -> Map<String, Value> {
         json!({
             "task": r.task,
             "repos": r.repos,
-            "paths": r.paths,
+            "paths": r.all_paths(),
             "modules": r.modules,
             "features": r.features,
             "concepts": r.concepts,
@@ -465,6 +555,25 @@ pub(super) fn header_json(h: &Header) -> Map<String, Value> {
             })).collect::<Vec<_>>(),
         }),
     );
+    if s.change_types.is_known() {
+        m.get_mut("scope").unwrap()["change_types"] = s.change_types.to_json();
+        m.get_mut("request").unwrap()["change_types"] = json!(r.change_types);
+    }
+    if !s.change_type_hints.is_empty() {
+        m.get_mut("scope").unwrap()["change_type_hints"] = json!(s.change_type_hints);
+    }
+    if !s.inferred_paths.is_empty() {
+        m.get_mut("scope").unwrap()["inferred_paths"] = json!(s.inferred_paths);
+    }
+    if !s.inferred_features.is_empty() {
+        m.get_mut("scope").unwrap()["inferred_features"] = json!(s.inferred_features);
+    }
+    if let Some(point) = &r.as_of {
+        m.get_mut("request").unwrap()["as_of"] = json!(point);
+    }
+    if let Some(change) = &r.change {
+        m.get_mut("request").unwrap()["change"] = json!(change);
+    }
     m.insert("completeness".into(), json!(h.completeness.as_str()));
     m.insert(
         "status_reasons".into(),
@@ -559,11 +668,15 @@ pub(super) fn unit(u: &Unit, format: Format) -> String {
             format!(",\n{}{}", indent(level), pretty_at(&unit_json(u), level))
         }
         Format::Compact => safe_text(unit_text(u, false)),
+        Format::Terse => safe_text(terse_unit(u)),
         Format::Human => safe_text(unit_text(u, true)),
     }
 }
 
 fn unit_text(u: &Unit, human: bool) -> String {
+    if let Some(reuse) = u.reuse {
+        return format!("{} {} [{}]\n", u.tier.as_str(), u.id, reuse.as_str());
+    }
     let mut o = String::new();
     let ind = if human { "   " } else { "" };
     let labels = if u.labels.is_empty() {
@@ -572,6 +685,34 @@ fn unit_text(u: &Unit, human: bool) -> String {
         format!("; labels: {}", u.labels.join(", "))
     };
     match &u.body {
+        UnitBody::Code(e) => {
+            w!(o, "### code {}: {}", u.id, e.symbol.name);
+            w!(
+                o,
+                "source: {}:{}:{}-{} at {}; provider {} {}; role={}; non-normative",
+                e.repo,
+                e.symbol.path,
+                e.symbol.start_line,
+                e.symbol.end_line,
+                e.commit,
+                e.tool.name,
+                e.tool.version,
+                e.role
+            );
+            w!(o, "why: {}", e.reason);
+            let max_ticks = e
+                .source
+                .split(|c| c != '`')
+                .map(str::len)
+                .max()
+                .unwrap_or(0);
+            let fence = "`".repeat(3.max(max_ticks + 1));
+            w!(
+                o,
+                "{fence}text\n{}\n{fence}",
+                e.source.trim_end_matches('\n')
+            );
+        }
         UnitBody::Section(s) => {
             let heading = if s.heading.is_empty() {
                 "(intro)"
@@ -644,7 +785,14 @@ fn unit_text(u: &Unit, human: bool) -> String {
 }
 
 pub(super) fn unit_json(u: &Unit) -> Value {
+    if let Some(reuse) = u.reuse {
+        return json!({"id":u.id, "record":u.record_id, "kind": if matches!(u.body, UnitBody::Code(_)) { "code" } else { u.kind.as_str() },
+            "tier":u.tier.as_str(), "delivery":reuse, "content_sha256":u.content_digest});
+    }
     let mut m = Map::new();
+    if let Some(digest) = &u.content_digest {
+        m.insert("content_sha256".into(), json!(digest));
+    }
     m.insert("tier".into(), json!(u.tier.as_str()));
     m.insert("id".into(), json!(u.id));
     m.insert("record".into(), json!(u.record_id));
@@ -659,6 +807,13 @@ pub(super) fn unit_json(u: &Unit) -> Value {
         m.insert("score".into(), json!(s));
     }
     match &u.body {
+        UnitBody::Code(e) => {
+            m.insert("kind".into(), json!("code"));
+            m.insert("status".into(), json!("observed"));
+            m.insert("origin".into(), json!("provider"));
+            m.insert("record".into(), Value::Null);
+            m.insert("code".into(), json!(e));
+        }
         UnitBody::Record(p) => {
             m.insert("content".into(), record_content_json(&p.record));
         }
@@ -742,6 +897,25 @@ pub(super) fn footer(f: &Footer, format: Format) -> String {
             s.push('}');
             s
         }
+        Format::Terse => {
+            let mut o = format!(
+                "receipt {} | budget {}/{} {} | included {} | excluded-budget {}\n",
+                f.receipt_id,
+                b.used,
+                b.limit,
+                b.unit.as_str(),
+                counts_text(&f.counts),
+                excluded
+            );
+            if let Some(digest) = &f.snapshot_digest {
+                w!(o, "kb.receipt.v2 snapshot-content={digest}");
+            }
+            w!(
+                o,
+                "Receipt proves delivery only. After compaction or a new session, request full context."
+            );
+            o
+        }
         Format::Compact => {
             let mut o = String::new();
             w!(
@@ -756,6 +930,9 @@ pub(super) fn footer(f: &Footer, format: Format) -> String {
                 format_str(b.format)
             );
             w!(o, "-- {RECEIPT_NOTE}");
+            if let Some(digest) = &f.snapshot_digest {
+                w!(o, "-- kb.receipt.v2 snapshot-content={digest}");
+            }
             o
         }
         Format::Human => {
@@ -774,6 +951,9 @@ pub(super) fn footer(f: &Footer, format: Format) -> String {
                 format_str(b.format)
             );
             w!(o, "{RECEIPT_NOTE}");
+            if let Some(digest) = &f.snapshot_digest {
+                w!(o, "kb.receipt.v2 snapshot-content={digest}");
+            }
             o
         }
     }
@@ -804,7 +984,122 @@ pub(super) fn footer_json(f: &Footer) -> Map<String, Value> {
             "note": RECEIPT_NOTE,
         }),
     );
+    if let Some(digest) = &f.snapshot_digest {
+        m.get_mut("receipt").unwrap()["protocol"] = json!("kb.receipt.v2");
+        m.get_mut("receipt").unwrap()["snapshot_content_digest"] = json!(digest);
+    }
     m
+}
+
+fn terse_header(h: &Header) -> String {
+    let mut text = format!(
+        "kb {} | {} | {}\n{}\n",
+        h.request.intent.as_str(),
+        h.completeness.as_str(),
+        PROTOCOL_ID,
+        h.snapshot.summary_line()
+    );
+    w!(
+        text,
+        "scope repos={} modules={} features={}",
+        h.scope.repos.label(),
+        h.scope.modules.label(),
+        h.scope.features.label()
+    );
+    if let Some(date) = &h.reference_date {
+        w!(text, "freshness on={} ({})", date.date, date.source);
+    }
+    if h.scope.change_types.is_known() {
+        w!(text, "change-types={}", h.scope.change_types.label());
+    }
+    if !h.pruned_change_types.is_empty() {
+        w!(
+            text,
+            "pruned-change-types: {}",
+            h.pruned_change_types.join(",")
+        );
+    }
+    if let Some(as_of) = &h.request.as_of {
+        w!(text, "as-of={}", as_of.requested);
+    }
+    for reason in &h.reasons {
+        w!(text, "{}: {}", reason.code, reason.message);
+    }
+    for setting in &h.settings {
+        w!(text, "setting {}", setting_value_text(setting));
+    }
+    for unit in &h.undetermined {
+        w!(text, "undetermined {}: {}", unit.id, unit.detail);
+    }
+    for issue in h.issues.iter().chain(h.diagnostics.iter()) {
+        w!(text, "{}", diag_text(issue));
+    }
+    if let Some(code) = &h.code_info {
+        w!(
+            text,
+            "code {} {} at {} complete={}",
+            code.tool.name,
+            code.tool.version,
+            code.commit,
+            code.complete
+        );
+        for limitation in &code.limitations {
+            w!(text, "code: {limitation}");
+        }
+    }
+    if let Some(id) = &h.delivery.core_receipt {
+        w!(text, "core={id}");
+    }
+    if let Some(id) = &h.delivery.since_receipt {
+        w!(text, "since={id}");
+    }
+    for note in &h.notes {
+        w!(text, "note: {note}");
+    }
+    text
+}
+
+fn terse_unit(u: &Unit) -> String {
+    if u.reuse.is_some() {
+        return unit_text(u, false);
+    }
+    let code = matches!(u.body, UnitBody::Code(_));
+    let mut out = format!(
+        "[{}] {} {}/{}\n",
+        u.tier.as_str(),
+        u.id,
+        if code { "code" } else { u.kind.as_str() },
+        if code { "observed" } else { u.status.as_str() },
+    );
+    if !u.labels.is_empty() {
+        w!(out, "labels: {}", u.labels.join(", "));
+    }
+    match &u.body {
+        UnitBody::Record(p) => {
+            w!(out, "scope: {}", scope_text(p.record.common().scope));
+            // Share the normative renderer: repeated empty JSON keys are not useful context.
+            // Keep all conditions, exceptions, settings, domain fields and validity metadata.
+            record_core(&mut out, &p.record, "");
+            link_lines(&mut out, &p.record, "", false);
+        }
+        UnitBody::Code(c) => {
+            w!(out, "provider evidence; non-normative");
+            w!(out, "{}", canonical_compact(&json!({"code":c})));
+        }
+        UnitBody::Section(s) => {
+            w!(
+                out,
+                "{}",
+                canonical_compact(&json!({"heading":s.heading,"markdown":s.markdown}))
+            );
+        }
+        UnitBody::Removal => w!(out, "proposal removal; accepted record still applies"),
+    }
+    out
+}
+
+fn canonical_compact(value: &Value) -> String {
+    super::canonical_json(value)
 }
 
 fn anchors(r: &ContextResult) -> Vec<(&str, &Anchor)> {
@@ -947,6 +1242,11 @@ fn normative(o: &mut String, ind: &str, n: &NormativeRef) {
     for e in n.exceptions {
         w!(o, "{ind}  except [{}]: {}", e.id, e.text);
     }
+    for probe in n.verify {
+        if let Ok(json) = serde_json::to_string(probe) {
+            w!(o, "{ind}  verify: {json}");
+        }
+    }
 }
 
 fn setting_line(o: &mut String, ind: &str, s: &Setting) {
@@ -1023,6 +1323,19 @@ pub(super) fn record_core(o: &mut String, rec: &Record, ind: &str) {
             }
         }
         Record::Contract(k) => {
+            scenarios(o, ind, &k.scenarios);
+            for c in &k.consumers {
+                w!(
+                    o,
+                    "{ind}consumer: {}:{}{}",
+                    c.repo,
+                    c.path,
+                    c.symbol
+                        .as_ref()
+                        .map(|s| format!("#{s}"))
+                        .unwrap_or_default()
+                );
+            }
             for p in &k.parties {
                 let modules = if p.modules.is_empty() {
                     String::new()
@@ -1049,6 +1362,20 @@ pub(super) fn record_core(o: &mut String, rec: &Record, ind: &str) {
             w!(o, "{ind}summary: {}", f.summary);
             items(o, ind, "behaviors", &f.behaviors);
             items(o, ind, "boundaries", &f.boundaries);
+            items(o, ind, "states", &f.states);
+            for t in &f.transitions {
+                w!(
+                    o,
+                    "{ind}transition [{}]: {} -> {} when {}",
+                    t.id,
+                    t.from,
+                    t.to,
+                    t.when
+                );
+            }
+            list(o, ind, "clocks", &f.clocks);
+            list(o, ind, "data sources", &f.data_sources);
+            scenarios(o, ind, &f.scenarios);
         }
         Record::Decision(d) => {
             w!(o, "{ind}context: {}", d.context);
@@ -1072,6 +1399,15 @@ pub(super) fn record_core(o: &mut String, rec: &Record, ind: &str) {
         }
         Record::Reference(r) => {
             w!(o, "{ind}summary: {}", r.summary);
+            for t in &r.terms {
+                w!(
+                    o,
+                    "{ind}term {}: {} (source: {})",
+                    t.term,
+                    t.meaning,
+                    t.source
+                );
+            }
             if !r.sources.is_empty() {
                 w!(o, "{ind}sources:");
                 for s in &r.sources {
@@ -1096,9 +1432,31 @@ pub(super) fn record_core(o: &mut String, rec: &Record, ind: &str) {
     }
 }
 
+fn scenarios(o: &mut String, ind: &str, scenarios: &[crate::model::Scenario]) {
+    for s in scenarios {
+        w!(
+            o,
+            "{ind}scenario [{}]: given {}; expect {}",
+            s.id,
+            s.given,
+            s.expect
+        );
+    }
+}
+
 /// Link and version lines. `all` adds `related` (full record view).
 fn link_lines(o: &mut String, rec: &Record, ind: &str, all: bool) {
     let c = rec.common();
+    for (field, value) in [
+        ("introduced", c.introduced),
+        ("retired", c.retired),
+        ("verified_at", c.verified_at),
+        ("review_by", c.review_by),
+    ] {
+        if let Some(value) = value {
+            w!(o, "{ind}{field}: {value}");
+        }
+    }
     let l = c.links;
     for (name, v, show) in [
         ("requires", &l.requires, true),

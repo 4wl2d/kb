@@ -1,0 +1,30 @@
+# Host template. Copy to .github/workflows/kb-verify.yml. Check out the pinned KB with
+# read-only credentials. Add --provider/--provider-file for import probes and explicit
+# --change-type or --applicable inputs only when the team can justify them.
+name: kb-verify
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+env:
+  KB_PATH: .kb
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          submodules: false
+          ref: ${{ github.event.pull_request.head.sha }}
+      - run: git submodule update --init -- "$KB_PATH"
+      - working-directory: ${{ env.KB_PATH }}
+        run: rustup toolchain install
+      - run: '"$KB_PATH/kbw" --kbw-bootstrap'
+      - name: Verify declared probes against the committed change
+        env:
+          KB_VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
+          KB_VERIFY_HEAD: ${{ github.event.pull_request.head.sha }}
+          KB_VERIFY_BRANCH: ${{ github.head_ref }}
+        run: '"$KB_PATH/kbw" verify --diff "$KB_VERIFY_BASE" --head "$KB_VERIFY_HEAD" --branch "$KB_VERIFY_BRANCH" --snapshot pinned --strict'

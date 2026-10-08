@@ -4,7 +4,7 @@ schema = 1
 id = "kb.model"
 repo = "kb"
 title = "Typed model, parsing and validation"
-paths = ["core/cli/src/model/**", "core/cli/src/parse.rs", "core/cli/src/validate.rs", "core/cli/src/scope.rs", "core/schemas/**"]
+paths = ["core/cli/src/model/**", "core/cli/src/parse.rs", "core/cli/src/parse/**", "core/cli/src/validate.rs", "core/cli/src/scope.rs", "core/schemas/**"]
 features = ["typed-knowledge"]
 
 [[module]]
@@ -25,7 +25,7 @@ features = ["context-assembly"]
 id = "kb.snapshot"
 repo = "kb"
 title = "Freshness, snapshots, overlays and host detection"
-paths = ["core/cli/src/snapshot.rs", "core/cli/src/snapshot/**", "core/cli/src/overlay.rs", "core/cli/src/host.rs", "core/cli/src/git.rs", "core/cli/src/source.rs"]
+paths = ["core/cli/src/snapshot.rs", "core/cli/src/snapshot/**", "core/cli/src/overlay.rs", "core/cli/src/host.rs", "core/cli/src/host/**", "core/cli/src/git.rs", "core/cli/src/source.rs", "core/cli/src/receipts.rs", "core/cli/src/freshness.rs"]
 features = ["freshness"]
 
 [[module]]
@@ -55,3 +55,31 @@ repo = "kb"
 title = "Migrations, upstream updates and impact analysis"
 paths = ["core/cli/src/migrate.rs", "core/cli/src/update.rs", "core/cli/src/impact.rs", "core/migrations/**"]
 features = ["coordinated-updates"]
+
+[[module]]
+id = "kb.authoring"
+repo = "kb"
+title = "Domain coverage and draft production"
+paths = ["core/cli/src/propose.rs", "core/cli/src/coverage.rs"]
+features = ["knowledge-production"]
+
+[[module]]
+id = "kb.evidence"
+repo = "kb"
+title = "Source provenance, drift, ledger, probes and local delivery observations"
+paths = ["core/cli/src/provenance.rs", "core/cli/src/trust.rs", "core/cli/src/trust/**", "core/cli/src/verify.rs", "core/cli/src/verify/**", "core/cli/src/usage.rs"]
+features = ["freshness", "knowledge-production"]
+
+[[module]]
+id = "kb.code"
+repo = "kb"
+title = "Bounded static code provider adapters"
+paths = ["core/cli/src/code.rs", "core/cli/src/process.rs", "core/providers/**"]
+features = ["context-assembly"]
+
+[[module]]
+id = "kb.evaluation"
+repo = "kb"
+title = "Routing/history evaluation, replay and latency measurements"
+paths = ["core/cli/src/evaluation.rs", "core/eval/**", "core/benchmarks/**"]
+features = ["evaluation"]

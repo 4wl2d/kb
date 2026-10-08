@@ -24,7 +24,7 @@
 "decision-missing-context.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
 "missing-owner.md" = { code = "FRONT_MATTER_INVALID", schema = "reject" }
 "reference-unknown-kind.md" = { code = "KIND_UNKNOWN", schema = "reject" }
-"schema-version-2.md" = { code = "UNSUPPORTED_SCHEMA_VERSION", schema = "reject" }
+"schema-version-future.md" = { code = "UNSUPPORTED_SCHEMA_VERSION", schema = "reject" }
 "schema-missing.md" = { code = "SCHEMA_FIELD_MISSING", schema = "reject" }
 # Id and text shape.
 "decision-bad-id.md" = { code = "ID_INVALID", schema = "reject" }

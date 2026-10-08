@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.procedure.rotate-signing-keys"
 kind = "procedure"
 title = "Rotate token signing keys"

@@ -12,6 +12,7 @@
 //! undocumented harness hooks.
 
 pub mod blocks;
+pub mod core;
 pub mod generate;
 pub mod install;
 pub mod template;

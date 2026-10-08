@@ -1,4 +1,4 @@
-# kb context intent=implement engine=0.1.0 skill_protocol=1 protocol=kb.cli.v1
+# kb context intent=implement engine=0.1.0 skill_protocol=2 protocol=kb.cli.v1
 snapshot: 111111111111 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=file:///synthetic/acme-kb; latest=111111111111; key=sha256:22222
 host: repo=unknown; head=unknown; versions=mobile=2.3.0
 scope: repos=mobile; modules=mobile.auth; features=login; concepts=auth-token (alias `refresh token`)
@@ -90,7 +90,7 @@ scope: product
 summary: Refresh tokens and access tokens follow the OAuth 2.0 authorization framework.
 sources:
 - RFC 6749: The OAuth 2.0 Authorization Framework <https://www.rfc-editor.org/rfc/rfc6749>
--- receipt sha256:4ad123b1eb43503c99650ff8564b7f8201523ccc2db0beb3e30bbb343c9e990a; included: mandatory 6, dependencies 1, proposals 0, supplementary 4, sections 0; excluded by budget: none; other exclusions: 3 (--explain); budget: 1708/8000 tokens-est (estimate, not a tokenizer count), measured as compact
+-- receipt sha256:10a6e04a32e67a6c7e455b67dabf2f9e98693184b92c64adf11a9f926391398a; included: mandatory 6, dependencies 1, proposals 0, supplementary 4, sections 0; excluded by budget: none; other exclusions: 3 (--explain); budget: 1708/8000 tokens-est (estimate, not a tokenizer count), measured as compact
 -- a receipt proves delivery, not understanding or compliance; re-request context after compaction, a new session, a hand-off, or a scope or snapshot change
 
 == explain (not counted in the budget) ==

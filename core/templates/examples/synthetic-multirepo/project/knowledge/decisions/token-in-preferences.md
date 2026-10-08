@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.decision.token-in-preferences"
 kind = "decision"
 title = "Store refresh tokens in shared preferences (superseded)"

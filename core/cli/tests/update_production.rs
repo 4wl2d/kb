@@ -335,14 +335,14 @@ fn update_prepare_migrates_a_legacy_project_with_the_bootstrapped_target_engine(
     }
 
     // Migrated project files on the branch equal the expected fixture byte for byte.
-    let expected = tree(&fixture("v1-expected"));
+    let expected = tree(&fixture("v2-expected"));
     assert!(expected.len() > 10, "{:?}", expected.keys());
     for (path, bytes) in &expected {
         let got = blob(&sb, &down, &tip, &format!("project/{path}"));
         assert_eq!(
             String::from_utf8_lossy(&got),
             String::from_utf8_lossy(bytes),
-            "project/{path} on {BRANCH} differs from v1-expected"
+            "project/{path} on {BRANCH} differs from v2-expected"
         );
     }
     let recorded = String::from_utf8(blob(&sb, &down, &tip, "project/upstream.toml")).unwrap();

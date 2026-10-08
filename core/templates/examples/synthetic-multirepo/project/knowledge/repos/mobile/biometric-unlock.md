@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.mobile.biometric-unlock"
 kind = "policy"
 title = "Biometric unlock before showing stored sessions"

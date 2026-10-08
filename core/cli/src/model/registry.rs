@@ -7,16 +7,17 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::diag::Diagnostic;
-use crate::glob::RepoGlob;
+use crate::glob::{RepoGlob, written_qualifier};
 use crate::model::ids::{MAX_REGISTRY_ID, REGISTRY_ID_PATTERN, check_registry_id};
 use crate::normalize::AliasPattern;
 
-pub const REGISTRY_FILES: [&str; 5] = [
+pub const REGISTRY_FILES: [&str; 6] = [
     "owners.toml",
     "repos.toml",
     "modules.toml",
     "features.toml",
     "concepts.toml",
+    "change-types.toml",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -97,8 +98,8 @@ pub struct Concept {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct OwnersFile {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     #[serde(default)]
     pub owner: Vec<Owner>,
@@ -107,8 +108,8 @@ pub struct OwnersFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ReposFile {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     #[serde(default)]
     pub repo: Vec<Repo>,
@@ -117,8 +118,8 @@ pub struct ReposFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ModulesFile {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     #[serde(default)]
     pub module: Vec<Module>,
@@ -127,8 +128,8 @@ pub struct ModulesFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct FeaturesFile {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     #[serde(default)]
     pub feature: Vec<Feature>,
@@ -137,11 +138,35 @@ pub struct FeaturesFile {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ConceptsFile {
-    /// Document schema version (must be 1).
-    #[schemars(extend("const" = 1))]
+    /// Document schema version (1 or 2).
+    #[schemars(extend("enum" = [1, 2]))]
     pub schema: u32,
     #[serde(default)]
     pub concept: Vec<Concept>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeType {
+    #[schemars(regex(pattern = crate::model::ids::LOCAL_ID_PATTERN), length(max = crate::model::ids::MAX_LOCAL_ID))]
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub aliases: Vec<String>,
+    #[serde(default)]
+    pub paths: Vec<String>,
+    /// Identifiers in task descriptions or changed filenames; not a source parser.
+    #[serde(default)]
+    pub symbols: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct ChangeTypesFile {
+    #[schemars(extend("const" = 2))]
+    pub schema: u32,
+    #[serde(default)]
+    pub change_type: Vec<ChangeType>,
 }
 
 /// Serializable registry data (stored in the index snapshot row).
@@ -152,6 +177,8 @@ pub struct RegistryData {
     pub modules: Vec<Module>,
     pub features: Vec<Feature>,
     pub concepts: Vec<Concept>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub change_types: Vec<ChangeType>,
 }
 
 /// Registry with compiled globs and alias patterns for lookups.
@@ -235,6 +262,9 @@ impl Registry {
     }
     pub fn feature(&self, id: &str) -> Option<&Feature> {
         self.data.features.iter().find(|f| f.id == id)
+    }
+    pub fn change_type(&self, id: &str) -> Option<&ChangeType> {
+        self.data.change_types.iter().find(|c| c.id == id)
     }
     pub fn concept(&self, id: &str) -> Option<&Concept> {
         self.data.concepts.iter().find(|c| c.id == id)
@@ -374,6 +404,15 @@ impl Registry {
             "concepts.toml",
             self.data.concepts.iter().map(|x| x.id.as_str()).collect(),
         );
+        check_ids(
+            "change type",
+            "change-types.toml",
+            self.data
+                .change_types
+                .iter()
+                .map(|x| x.id.as_str())
+                .collect(),
+        );
 
         let repo_ids: BTreeSet<&str> = self.data.repos.iter().map(|r| r.id.as_str()).collect();
         let feature_ids: BTreeSet<&str> =
@@ -381,9 +420,10 @@ impl Registry {
         let glob_check = |d: &mut Vec<Diagnostic>, file: &str, owner: &str, specs: &[String]| {
             for s in specs {
                 match RepoGlob::parse(s) {
-                    Ok(g) => {
-                        if let Some(r) = &g.repo
-                            && !repo_ids.contains(r.as_str())
+                    // Checked as written: a qualifier that is not id-shaped never matches.
+                    Ok(_) => {
+                        if let Some(r) = written_qualifier(s)
+                            && !repo_ids.contains(r)
                         {
                             d.push(
                                 Diagnostic::error(
@@ -478,6 +518,26 @@ impl Registry {
             }
             glob_check(&mut d, "concepts.toml", &c.id, &c.paths);
         }
+        for c in &self.data.change_types {
+            if let Err(e) = crate::model::ids::check_local_id(&c.id) {
+                d.push(
+                    Diagnostic::error("CHANGE_TYPE_INVALID", e)
+                        .at_path(reg_path("change-types.toml")),
+                );
+            }
+            for a in c.aliases.iter().chain(&c.symbols) {
+                if AliasPattern::compile(a).is_none() {
+                    d.push(
+                        Diagnostic::error(
+                            "REGISTRY_ALIAS_INVALID",
+                            format!("change type {}: empty alias", c.id),
+                        )
+                        .at_path(reg_path("change-types.toml")),
+                    );
+                }
+            }
+            glob_check(&mut d, "change-types.toml", &c.id, &c.paths);
+        }
         d
     }
 
@@ -557,6 +617,7 @@ mod tests {
     fn sample() -> Registry {
         Registry::new(RegistryData {
             owners: vec![],
+            change_types: vec![],
             repos: vec![Repo {
                 id: "mobile".into(),
                 title: "M".into(),
@@ -605,5 +666,27 @@ mod tests {
             "ui-composition"
         );
         assert!(r.validate().is_empty());
+    }
+
+    #[test]
+    fn glob_qualifiers_are_checked_as_written() {
+        let mut data = sample().data;
+        data.modules[0].paths = vec![
+            "Mobile:app/auth/**".into(),
+            "app/a:b/**".into(),
+            "[a:b]/x.md".into(),
+        ];
+        let d = Registry::new(data).validate();
+        let got: Vec<_> = d
+            .iter()
+            .map(|x| (x.code.as_str(), &x.message[..]))
+            .collect();
+        assert_eq!(
+            got,
+            [(
+                "REGISTRY_UNKNOWN_REPO",
+                "`mobile.auth` glob `Mobile:app/auth/**` names unknown repo `Mobile`"
+            )]
+        );
     }
 }

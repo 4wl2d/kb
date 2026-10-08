@@ -1,5 +1,5 @@
 # SYNTHETIC EXAMPLE. This profile describes an invented product; it is not project data.
-schema = 1
+schema = 2
 
 [project]
 name = "Example (synthetic multi-repo)"

@@ -14,13 +14,17 @@ kb-knowledge:
       # fingerprint (toolchain included), so this key only affects cache reuse.
       files: [Cargo.lock, core/release.toml]
     paths: [.cache/runtime]
+  artifacts:
+    when: always
+    paths: [.cache/knowledge-ci/]
   rules:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - rustup toolchain install   # the version pinned in rust-toolchain.toml
     - ./kbw --kbw-bootstrap      # explicit runtime bootstrap (source build or cache hit)
-    - ./kbw validate
+    # Provision read-only hosts pinned in project/ci/hosts.tsv before this step.
+    - sh core/templates/ci/check-knowledge.sh
     - |
       if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
         git fetch --no-tags origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"

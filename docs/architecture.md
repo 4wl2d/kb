@@ -4,8 +4,8 @@ This document is the normative engineering contract for the `kb` engine. User-fa
 guides in `docs/` explain the same behavior for authors and operators; when they
 disagree, this document and the code win and the guide is a bug.
 
-Versions described here: engine `0.1.0`, document schema `1`, CLI protocol `1`,
-index schema `1`, skill protocol `1`, bootstrap manifest `1`; parser version `2` (code only,
+Versions described here: engine `0.1.0`, document schema `2` (reads `1` and `2`), CLI protocol `1`,
+index schema `2`, skill protocol `2`, bootstrap manifest `1`; parser version `6` (code only,
 `PARSER_VERSION` in `core/cli/src/versions.rs`).
 
 ## 1. Distribution model and ownership
@@ -32,7 +32,7 @@ index schema `1`, skill protocol `1`, bootstrap manifest `1`; parser version `2`
 
 ```
 kbw                       POSIX sh launcher (runtime selection, source bootstrap, artifact install)
-Cargo.toml / Cargo.lock   workspace (members: core/cli, core/benchmarks)
+Cargo.toml / Cargo.lock   workspace (core/cli, core/benchmarks, core/providers, core/eval)
 rust-toolchain.toml       pinned toolchain
 core/cli/                 crate `kb`: library + `kb` executable
 core/schemas/             generated JSON Schemas (drift-checked by tests and `kb schema --check`)
@@ -42,6 +42,8 @@ core/skills/              canonical skill instructions + references (rendered by
 core/maintainer-knowledge/ opt-in knowledge about kb itself (profile `maintainer`)
 core/tests/               shared fixtures + routing evaluations used by core/cli/tests
 core/benchmarks/          crate `kb-bench`: corpus generator + measurements
+core/providers/           optional out-of-process ast-index / CodeGraph reference adapters
+core/eval/                optional isolated, preregistered agent replay kit
 core/release.toml         bootstrap/compatibility manifest (line-parseable by kbw)
 project/                  project-owned knowledge (created by `kb init`)
 .cache/                   generated (runtime binaries, git mirror, SQLite index); git-ignored
@@ -51,11 +53,12 @@ After `kb init --apply`:
 
 ```
 project/project.toml            profile config (trusted config: namespace, source, trust)
-project/registry/{owners,repos,modules,features,concepts}.toml
+project/registry/{owners,repos,modules,features,concepts,change-types}.toml
 project/knowledge/<group>/*.md  typed records (groups are free-form directories)
 project/skill-config/skill.toml project settings for generated skills
 project/skill-config/generated/ rendered skill bundle (generated, drift-checked, committed)
 project/routing-tests/*.toml    routing fixtures
+project/ci/                    explicit pinned host inputs and team CI configuration
 project/upstream.toml           upstream base (url parameter + revision) for divergence/update
 project/README.md               replaced by init with a project README
 ```
@@ -65,14 +68,15 @@ records. Every other `*.md` file under a knowledge root must be a record. Non-`.
 under knowledge roots are ignored with a warning. Symlinks under knowledge roots are an
 error (never followed).
 
-## 3. Record format (document schema 1)
+## 3. Record format (document schemas 1 and 2)
 
 A record is a Markdown file whose first line is exactly `+++`, followed by strict TOML
 front matter, a closing line `+++`, then an optional Markdown body.
 
 * Unknown fields, duplicate keys, wrong types and unknown enum values are errors.
-* `schema` must equal `1`. Other values: `UNSUPPORTED_SCHEMA_VERSION` (if a migration
-  exists, the message names `kb migrate`).
+* `schema` is `1` or `2`. Schema-2 fields are rejected in schema-1 files, including explicit
+  empty/default values. Other versions: `UNSUPPORTED_SCHEMA_VERSION`. `kb migrate` upgrades
+  `1` to `2` without changing facts, ids, status, comments or Markdown (ADR 0010).
 * Body: optional explanatory Markdown split into sections by `## ` headings. Section id =
   slug of the heading (lowercase, alphanumerics kept incl. Unicode letters, other runs →
   `-`). Duplicate section slugs are an error. Text before the first `## ` heading is the
@@ -84,7 +88,7 @@ front matter, a closing line `+++`, then an optional Markdown body.
 
 | field | type | rules |
 |---|---|---|
-| `schema` | int | `1` |
+| `schema` | int | `1` or `2`; new authoring uses `2` |
 | `id` | string | `^[a-z][a-z0-9]*(-[a-z0-9]+)*(\.[a-z0-9]+(-[a-z0-9]+)*)+$`, ≤128 bytes; first segment = profile namespace |
 | `kind` | enum | `policy feature invariant contract decision procedure reference gap` |
 | `title` | string | 1..=200 chars, single line |
@@ -95,11 +99,14 @@ front matter, a closing line `+++`, then an optional Markdown body.
 | `links` | table | optional; see 3.5 |
 | `applicability` | table | optional: `versions = { <repo> = "<semver req>" }` |
 | `anchors` | array of tables | optional provenance anchors, see 3.6 |
+| `introduced`, `retired` | string | schema 2: ISO calendar date or commit id; inclusive start, exclusive end; bounds use the same kind |
+| `verified_at`, `review_by` | string | schema 2: ISO calendar dates; review deadline cannot precede verification |
 
 ### 3.2 Kind-specific fields
 
 Normative content is typed and atomic. A `Statement` is
-`{ id, level, text, conditions = [..], exceptions = [{ id, text }] }` with `level` in
+`{ id, level, text, conditions = [..], exceptions = [{ id, text }], verify = [..] }`
+(`verify` is schema 2 only) with `level` in
 `must must-not should should-not may`. Local ids (`statement.id`, exception ids, item ids,
 setting names, party ids) match `^[a-z0-9]+(-[a-z0-9]+)*$` and are unique per record.
 Exceptions that change an obligation's meaning must be typed `exceptions`; they are
@@ -123,6 +130,26 @@ rendered together with the statement and are never dropped by budgeting.
 * **gap**: `gap = missing|ambiguity|contradiction`, `description`, `affects = [record ids]`,
   `questions = [..]`.
 
+Schema 2 additionally permits `delivery = "always"|"scoped"` (default scoped) on policies
+and invariants. Always delivery requires product scope without version or change-type
+constraints. Features may add `states: [Item]`, `transitions: [{id,from,to,when}]` (endpoints
+name declared states), `clocks: [string]`, `data_sources: [string]` and
+`scenarios: [{id,given,expect}]`. Contracts may add the same scenarios and
+`consumers: [{repo,path,symbol?}]`; consumer repos must exist. References may add
+`terms: [{term,meaning,source}]` with unique normalized terms. All additions are optional;
+descriptive feature models remain supplementary. New lists retain the 500-item limit.
+
+Statements and obligations may declare `verify` arrays. Probe kinds are `commit-message`
+and `branch-name` (pattern), `forbidden-import` (from/to path globs), `naming` and `banned-api`
+(paths plus pattern). Regexes are validated with a bounded Rust regex compiler. Probes are
+data, contain no executable command, and have no side effects during parsing or retrieval.
+A probe glob with a `:` before any `/`, outside a `[...]` class or `{...}` group, is
+repo-qualified (a `:` inside a class or group is pattern text, while `{mobile,web}:` is a
+qualifier), and the text before that `:` must be a registry
+repo id as written (`UNKNOWN_REPO`): an unknown or mistyped qualifier, including a case
+change such as `Mobile:`, would never match and silently skip a blocking probe, so it
+fails validation and `verify`.
+
 ### 3.3 Scope (mandatory applicability)
 
 ```toml
@@ -131,6 +158,7 @@ product = false            # true => product-wide; then repos/modules/features m
 repos = ["mobile"]
 modules = ["mobile.auth"]
 features = ["login"]
+change_types = []          # schema 2; optional change-category constraints
 ```
 
 * `product = true` XOR at least one non-empty dimension (an accidental empty scope is an error).
@@ -183,7 +211,8 @@ aliases = ["token refresh", "обновление токена"]        # extra 
 
 Selectors never exclude an applicable obligation. Paths are globs (`*` within a segment,
 `**` across segments, `?`, `[...]`), repo-relative, `/`-separated; they may not be
-absolute, contain `..`, backslashes or NUL.
+absolute, contain `..`, backslashes or NUL. Their `repo:` qualifiers, like those of probe
+and registry globs, are checked as written against the registry.
 
 ### 3.5 Links
 
@@ -210,6 +239,11 @@ addressable) and must keep their kind (no reuse for other facts).
 `{ kind = source|test|change|doc, repo?, path?, symbol?, commit?, change?, note? }`.
 `source`/`test` need `repo` and `path`; `change` needs `change` (e.g. `"!42"`) or `commit`.
 A test anchor does not prove the test runs; a valid schema does not prove the text is true.
+
+Schema-2 anchors may add `stamp = {commit,start_line,end_line,sha256}`: an inclusive,
+one-based nonempty span of a Git blob. A stamp needs a repo/path and lowercase SHA-256;
+its commit must agree with the anchor commit when both are supplied (one is a prefix of the
+other, ignoring hex case).
 
 ### 3.7 Policies, settings and overrides
 
@@ -242,7 +276,7 @@ features.
 
 ## 4. Registries and profile config
 
-`project/project.toml` (schema 1):
+`project/project.toml` (schemas 1 and 2):
 
 ```toml
 schema = 1
@@ -260,7 +294,7 @@ default_budget = 8000
 default_budget_unit = "tokens-est"
 ```
 
-Registries (`project/registry/*.toml`, each with `schema = 1`, missing file = empty):
+Registries (`project/registry/*.toml`, each with `schema = 1` or `2`, missing file = empty):
 `owners.toml` `[[owner]] id, title, repos = [..], product = bool` (authority: an owner with
 non-empty `repos` may only own records whose implied repos are within them; product-wide
 records need an owner with `product = true`); `repos.toml` `[[repo]] id, title, remotes = [..],
@@ -282,17 +316,25 @@ with the same schema; namespace `kb`.
 
 ## 5. Context assembly
 
-Request: `intent` (`implement refactor debug review explain`), optional `task`, `repo[]`,
+Request: `intent` (`implement refactor debug diagnose review explain`), optional `task`, `repo[]`,
 `path[]`, `module[]`, `feature[]`, `concept[]`, `budget`, `budget_unit`, `include_proposals`,
 `sections` (`none|mandatory|all`, default none), `max_supplementary` (default 12),
-`host_version[]`, `explain`.
+`host_version[]`, `explain`; optional changed-diff scope, change types, historical `as_of`,
+freshness reference/age, explicit delivery receipts and opt-in code-provider inputs.
 
 Pipeline:
 
 1. **Preflight**: profile config, runtime/manifest compatibility, snapshot freshness and
    selection (§6), snapshot engine compatibility, snapshot validity. A snapshot with
    validation errors yields `completeness = incomplete` plus diagnostics (never `complete`).
-2. **Scope resolution**: host repo, paths → modules/features, alias → concepts. Unknown
+2. **Scope resolution**: host repo, paths → modules/features, alias → concepts. Tracked
+   filename/identifier matches can discover paths before an explicit path is known; such
+   paths are candidates that never make an unknown module/feature scope known (identifiers
+   naming more than 8 files are skipped; at most 64 discovered paths are listed and ranked,
+   all of them add their modules and features to an already known scope, and none count
+   against the `--path` limit). `--changed` includes old/deleted paths and distinguishes an empty diff
+   from unknown scope. Explicit change types can prune inapplicable categories; inferred hints only
+   add candidates and cannot silently exclude unknown categories. Unknown
    registry ids given explicitly → `UNKNOWN_SCOPE` error. A plain `--path` is made
    host-relative (relative to the current directory inside the host, else to the host root);
    an absolute path that spells the host root through a symlinked prefix is accepted (only
@@ -328,6 +370,22 @@ Pipeline:
 8. **Output** with snapshot provenance, scope, completeness, effective settings, units,
    ambiguities, diagnostics, receipt.
 
+`diagnose` without explicit paths/modules/diff remains provisional, with
+`DIAGNOSE_SCOPE_PROVISIONAL`; discovery is not authority to skip a scoped pre-edit query.
+`--as-of` installs a pure temporal view across every lookup and recalculates lexical
+statistics on that slice. Undated accepted records are withheld (`AS_OF_UNDATED`), as are
+records scoped to other repositories whose commit bounds cannot be resolved in the host
+(`AS_OF_BOUND_UNRESOLVED`), and required records outside the slice remain missing. Git adapters resolve commit ancestry,
+historical filenames and version files; no checkout mutation or wall clock enters the
+pure assembler. Frozen input artifacts remain necessary for replay (ADR 0012).
+
+`--with-code` requires an explicit `kb.code.v1` provider. The adapter validates repo/commit,
+paths, source-span hashes, capabilities and bounded output before optional code units are
+packed after KB supplementary content. Static facts remain `kind=code`, `status=observed`,
+with provider provenance; they cannot become accepted knowledge or displace mandatory
+units. `impact --deep` unions bounded dependents from base and head, retaining unresolved
+edges and dirty-tree limitations. See ADR 0011 and `core/providers/README.md`.
+
 Completeness: `complete` (all mandatory resolved, snapshot valid, nothing undetermined),
 `partial` (undetermined obligations, unknown repo, or non-approved snapshot content),
 `conflict` (setting conflicts, incompatible dependency), `incomplete` (missing, draft or
@@ -362,8 +420,19 @@ the `--json` receipt can be recomputed from printed output; a compact/human rece
 by re-running the same request in the same format against the same snapshot. The receipt
 lists included ids with reasons, requires edges, excluded
 candidates with reasons, undetermined obligations, warnings and source anchors. A receipt
-proves delivery, not understanding or compliance. Agents must re-request context after
+proves delivery, not understanding or compliance. Normal CLI snapshots carry a content
+digest and emit `kb.receipt.v2`, with per-unit content hashes. `--since-receipt` requires an
+explicit, locally stored receipt for the same KB/host/profile. `--core-receipt` additionally
+requires the actual installed `--core-source`, matching accepted always-on content, bundle
+and lock. Applicability/dependencies are recomputed before unchanged units are rendered as
+references. Invalid, stale or missing proof never silently suppresses obligations.
+No receipt is inferred from a session id; historical queries do not reuse installed core.
+Agents must re-request context after
 compaction, a new session, a hand-off, or a scope/snapshot change.
+
+`terse` retains every typed obligation, condition and exception while deferring Markdown.
+`show --sections` returns deferred bodies. `outline` is an inventory with a hard 2000
+token-estimate ceiling, not a delivery receipt; required ids are never dropped to fit it.
 
 ## 6. Freshness and snapshots
 
@@ -433,11 +502,13 @@ retry re-hashes the file.
 ## 8. CLI
 
 Global options: `--root`, `--config`, `--profile project|maintainer`, `--format
-compact|human|json` (`--json`), `--offline`, `--snapshot`, `--host`, `--quiet`,
+compact|terse|human|json` (`--json`), `--offline`, `--snapshot`, `--host`, `--quiet`,
 `--skill-protocol <n>` (mismatch → `SKILL_OUTDATED`). Unknown arguments are rejected.
 
-Commands: `init`, `doctor`, `validate`, `index`, `context`, `search`, `show`, `sync`,
-`impact`, `integrate`, `migrate`, `update {check,prepare,divergence,abandon}`, `schema`,
+Commands: `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`, `show`, `sync`,
+`impact`, `coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`, `drift`,
+`ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
+`update {check,prepare,divergence,abandon}`, `schema`,
 `version`. Mutating commands are dry-run by default and write only with `--apply`
 (`update prepare` writes only to its own branch/worktree; `update abandon <branch>` reports
 what it would remove and removes the worktree and branch only with `--apply`, refusing a
@@ -525,14 +596,61 @@ engine divergence) by setting the repository variable `KB_ENGINE_CI` (skips the 
 `kb integrate --generate` renders `core/skills/kb/*` with `project/skill-config/skill.toml`
 into `project/skill-config/generated/` (skill bundle + managed instruction blocks).
 `kb integrate [--check|--apply]` (host level) installs the bundle into the host repository:
-`.claude/skills/kb/` (Claude Code), `.agents/skills/kb/` (Codex; Cursor also reads it) and
-managed blocks in `CLAUDE.md` / `AGENTS.md` delimited by
+exactly one full skill: `.agents/skills/kb/` with Codex/Cursor, otherwise
+`.claude/skills/kb/` with Claude, otherwise `.grok/skills/kb/` with Grok, otherwise the
+portable `.kbw/skills/kb/`. Native instruction targets are `AGENTS.md` (Codex/Grok/Junie),
+`CLAUDE.md`, `.cursor/rules/kb.mdc` and `.github/copilot-instructions.md`. Secondary targets
+point at the primary workflow; mixed Claude uses a short `.claude/commands/kb.md` alias.
+Existing `AGENTS.override.md` and `.junie/AGENTS.md` receive pointer blocks without creating
+new masking overrides. Managed blocks are delimited by
 `<!-- kb:begin <name> -->` / `<!-- kb:end <name> -->`. Installed hashes are tracked in
 `.kbw/integration.lock` in the host; user-modified generated files or blocks are reported as
 conflicts and never silently overwritten.
+Old locked duplicate skills can be removed only when their installed hashes still match.
+Accepted `delivery=always` product-wide unconditional rules form a core of at most 600
+estimated tokens; overflow fails instead of truncating. Native file caps are checked before
+writing. `integrate --probe` verifies installation and emits a load challenge; it always
+distinguishes that result from unperformed real harness consultation (ADR 0013).
 The skill setting `snapshot` (`auto|latest|pinned`) is written as an explicit `--snapshot`
 into every generated kbw command; `auto` passes nothing, so a host `.kbw.toml selection`
 decides, while `latest`/`pinned` override it. The shipped host CI templates run
 `kbw impact --snapshot pinned --check`, which checks against the host pin (freshness is still
 verified) and therefore does not fail with `UPDATE_REQUIRED` while a merged knowledge change
 waits for the host pin update.
+
+## 11. Knowledge production and evidence
+
+`coverage` ranks domain deficits against tracked paths and a history window anchored to
+the host HEAD date. Optional provider fan-in is separate from churn-only fallback.
+`propose begin` emits a deterministic change work order; `capture` and `propose submit`
+produce only drafts, checking schema, owners, scope, links, anchors and duplicates before
+an explicit write. Comments, test commands and source text remain data. Confirmed behavior
+requires a merged fix plus regression evidence or an explicit reviewed decision, with a
+named reviewer. Neither command, a stamp nor a pipeline can accept knowledge (ADR 0014).
+
+`anchors stamp` edits only explicit records with fresh-byte preconditions; untouched lines
+keep their original bytes and inserted or edited stamp lines take the front matter's
+predominant line ending (CRLF stays CRLF); `check` verifies
+Git bytes, not truth or test execution. Drift queues are grouped by owner; ledger reports
+supported/stale/unverifiable evidence and seeded draft audits. Freshness uses `--on` or a
+selected commit date; calendar SLA jobs must supply today's date explicitly. Warnings keep
+applicable obligations. `verify` runs only declared regex/glob/static-import probes, never
+record-supplied commands. Conditions/exceptions need explicit applicability evidence;
+unknown cannot pass. See ADR 0015 and [knowledge-lifecycle.md](knowledge-lifecycle.md).
+
+Context delivery appends private local ids/scopes/costs/provenance to a locked usage log,
+excluding task text and source snippets. `usage report` joins selected receipts to the
+final diff; its irrelevance labels are scope proxies, not semantic quality measurements.
+No engine command uploads these observations.
+
+## 12. Evaluation and optional extensions
+
+Tier A routing adds ordered delivery, token ceilings and explicitly labeled recall and
+precision. History evaluation retains unlabeled and temporal uncertainty. The separate
+Tier B crate freezes task/knowledge inputs, isolates coder/test/judge stages, preserves
+native usage and analyzes paired task clusters; it is the only optional tool here that
+can run explicitly requested model jobs. It is not part of engine query execution.
+See [evaluation.md](evaluation.md) and [optional-extensions.md](optional-extensions.md).
+Tests, installation probes and static graphs cannot substitute for held-out feature,
+generation and field acceptance. Pending gates do not authorize default-on extensions or
+release tags.

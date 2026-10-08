@@ -10,8 +10,9 @@ knowledge is covered by [BOOTSTRAP.md](../BOOTSTRAP.md).
 
 Placeholders: `<your-git-host>/<org>/<kb-repo>.git` is your product KB repository,
 `<upstream-url>` the kb upstream, `.kb` the conventional mount path. Output excerpts were
-captured with engine 0.1.0 in local scratch repositories; long absolute paths are shortened
-to `<...>`.
+captured from the schema-1 baseline in local scratch repositories; historical hashes/counts
+are illustrative. Current authoring uses schema 2 and skill protocol 2. Long absolute paths
+are shortened to `<...>`.
 
 ## 1. Roles and ownership
 
@@ -56,10 +57,10 @@ URL explicitly.
 
 ```sh
 ./kbw --kbw-bootstrap                                                    # explicit runtime build
-git switch -c kb/init
+git switch -c feature/kb-init
 ./kbw init --name "<Product>" --namespace <ns> --upstream-url <upstream-url>          # dry-run
 ./kbw init --name "<Product>" --namespace <ns> --upstream-url <upstream-url> --apply
-git add project .github/workflows/kb-knowledge.yml
+git add project .github/workflows/kb-knowledge.yml .github/pull_request_template.md .gitlab
 git commit -m "Initialize the project knowledge base"
 ```
 
@@ -68,6 +69,13 @@ Run `init` right after forking: it records the current `HEAD` as the upstream ba
 `--harness`) and the created files are listed in [BOOTSTRAP.md](../BOOTSTRAP.md#2-initialize-project).
 Then adapt the knowledge base with BOOTSTRAP.md (manually or with the
 [adaptation prompt](prompts/adaptation.md)) and merge the result through review.
+
+Init also creates subsystem/checklist/glossary scaffolding, `change-types.toml`, KB review
+templates and `.gitlab/ci/kb-knowledge.yml`; it preserves existing CI/MR files. A GitLab team
+must include that job from its existing entrypoint. Domain harvest produces concrete
+feature state/transition/scenario packs, contracts/consumers, invariants, decisions and
+glossary from evidence, with accepted/proposed/gap counts. A new fact stays draft until
+review; initialization never manufactures accepted domain knowledge.
 
 ## 4. Mount the KB in host repositories
 
@@ -114,7 +122,11 @@ selection = "pinned"      # default for --snapshot auto: auto | latest | pinned
 Run the KB's launcher from inside the host (`<kb-checkout>/kbw context ...`) or pass
 `--host <dir>`. The generated skill and instruction blocks tell agents to run
 `<kb_path>/kbw`, where `kb_path` is host-relative and may not contain `..`. If the checkout
-is not at that path, `kbw integrate` warns `KB_PATH_MISMATCH`; the simplest layout is a
+is not at that path, `kbw integrate` warns `KB_PATH_MISMATCH`. It also warns
+`BUNDLE_STALE` when the committed bundle differs from what `kbw integrate --generate`
+renders now (it installs the committed, reviewed bundle; regenerate it through review) and
+`BUNDLE_UNVERIFIED` when the bundle cannot be re-rendered to check it (the message gives
+the cause). The simplest layout is a
 plain clone at `kb_path` inside the host, excluded from the host's Git (for example in
 `.git/info/exclude`), with the pin in `.kbw.toml`.
 
@@ -158,7 +170,7 @@ kb integrate (apply): host <...>/mobile
   create    .agents/skills/kb/SKILL.md
   create    .agents/skills/kb/references/harnesses.md
   ...
-  create    .claude/skills/kb/SKILL.md
+  create    .claude/commands/kb.md
   ...
   create    AGENTS.md [block kb-instructions]
   create    CLAUDE.md [block kb-instructions]
@@ -166,11 +178,14 @@ kb integrate (apply): host <...>/mobile
 host integration written; review and commit it (including the lock)
 ```
 
-| harness | skill directory | instruction file |
+| harness | full skill / pointer | native instruction target |
 |---|---|---|
-| Claude Code | `.claude/skills/kb/` | `CLAUDE.md` |
-| Codex | `.agents/skills/kb/` | `AGENTS.md` |
-| Cursor | `.agents/skills/kb/`, or `.claude/skills/kb/` when Claude Code is enabled | `AGENTS.md` |
+| Claude Code | `.claude/skills/kb/` when primary; otherwise `.claude/commands/kb.md` points at the shared skill | `CLAUDE.md` |
+| Codex | shared `.agents/skills/kb/` | `AGENTS.md`; an existing `AGENTS.override.md` gets a pointer |
+| Cursor | shared `.agents/skills/kb/` | `.cursor/rules/kb.mdc`, `alwaysApply: true` |
+| Grok Build | `.grok/skills/kb/` when primary; otherwise shared skill | `AGENTS.md` |
+| GitHub Copilot | portable/shared skill pointer | `.github/copilot-instructions.md` |
+| Junie | portable/shared skill pointer | `AGENTS.md`; an existing `.junie/AGENTS.md` gets a pointer |
 
 * Instruction files change only between `<!-- kb:begin kb-instructions -->` and
   `<!-- kb:end kb-instructions -->`; every other byte is kept, and missing files are created.
@@ -179,9 +194,15 @@ host integration written; review and commit it (including the lock)
   `--check` fails with `DRIFT_DETECTED` (exit 42). `--apply --force` overwrites explicitly.
   Project-specific additions belong in `notes` of `skill.toml`, not in generated files.
 * A second `--apply` is a no-op ("host integration is up to date; nothing written").
-* Enabling Claude Code and Codex together installs both directories, so Cursor sees two
-  identical skills; the skill's `references/harnesses.md` explains the trade-off and the
-  sources.
+* Exactly one full skill is installed. Selection order is agents (Codex/Cursor), Claude,
+  Grok, then portable `.kbw/skills/kb/`. Secondary files point at it. Previously managed
+  duplicates are removed only when their locked hashes still match; local edits conflict.
+* Accepted unconditional product policies/invariants with `delivery = "always"` form a
+  core capped at 600 estimated tokens. Native instruction/skill byte caps are enforced;
+  nothing is truncated. Context reuses that core only with a verified installed receipt.
+* `.kb/kbw integrate --probe` checks installation and produces a challenge for a fresh
+  harness session. It does not run a model or claim runtime loading. Preserve actual
+  version/response/tool-call evidence when executing a load probe.
 
 Instruction files and skills are text: they make the protocol available to agents but do
 not enforce it, and kb uses no undocumented harness hooks.
@@ -191,17 +212,41 @@ not enforce it, and kb uses no undocumented harness hooks.
 | template (`core/templates/`) | install as | checks |
 |---|---|---|
 | `ci/github/kb-knowledge.yml` | KB: `.github/workflows/kb-knowledge.yml` (created by `init`) | bootstrap, `validate`, `validate --base origin/<target>` on PRs, `integrate --generate --check`, `update divergence`, `schema --check` |
-| `ci/gitlab/kb-knowledge.gitlab-ci.yml` | KB: include or copy into `.gitlab-ci.yml` | the same |
+| `ci/gitlab/kb-knowledge.gitlab-ci.yml` | KB: init copies `.gitlab/ci/kb-knowledge.yml`; include it from the existing entrypoint | the same |
 | `ci/github/host-kb-impact.yml` | host: `.github/workflows/kb-impact.yml`; set `KB_PATH` | submodule checkout (no recursion), bootstrap, `impact --base origin/<target> --statement <description> --snapshot pinned --check`, `integrate --check` |
 | `ci/gitlab/host-kb-impact.gitlab-ci.yml` | host: copy the job into `.gitlab-ci.yml` | the same |
-| `mr/github_pull_request_template.md` | host and KB: `.github/pull_request_template.md` | `kb-impact` block and linked-MR checklist |
-| `mr/gitlab_merge_request_template.md` | host and KB: `.gitlab/merge_request_templates/Default.md` | the same |
+| `mr/github_pull_request_template.md`, `mr/gitlab_merge_request_template.md` | host PR/MR templates | knowledge learned, `kb-impact`, linked-MR checklist and optional applicability labels |
+| `mr/kb_review.md` | KB: `.github/pull_request_template.md`, `.gitlab/merge_request_templates/Knowledge.md` | named review, evidence ladder, accepted/proposed/gap counts |
+| `ci/*/host-kb-verify*`, `ci/hooks/commit-msg` | optional host CI/hook integration | declared probes on committed/staged input; native exit codes |
+| `ci/*/host-knowledge-from-change*` | opt-in post-merge workflow | frozen work order, draft agent, fresh revalidation, separately authorized draft MR publication |
 | `ownership/CODEOWNERS.tmpl` | adapt by hand; owners are explicit parameters | none |
 | `security/SECURITY.md.tmpl` | KB: `.github/SECURITY.md` (never the engine-owned root `SECURITY.md`); the contact is an explicit parameter | none |
 
+KB CI also runs strict routing, anchor, drift and ledger checks with pinned host inputs
+from `project/ci/hosts.tsv` and an explicit calendar reference. Missing evidence does not
+become a green check. Post-merge accrual keeps model/read credentials separate from the
+protected publication job, handles reviewed merge/squash/rebase ranges without guessing
+parents, and never accepts a draft. Review the configuration and authority requirements
+in [the CI guide](../core/templates/ci/README.md) before enabling these optional jobs.
+
 Host CI reads the pinned KB revision (`--snapshot pinned`) because `auto` returns
 `UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the normal state
-between merging knowledge and updating the pin. Freshness is still verified.
+between merging knowledge and updating the pin. Freshness is still verified. The host CI
+templates therefore need a pin (a KB submodule gitlink or a `.kbw.toml` `pin`); a host that
+mounts a separate checkout without a pin changes `--snapshot` in its copy of the template.
+The commit-msg hook also works in a host without a pin and selects its snapshot as follows.
+
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+declares `selection`, the hook passes `auto` and the engine applies that selection.
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+`pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
+adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
+exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
+whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
+the committed message stays authoritative); a message of only comments is checked
+whitespace-cleaned, because Git aborts an empty message. The `git commit --cleanup=<mode>`
+and `--allow-empty-message` flags are invisible to hooks; to skip the editor, use
+`GIT_EDITOR=true`.
 
 The `kb-impact` block (exactly one per description) is how a merge request acknowledges its
 knowledge impact:
@@ -220,6 +265,7 @@ change_id = "AUTH-42"
 | `reason` | required, non-empty, in every mode |
 | `kb_revision` | optional, 7–64 hex characters; not allowed with `none` |
 | `change_id` | optional shared id, 1–128 characters on one line; `linked` needs `kb_revision` or `change_id` |
+| `applicable`, `not_applicable`, `applicability_reviewed` | optional human applicability labels used by history evaluation; no labels means unknown, not perfect coverage |
 
 `kbw impact --check` fails with `IMPACT_UNACKNOWLEDGED` (exit 44) when the diff touches
 knowledge-linked files or files with unknown coverage and neither the pointer changes nor a
@@ -349,6 +395,17 @@ update check: upstream v0.1.1 = 323c06a5ab5e (from <...>/upstream)
   apply to them.
 
 ## 9. Coordinated upgrades
+
+For this upgrade, document schema 1 → 2 changes only the declarations and preserves ids,
+kind, status, comments, body and existing facts. Skill protocol changes to 2, index schema
+to 2 and parser version to 6. `update prepare` runs the adjacent migration and regeneration
+in its review worktree; a manual migration remains previewable with `./kbw migrate` before
+`--apply`. Host-binding, routing and skill-config schema numbers remain independently 1.
+New engine templates do not overwrite an existing downstream's `project/` or host CI.
+After the mechanical update, copy/adapt CI/MR templates, re-run adaptation v2 in re-run mode
+for domain harvest, then use maintenance v2. Content does not appear from an engine update
+alone. Run [Tier A](evaluation.md) and the relevant held-out acceptance before changing
+measurement-dependent defaults.
 
 One reviewed update branch carries the engine, the migrated knowledge, the schema versions
 and the regenerated skill together. After it is merged, hosts still pin older KB revisions:

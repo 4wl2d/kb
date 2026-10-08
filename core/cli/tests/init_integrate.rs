@@ -223,7 +223,15 @@ fn init_apply_creates_a_loadable_project_and_refuses_a_second_init() {
     assert_ok(&o);
     let v = json(&o);
     assert_eq!(v["result"]["mode"], "apply");
-    assert_eq!(v["result"]["written"], 28);
+    assert_eq!(
+        v["result"]["written"].as_u64().unwrap(),
+        v["result"]["plan"]["changes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|c| matches!(c["action"].as_str(), Some("create" | "replace" | "update")))
+            .count() as u64
+    );
     let files = snapshot(&kb.root);
     for p in [
         "project/project.toml",
@@ -270,6 +278,20 @@ fn init_apply_creates_a_loadable_project_and_refuses_a_second_init() {
     assert_eq!(corpus.config.project.name, "Acme \"Mobile\"");
     assert_eq!(corpus.config.project.namespace, "acme");
     assert_eq!(corpus.records().count(), 0);
+    for path in [
+        ".github/pull_request_template.md",
+        ".gitlab/merge_request_templates/Knowledge.md",
+        ".gitlab/ci/kb-knowledge.yml",
+        "project/ci/hosts.tsv",
+        "project/knowledge/subsystems/README.md",
+        "project/knowledge/checklists/README.md",
+        "project/knowledge/glossary/README.md",
+    ] {
+        assert!(
+            files.contains_key(path),
+            "missing downstream scaffold {path}"
+        );
+    }
 
     assert_ok(&kb.run(&["integrate", "--generate", "--check"]));
 
@@ -371,13 +393,56 @@ fn init_never_overwrites_existing_files() {
     let kb = Kb::new();
     let owners = "schema = 1\n# hand-written before init\n";
     write(&kb.root.join("project/registry/owners.toml"), owners);
+    write(
+        &kb.root.join(".github/pull_request_template.md"),
+        "Human review process.\n",
+    );
     let o = kb.run(&["init", "--name", "Acme", "--namespace", "acme", "--apply"]);
     assert_ok(&o);
     let a = plan_actions(&json(&o));
     assert_eq!(a["project/registry/owners.toml"], "keep");
+    assert_eq!(a[".github/pull_request_template.md"], "keep");
+    assert_eq!(
+        fs::read_to_string(kb.root.join(".github/pull_request_template.md")).unwrap(),
+        "Human review process.\n"
+    );
     assert_eq!(
         fs::read_to_string(kb.root.join("project/registry/owners.toml")).unwrap(),
         owners
+    );
+}
+
+#[test]
+fn init_next_hint_names_every_written_path_outside_project() {
+    let kb = Kb::new();
+    // A kept file is not written, so the hint must not ask to commit it.
+    write(
+        &kb.root.join(".github/pull_request_template.md"),
+        "Human review process.\n",
+    );
+    let root = kb.root.to_str().unwrap();
+    let args = [
+        "--root",
+        root,
+        "init",
+        "--name",
+        "Acme",
+        "--namespace",
+        "acme",
+        "--apply",
+    ];
+    let o = kb.sb.kb(&kb.sb.path(), &args, &[]);
+    assert_ok(&o);
+    let text = common::stdout(&o);
+    let next = text
+        .lines()
+        .find(|l| l.starts_with("next: "))
+        .unwrap_or_else(|| panic!("no next hint in:\n{text}"));
+    assert_eq!(
+        next,
+        "next: review and commit project/, .github/workflows/kb-knowledge.yml, \
+         .gitlab/ci/kb-knowledge.yml and .gitlab/merge_request_templates/Knowledge.md, \
+         then run `./kbw validate`"
     );
 }
 
@@ -486,6 +551,10 @@ fn templates_use_only_documented_placeholders() {
         "snapshot_arg",
         "agents_skill_path",
         "claude_skill_path",
+        "core_source",
+        "core_lines",
+        "core_arg",
+        "managed_instructions",
     ] {
         v.text(k, "x");
     }
@@ -544,7 +613,10 @@ fn generated_skill_front_matter_is_valid_for_every_harness() {
         assert!(skill_dir.join(format!("references/{r}.md")).is_file());
     }
     assert!(text.contains(".kb/kbw context --intent implement"));
-    assert!(text.contains("--skill-protocol 1"));
+    assert!(text.contains(&format!(
+        "--skill-protocol {}",
+        kb::versions::SKILL_PROTOCOL
+    )));
 }
 
 // ---------------------------------------------------------------------------------------
@@ -628,17 +700,14 @@ fn host_install_preserves_user_content_and_second_apply_is_a_no_op() {
     #[cfg(unix)]
     assert_eq!(v["result"]["warnings"], serde_json::json!([]), "{v:#}");
     let a = actions(&v);
-    assert_eq!(a[".claude/skills/kb/SKILL.md"], "create");
+    assert_eq!(a[".agents/skills/kb/SKILL.md"], "create");
     assert_eq!(a[".agents/skills/kb/references/recovery.md"], "create");
     assert_eq!(a["AGENTS.md#kb-instructions"], "create");
     assert_eq!(v["result"]["lock"]["action"], "create");
 
     let bundle = kb.root.join("project/skill-config/generated");
     let skill = fs::read(bundle.join("skills/kb/SKILL.md")).unwrap();
-    assert_eq!(
-        fs::read(host.join(".claude/skills/kb/SKILL.md")).unwrap(),
-        skill
-    );
+    assert!(!host.join(".claude/skills/kb/SKILL.md").exists());
     assert_eq!(
         fs::read(host.join(".agents/skills/kb/SKILL.md")).unwrap(),
         skill
@@ -679,13 +748,13 @@ fn edited_generated_file_or_block_is_a_conflict_until_forced() {
     let pristine = snapshot(&host);
 
     // A hand-edited generated SKILL.md.
-    let skill = host.join(".claude/skills/kb/SKILL.md");
+    let skill = host.join(".agents/skills/kb/SKILL.md");
     let mut edited = fs::read(&skill).unwrap();
     edited.extend_from_slice(b"\nmy local tweak\n");
     fs::write(&skill, &edited).unwrap();
     let o = kb.integrate(&host, &["--apply"]);
     assert_code(&o, "CONFLICT", 45);
-    assert_eq!(actions(&json(&o))[".claude/skills/kb/SKILL.md"], "conflict");
+    assert_eq!(actions(&json(&o))[".agents/skills/kb/SKILL.md"], "conflict");
     assert_eq!(
         fs::read(&skill).unwrap(),
         edited,
@@ -784,7 +853,7 @@ fn check_detects_drift_after_the_bundle_changes() {
     kb.regenerate();
     let o = kb.integrate(&host, &["--check"]);
     assert_code(&o, "DRIFT_DETECTED", 42);
-    assert_eq!(actions(&json(&o))[".claude/skills/kb/SKILL.md"], "update");
+    assert_eq!(actions(&json(&o))[".agents/skills/kb/SKILL.md"], "update");
     assert_ok(&kb.integrate(&host, &["--apply"]));
     assert_ok(&kb.integrate(&host, &["--check"]));
     assert!(
@@ -820,7 +889,7 @@ fn malformed_markers_are_an_error_and_nothing_is_written() {
 fn harness_selection_controls_targets_and_stale_targets_are_removed() {
     let kb = Kb::new();
     kb.init();
-    kb.set_skill("[\"claude\", \"cursor\"]", None);
+    kb.set_skill("[\"claude\"]", None);
     kb.regenerate();
     let host = kb.host("host");
     fs::write(host.join("CLAUDE.md"), CLAUDE_USER).unwrap();
@@ -828,10 +897,9 @@ fn harness_selection_controls_targets_and_stale_targets_are_removed() {
     assert!(host.join(".claude/skills/kb/SKILL.md").is_file());
     assert!(
         !host.join(".agents").exists(),
-        "Cursor reads .claude/skills; no duplicate copy"
+        "one canonical skill is installed"
     );
-    let agents = fs::read_to_string(host.join("AGENTS.md")).unwrap();
-    assert!(agents.contains(".claude/skills/kb/SKILL.md"));
+    assert!(!host.join("AGENTS.md").exists());
     assert!(
         fs::read_to_string(host.join("CLAUDE.md"))
             .unwrap()
@@ -917,7 +985,10 @@ fn skill_status_reports_installed_protocol() {
     let text = fs::read_to_string(&lock).unwrap();
     fs::write(
         &lock,
-        text.replace("skill_protocol = 1", "skill_protocol = 0"),
+        text.replace(
+            &format!("skill_protocol = {}", kb::versions::SKILL_PROTOCOL),
+            "skill_protocol = 0",
+        ),
     )
     .unwrap();
     let s = skill_status(&kb.root, &host).unwrap();
@@ -962,16 +1033,17 @@ fn skill_snapshot_setting_applies_to_every_generated_command() {
 
     // `auto` defers to the host binding: no command selects a snapshot.
     let auto = commands();
-    for f in [
-        "skills/kb/SKILL.md",
-        "blocks/AGENTS.md.block",
-        "blocks/CLAUDE.md.block",
-    ] {
+    for f in ["skills/kb/SKILL.md", "blocks/AGENTS.md.block"] {
         assert!(
             auto.get(f).is_some_and(|c| c.len() >= 2),
             "{f} shows context and impact: {auto:#?}"
         );
     }
+    assert!(
+        fs::read_to_string(gen_dir.join("blocks/CLAUDE.md.block"))
+            .unwrap()
+            .contains("Read `AGENTS.md`")
+    );
     assert!(
         auto.values().flatten().all(|c| !c.contains("--snapshot")),
         "{auto:#?}"

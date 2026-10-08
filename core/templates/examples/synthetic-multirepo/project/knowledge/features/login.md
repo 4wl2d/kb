@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.feature.login"
 kind = "feature"
 title = "Login: sign-in and silent session refresh"

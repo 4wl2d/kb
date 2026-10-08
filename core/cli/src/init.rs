@@ -5,7 +5,8 @@
 //! the project README. An existing `project/project.toml` means the project is already
 //! initialized. The plan also renders the skill bundle (`project/skill-config/generated/`)
 //! so that `kbw integrate --generate --check` passes right after init, and installs the
-//! downstream CI workflow `.github/workflows/kb-knowledge.yml`.
+//! downstream GitHub/GitLab KB CI and review templates: the workflow
+//! `.github/workflows/kb-knowledge.yml` and the files in `KB_REVIEW_FILES`.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -34,6 +35,21 @@ pub const UPSTREAM_TEMPLATE: &str = "core/templates/project/upstream.toml.tmpl";
 /// Downstream KB CI workflow template and its install location.
 pub const KB_CI_TEMPLATE: &str = "core/templates/ci/github/kb-knowledge.yml";
 pub const KB_CI_TARGET: &str = ".github/workflows/kb-knowledge.yml";
+/// Downstream-owned copies; upstream updates never replace them automatically.
+pub const KB_REVIEW_FILES: [(&str, &str); 3] = [
+    (
+        "core/templates/ci/gitlab/kb-knowledge.gitlab-ci.yml",
+        ".gitlab/ci/kb-knowledge.yml",
+    ),
+    (
+        "core/templates/mr/kb_review.md",
+        ".github/pull_request_template.md",
+    ),
+    (
+        "core/templates/mr/kb_review.md",
+        ".gitlab/merge_request_templates/Knowledge.md",
+    ),
+];
 /// The only pre-existing file init replaces.
 pub const PROJECT_README: &str = "project/README.md";
 /// Namespace of every shipped synthetic example.
@@ -344,6 +360,9 @@ pub fn plan(kb_root: &Path, opts: &InitOptions) -> Result<InitPlan> {
     };
     let ci = render_one(kb_root, KB_CI_TEMPLATE, &vars)?;
     files.insert(KB_CI_TARGET.to_string(), ci.bytes);
+    for (template, target) in KB_REVIEW_FILES {
+        files.insert(target.into(), render_one(kb_root, template, &vars)?.bytes);
+    }
 
     // Validate what will be written with the same strict parsers the engine uses later.
     let cfg_bytes = files
@@ -373,7 +392,7 @@ pub fn plan(kb_root: &Path, opts: &InitOptions) -> Result<InitPlan> {
         .or_else(|| files.get(&skill_path))
         .ok_or_else(|| KbError::internal(format!("templates did not produce `{skill_path}`")))?;
     let skill = parse_skill_config(&skill_path, skill_bytes)?;
-    let bundle = render_bundle(kb_root, &config, &skill)?;
+    let bundle = render_bundle(kb_root, &config, &skill, &loc)?;
     let gen_dir = generated_dir(&loc);
     for (rel, bytes) in bundle.all_files()? {
         files.insert(format!("{gen_dir}/{rel}"), bytes);

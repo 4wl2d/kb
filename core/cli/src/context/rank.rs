@@ -91,6 +91,7 @@ pub fn kind_prior(kind: Kind, intent: Intent) -> i64 {
         Intent::Implement => 0,
         Intent::Refactor => 1,
         Intent::Debug => 2,
+        Intent::Diagnose => 2,
         Intent::Review => 3,
         Intent::Explain => 4,
     };

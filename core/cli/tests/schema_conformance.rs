@@ -93,22 +93,34 @@ fn generated_schemas_are_valid_draft_2020_12_with_kb_ids() {
         "upstream",
         "release-manifest",
         "cli-envelope",
+        "code-request",
+        "code-response",
     ]
     .into_iter()
     .collect();
     let names: BTreeSet<String> = all.keys().cloned().collect();
-    let want: BTreeSet<String> = expected
+    let mut want: BTreeSet<String> = expected
         .iter()
         .map(|n| format!("{n}.v1.schema.json"))
         .collect();
+    want.extend(
+        expected
+            .iter()
+            .filter(|n| **n == "record" || **n == "project" || n.starts_with("registry-"))
+            .map(|n| format!("{n}.v2.schema.json")),
+    );
+    want.insert("registry-change-types.v2.schema.json".into());
     assert_eq!(names, want);
     for (file, text) in &all {
         assert!(text.ends_with("}\n"), "{file} must end with a newline");
         let v: Value = serde_json::from_str(text).unwrap();
         jsonschema::meta::validate(&v).unwrap_or_else(|e| panic!("{file}: {e}"));
         jsonschema::validator_for(&v).unwrap_or_else(|e| panic!("{file}: {e}"));
-        let name = file.trim_end_matches(".v1.schema.json");
-        assert_eq!(v["$id"], json!(format!("kb:schema/{name}/v1")));
+        let (name, version) = file
+            .trim_end_matches(".schema.json")
+            .rsplit_once('.')
+            .unwrap();
+        assert_eq!(v["$id"], json!(format!("kb:schema/{name}/{version}")));
         assert_eq!(
             v["$schema"],
             json!("https://json-schema.org/draft/2020-12/schema")

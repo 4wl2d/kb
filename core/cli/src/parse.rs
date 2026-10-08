@@ -12,6 +12,8 @@ use crate::model::record::*;
 use crate::util::check_rel_path;
 use crate::versions::DOCUMENT_SCHEMA;
 
+mod evolution;
+
 /// Maximum size of a record file.
 pub const MAX_RECORD_BYTES: usize = 512 * 1024;
 /// Maximum size of front matter.
@@ -87,7 +89,8 @@ pub fn parse_record(path: &str, bytes: &[u8]) -> ParseResult {
     let table: toml::Table =
         toml::from_str(fm).map_err(|e| toml_diag("FRONT_MATTER_SYNTAX", &e))?;
     match table.get("schema") {
-        Some(toml::Value::Integer(v)) if *v == DOCUMENT_SCHEMA as i64 => {}
+        Some(toml::Value::Integer(v))
+            if u32::try_from(*v).is_ok_and(crate::versions::supports_document_schema) => {}
         Some(toml::Value::Integer(v)) => {
             return Err(diag(
                 "UNSUPPORTED_SCHEMA_VERSION",
@@ -127,6 +130,14 @@ pub fn parse_record(path: &str, bytes: &[u8]) -> ParseResult {
         None => return Err(diag("KIND_MISSING", "missing `kind` field".into())),
     };
     // Pass 2: strict typed parse of the same text (span-aware errors).
+    if table.get("schema").and_then(toml::Value::as_integer) == Some(1)
+        && let Some(field) = evolution::schema_two_field(&table)
+    {
+        return Err(diag(
+            "SCHEMA_FIELD_UNAVAILABLE",
+            format!("`{field}` requires schema 2; run `kb migrate`"),
+        ));
+    }
     let record = parse_kind(kind, fm).map_err(|e| toml_diag("FRONT_MATTER_INVALID", &e))?;
     let sections = split_sections(body).map_err(|e| diag("BODY_INVALID", e))?;
     let mut problems = check_record(&record);
@@ -369,7 +380,7 @@ fn contains_word(hay: &str, word: &str) -> bool {
 
 /// Context-free semantic checks of one record.
 pub fn check_record(r: &Record) -> Vec<Diagnostic> {
-    let mut d = Vec::new();
+    let mut d = evolution::check(r);
     let c = r.common();
     let err =
         |d: &mut Vec<Diagnostic>, code: &str, msg: String| d.push(Diagnostic::error(code, msg));

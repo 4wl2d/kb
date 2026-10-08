@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.procedure.add-api-schema"
 kind = "procedure"
 title = "Add or change an API schema"

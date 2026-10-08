@@ -9,9 +9,12 @@ data, and nothing here is indexed as knowledge.
 | `project/` | `kbw init` | project skeleton rendered into `project/` |
 | `records/<kind>.md` | authors | one valid record per kind (policy, feature, invariant, contract, decision, procedure, reference, gap) with placeholder text |
 | `ci/github/kb-knowledge.yml` | `kbw init` | downstream KB CI, installed as `.github/workflows/kb-knowledge.yml` |
+| `ci/gitlab/kb-knowledge.gitlab-ci.yml` | `kbw init` | `.gitlab/ci/kb-knowledge.yml`, explicitly included by the team's entrypoint |
 | `ci/github/host-kb-impact.yml` | host repositories | host CI: KB submodule checkout, `kbw impact --snapshot pinned --check` (re-run when the description is edited), `kbw integrate --check` |
-| `ci/gitlab/*.gitlab-ci.yml` | GitLab users | equivalents of both workflows |
-| `mr/*_template.md` | host and KB repositories | merge request templates with the `kb-impact` block and the linked-MR checklist |
+| `ci/*/host-kb-verify*`, `ci/hooks/commit-msg` | host repositories | opt-in declarative checks on committed or staged input |
+| `ci/*/host-knowledge-from-change*`, CI glue `*.sh` | teams enabling accrual | merged-change export, draft validation and separately authorized publication |
+| `mr/*_template.md` | host repositories | knowledge learned, `kb-impact`, linked-MR checklist and optional evaluation labels |
+| `mr/kb_review.md` | `kbw init` | KB GitHub/GitLab review templates with the evidence ladder and named reviewer |
 | `ownership/CODEOWNERS.tmpl` | downstream KB | code owners; organization handles are explicit parameters |
 | `security/SECURITY.md.tmpl` | downstream KB | security policy, published as `.github/SECURITY.md` (GitHub prefers it over the engine-owned root `SECURITY.md`); the contact is an explicit parameter |
 | `examples/synthetic-multirepo/` | `kbw init --example synthetic-multirepo` | SYNTHETIC demo project with routing tests and expected queries |
@@ -43,3 +46,8 @@ Parameters of the adapt-by-hand templates: `ownership/CODEOWNERS.tmpl` uses
 set `KB_PATH` in the host workflows instead.
 
 The skill templates live in `core/skills/` and are rendered by `kbw integrate --generate`.
+New records/project registries use schema 2; routing and skill configuration retain schema
+1. Subsystem, checklist and glossary groups are ordinary directories with existing record
+kinds. The [CI guide](ci/README.md) explains pinned host inputs, strict evidence checks,
+team-owned model wrappers, credential separation and opt-in publishing. Init preserves
+existing templates and never enables a paid job or a protected publication environment.

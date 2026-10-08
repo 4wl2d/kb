@@ -5,7 +5,10 @@
       "enum": [
         "claude",
         "codex",
-        "cursor"
+        "cursor",
+        "grok",
+        "copilot",
+        "junie"
       ],
       "type": "string"
     },
@@ -15,7 +18,8 @@
         "refactor",
         "debug",
         "review",
-        "explain"
+        "explain",
+        "diagnose"
       ],
       "type": "string"
     },

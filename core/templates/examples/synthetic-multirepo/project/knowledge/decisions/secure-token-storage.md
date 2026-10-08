@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.decision.secure-token-storage"
 kind = "decision"
 title = "Keep refresh tokens in the platform keystore"

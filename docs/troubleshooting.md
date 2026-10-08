@@ -23,12 +23,14 @@ scope: each of those changes what the answer means, so say so when you do it.
 | `DRIFT_DETECTED` (42), `CONFLICT` (45) | [drift](#drift_detected), [conflict](#conflict) |
 | `ENGINE_DIVERGED` (43) | [engine divergence](#engine_diverged) |
 | `IMPACT_UNACKNOWLEDGED` (44) | [impact](#impact_unacknowledged) |
+| the host commit-msg hook rejects commits or never runs | [commit-msg hook](#commit-msg-hook) |
 | `UNSUPPORTED_SCHEMA_VERSION` (13), `MIGRATION_FAILED` (52) | [schema versions](#unsupported_schema_version-and-migration_failed) |
 | `RUNTIME_INCOMPATIBLE` (50) | [runtime mismatch](#runtime_incompatible) |
 | `UPDATE_CONFLICT` (51), `UPDATE_FAILED` (53) | [upstream update](#update_conflict-and-update_failed) |
 | `INDEX_ERROR` (61), `INDEX_RECOVERED`, `IO_ERROR` (62) | [index](#index_error-and-index-recovery) |
 | `kbw: error[KBW_...]` (exit 50) | [launcher](#launcher-errors) |
 | bundled SQLite fails to compile on macOS | [SDKROOT](#macos-bundled-sqlite-build-cannot-find-system-headers) |
+| `kb-eval` replay: `isolation canary failed` on Linux | [replay isolation](#kb-eval-isolation-canary-failed-on-linux) |
 | no network | [offline recovery](#offline-recovery) |
 
 ## PROJECT_NOT_INITIALIZED
@@ -64,6 +66,17 @@ scope: each of those changes what the answer means, so say so when you do it.
   --branch` outside `kb-update/`, `integrate` run where no host repository can be found
   (run it inside the host or pass `--host <dir>`), or `doctor --online` together with
   `--offline` (nothing is fetched; drop one of them).
+* `capture` with `--anchor` or `--test-anchor REPO:PATH@REV` fails with `anchor revision <X>
+  is missing` (64): the text after the last `@` is not a commit in that repository's
+  checkout. A path that itself contains `@` (`icon@2x.png`, `@types/...`) must exist at
+  `HEAD` or end with an explicit `@REV`, for example
+  `--anchor mobile:assets/icon@2x.png@HEAD`.
+* `context` no longer fails with `INVALID_INPUT` when a task names too many files or the
+  host patch exceeds a Git adapter bound (8 MiB, the 30 s Git deadline or 1 MiB of Git
+  diagnostics); it reports discovery issues instead (see
+  [context incomplete](#context_incomplete)). `propose begin` still fails closed when the
+  range's patch exceeds one of those bounds, because the patch is the work order's primary
+  input: narrow the range.
 
 ## FRESHNESS_UNVERIFIED
 
@@ -126,7 +139,7 @@ Two different causes share this code; `details` tells them apart.
 
 ## SKILL_OUTDATED
 
-* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 1` (exit 23), `details = {"caller": 99, "engine": 1}`.
+* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 2` (exit 23), `details = {"caller": 99, "engine": 2}`.
 * **Cause**: generated skills pass `--skill-protocol <n>`; the KB's engine changed the skill
   protocol since the agent loaded its instructions.
 * **Fix**: re-read the installed `SKILL.md` (or start a new session so the harness reloads
@@ -147,12 +160,26 @@ Two different causes share this code; `details` tells them apart.
 | `NOT_APPROVED` | the selected revision is not reachable from the approved tip; merge it through review or select `latest`/`pinned` |
 | `APPROVAL_UNKNOWN` | no approved tip is known to compare with; run once online (`./kbw sync`) |
 | `REPO_UNKNOWN` | pass `--repo <id>`, or make the host identifiable: a registry `remotes` entry matching the host's remote URL, or `repo = "<id>"` in the host's `.kbw.toml` |
-| `UNDETERMINED_OBLIGATIONS` | name what you change: `--path <file>` (a directory that maps to no module gives the warning `PATH_SCOPE_UNKNOWN`), `--module`, `--feature`; `undetermined[]` lists the obligations that may apply |
+| `DIAGNOSE_SCOPE_PROVISIONAL` | path-free diagnosis only proposes candidate knowledge; confirm the files involved and re-run `context` with `--path`/`--module` or `--changed` before editing |
+| `AS_OF_UNDATED` | `--as-of` withheld accepted records without an `introduced` bound (`--explain` lists them); add `introduced` dates or commits through review, or treat the slice as partial |
+| `AS_OF_BOUND_UNRESOLVED` | `--as-of` withheld accepted records scoped to other repositories, because their commit bounds cannot be resolved in this host (`--explain` lists the temporal exclusions); replay from the repository those records name, or give cross-repository knowledge date bounds in the KB through review |
+| `UNDETERMINED_OBLIGATIONS` | name what you change: `--path <file>` (a directory that maps to no module gives the warning `PATH_SCOPE_UNKNOWN`), `--module`, `--feature`, or `--changed`; filenames and symbols named in `--task` (reported in `scope.inferred_paths`) never establish module scope on their own; `undetermined[]` lists the obligations that may apply |
 | `DEPENDENCY_VERSION_UNDETERMINED` | pass `--host-version <repo>=<x.y.z>` for the repo named in the message (only the identified host repo's version is read automatically, from its registry `version_file`) |
 | `SETTING_CONFLICT` | the most specific applicable overrides of one setting (none strictly more specific than another) disagree; narrow the scope, and fix the overrides in the KB through review (`validate` reports them as `OVERRIDE_AMBIGUOUS`) |
 | `INCOMPATIBLE_DEPENDENCY` | a required record does not apply to the host version; check `--host-version`, then fix `applicability` or `requires` in the KB |
 | `REQUIRES_MISSING`, `REQUIRES_NOT_ACCEPTED` | a required record is missing, `draft` or `superseded`: the knowledge base is defective; report it; maintainers fix it and `validate` catches it. A `deprecated` required record is delivered with label `deprecated` and the warning `REQUIRES_DEPRECATED` in `issues` and does not lower completeness |
 | `SNAPSHOT_INVALID` | the snapshot has validation errors; run `./kbw validate` (add `--snapshot <rev>` to check that revision) and fix them through review |
+
+Discovery from `--task` and from the host diff reports these entries in `issues`; they do
+not change the status by themselves and replace the former `INVALID_INPUT` errors for a
+task that names too many files and for a host patch over a Git adapter bound:
+
+| issue | meaning | fix |
+|---|---|---|
+| `IDENTIFIER_AMBIGUOUS` (info) | a filename or symbol named in the task matches more than 8 files and supplies no candidate paths | name the file with `--path` |
+| `INFERRED_PATHS_TRUNCATED` (warning) | the task named more than 64 files (the message gives the count); only the first 64 by path are listed and ranked, and all of them still add their modules and features to the scope | name the files with `--path` |
+| `CHANGED_TEXT_SKIPPED` (info) | the host patch exceeded a Git adapter bound (8 MiB, the 30 s Git deadline or 1 MiB of Git diagnostics; the message names it); changed-text change-type hints were skipped | pass `--change-type` for explicit categories |
+| `TRACKED_NAMES_SKIPPED` (info) | tracked filenames that are not UTF-8 or not safe relative paths were not used for discovery | name what you change with `--path` or `--module` |
 
 ## CONTEXT_BUDGET_EXCEEDED
 
@@ -228,6 +255,31 @@ is `INVALID_INPUT` (64) and fetches nothing.
   regenerate, then `integrate --apply`. Only when the edits may be discarded, `integrate
   --apply --force`. Agents must not pass `--force` on their own.
 
+`propose submit` exits 45 when the submission would duplicate or overwrite knowledge;
+nothing is written:
+
+* **The id already exists elsewhere**: at several local paths, or at one local path while
+  the selected snapshot has it at a different path. Submission never creates a second
+  copy; resolve the duplicate through review first.
+* **`<path> is committed with text that differs from the approved record in the selected snapshot`**:
+  usually a draft that revises an already approved record on an unmerged KB proposal
+  branch. Submit from that branch with `--snapshot working-tree --offline`, so the branch's
+  own records are the base (see [knowledge-lifecycle.md](knowledge-lifecycle.md#find-the-gaps-and-prepare-a-draft));
+  otherwise update the KB checkout to the selected snapshot.
+* **`the KB checkout does not contain the approved record <path> from the selected snapshot`**:
+  the checkout is clean but behind the snapshot, for example a proposal branch created
+  before that record was accepted. Update the KB checkout to the selected snapshot, then
+  submit again.
+* **`<path> has uncommitted changes`**: edit and validate that draft file directly.
+* **`<path> has local changes; submission will not overwrite them`**: the destination
+  differs from HEAD in a way Git has not recorded, for example the record file was deleted
+  from the working tree while HEAD still has it, or the KB checkout has no commit yet. It
+  also appears when the default draft path already holds a file that is not this record.
+  Restore or commit that change (or move the file) first.
+* **`identical knowledge already exists under another id`**: revise the existing record
+  (`details.duplicates`).
+* **`<path> changed after validation`** (on `--apply`): run the submission again.
+
 ## ENGINE_DIVERGED
 
 * **Symptom**: `update divergence` exits 43: `N engine-owned path(s) diverge from upstream <rev>`, `details.diverged[]` = `{path, status}`; `doctor` shows `engine` as a warning.
@@ -266,6 +318,37 @@ is `INVALID_INPUT` (64) and fetches nothing.
   `IMPACT_UNACKNOWLEDGED` with `--check`, `INVALID_INPUT` without. kb checks presence and
   shape only; reviewers judge the reasoning. On GitLab, editing the description does not
   start a pipeline; re-run the merge request pipeline after fixing the block.
+
+## commit-msg hook
+
+The optional host hook `core/templates/ci/hooks/commit-msg` (see
+[downstream.md](downstream.md#6-ci-and-merge-request-templates)) runs `verify --only
+commit-message --only branch-name` on the index Git is committing and the pending message,
+and exits with verify's code.
+
+* **Which KB revision it reads**: `KB_SNAPSHOT`, when set, is passed as-is. Otherwise, if
+  `.kbw.toml` at the host root declares a `selection` key, the hook passes `auto` (the
+  engine honors that selection). Otherwise, if the host pins the KB (`HEAD` has a gitlink,
+  mode `160000`, at the KB path, or `.kbw.toml` declares `pin`), the hook passes `pinned`.
+  Otherwise it passes `auto` (the approved tip). `KB_OFFLINE=1` adds `--offline`.
+* **`FRESHNESS_UNVERIFIED` (20) while offline**: set `KB_OFFLINE=1`; host CI still verifies
+  freshness.
+* **`UPDATE_REQUIRED` (21), `SNAPSHOT_NOT_FOUND` (22)**: the same causes as for any reading
+  command ([update required](#update_required), [snapshot not found](#snapshot_not_found)).
+  Without `KB_SNAPSHOT` or a `.kbw.toml` `selection`, the rule above never asks for a pin
+  the host lacks, nor for `auto` while a pin exists.
+* **A message rejected although CI accepts it**: Git runs the hook before it cleans the
+  message up, so the hook cleans it as Git will (scissors cut, comments stripped when Git
+  strips them). When `GIT_EDITOR` is exactly `:` the hook cannot tell whether Git will strip
+  comments, so it checks both the whitespace-cleaned and the comment-stripped message and
+  rejects only if both fail (CI on the committed message stays authoritative). A message
+  of only comments is checked whitespace-cleaned, because Git aborts an empty message, so
+  it is rejected when the comment lines fail the pattern. The `git commit --cleanup=<mode>`
+  and `--allow-empty-message` flags are invisible to hooks. To skip the editor, use
+  `GIT_EDITOR=true`, not `:`.
+* **The hook never runs**: it usually lacks the executable bit. The template is mode
+  `100755`; keep that mode when installing it (`chmod +x`), in the directory Git reads hooks
+  from (`git config core.hooksPath`, default `.git/hooks`).
 
 ## UNSUPPORTED_SCHEMA_VERSION and MIGRATION_FAILED
 
@@ -388,6 +471,29 @@ cargo test --workspace --locked
 
 `./kbw --kbw-bootstrap` (and `--kbw-package`) sets `SDKROOT` this way automatically on macOS
 when it is unset and `xcrun` is available.
+
+## kb-eval: isolation canary failed on Linux
+
+* **Symptom**: a `kb-eval` stage, or the upstream CI replay isolation smoke, fails with
+  `isolation canary failed; no agent was started`, and the probe stderr it quotes contains
+  `bwrap: setting up uid map: Permission denied` or `loopback: Failed RTM_NEWADDR`.
+* **Cause**: Ubuntu's AppArmor restriction on unprivileged user namespaces
+  (`kernel.apparmor_restrict_unprivileged_userns = 1`, for example on Ubuntu 24.04) stops
+  bubblewrap from setting up its namespaces. The replay kit fails closed; it never runs a
+  stage unsandboxed.
+* **Fix** (an administrator action): grant `userns` to bubblewrap alone with a binary-scoped
+  AppArmor profile, as the upstream CI does, then check that the probe succeeds:
+
+  ```sh
+  printf '%s\n' 'abi <abi/4.0>,' 'include <tunables/global>' \
+    'profile kb-eval-bwrap /usr/bin/bwrap flags=(unconfined) {' '  userns,' '}' \
+    | sudo tee /etc/apparmor.d/kb-eval-bwrap >/dev/null
+  sudo apparmor_parser -r /etc/apparmor.d/kb-eval-bwrap
+  bwrap --unshare-all --die-with-parent --ro-bind / / /bin/true
+  ```
+
+  Never lower the host-wide sysctl to make a run pass. See
+  [core/eval/README.md](../core/eval/README.md#isolation-and-execution).
 
 ## Offline recovery
 

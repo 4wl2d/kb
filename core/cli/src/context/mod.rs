@@ -12,7 +12,12 @@
 //! [`show`] modules.
 
 mod applicability;
+pub mod code;
+pub mod delivery;
+pub mod discovery;
+pub(crate) mod lexical;
 pub mod memory;
+pub mod outline;
 mod pack;
 mod present;
 mod rank;
@@ -21,6 +26,7 @@ pub mod search;
 mod settings;
 pub mod show;
 mod task;
+pub mod temporal;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -37,10 +43,13 @@ use crate::model::{BudgetUnit, Intent, Kind, ParsedRecord, RecordMeta, Section, 
 use crate::output::Format;
 use crate::util::sha256_hex;
 
+pub use applicability::evaluate as evaluate_applicability;
+pub use applicability::evaluate_saved_scope;
 pub use applicability::{Applicability, Dim, Verdict};
 pub use pack::{estimate_tokens, measure};
 pub use rank::{MIN_SCORE, Signal, SignalKind, kind_prior, mentioned_ids};
 pub use settings::{EffectiveSetting, SettingSource};
+pub use task::resolve as resolve_scope;
 pub use task::{
     Ambiguity, DimScope, MAX_PATHS, MAX_SCOPE_IDS, MAX_TASK_BYTES, ResolvedPath, TaskScope,
 };
@@ -72,14 +81,22 @@ impl SectionsMode {
 /// A context request (CLI options of `kb context`).
 #[derive(Debug, Clone)]
 pub struct ContextRequest {
+    pub stale: Option<u32>,
     pub intent: Intent,
     pub task: Option<String>,
     pub repos: Vec<String>,
     /// Host-relative paths or `repo:path`.
     pub paths: Vec<String>,
+    /// Host-relative paths of a host diff (new and old names). Bounded by the diff, not by
+    /// the `--path` limit; reported with `paths` in the result's `request.paths`.
+    pub changed_paths: Vec<String>,
     pub modules: Vec<String>,
     pub features: Vec<String>,
     pub concepts: Vec<String>,
+    /// Explicit, exhaustive change categories. Empty means unknown, not no change.
+    pub change_types: Vec<String>,
+    pub as_of: Option<temporal::AsOf>,
+    pub change: Option<ChangeScope>,
     /// Budget (default: profile `context.default_budget`).
     pub budget: Option<u64>,
     /// Budget unit (default: profile `context.default_budget_unit`).
@@ -95,13 +112,18 @@ pub struct ContextRequest {
 impl ContextRequest {
     pub fn new(intent: Intent) -> ContextRequest {
         ContextRequest {
+            stale: None,
             intent,
             task: None,
             repos: Vec::new(),
             paths: Vec::new(),
+            changed_paths: Vec::new(),
             modules: Vec::new(),
             features: Vec::new(),
             concepts: Vec::new(),
+            change_types: Vec::new(),
+            as_of: None,
+            change: None,
             budget: None,
             budget_unit: None,
             include_proposals: false,
@@ -110,12 +132,31 @@ impl ContextRequest {
             host_versions: Vec::new(),
         }
     }
+
+    /// The result's `request.paths`: `paths`, or the sorted union of `paths` and
+    /// `changed_paths` when a diff supplied paths.
+    pub fn all_paths(&self) -> Vec<String> {
+        if self.changed_paths.is_empty() {
+            return self.paths.clone();
+        }
+        let all: BTreeSet<&String> = self.paths.iter().chain(&self.changed_paths).collect();
+        all.into_iter().cloned().collect()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ChangeScope {
+    pub base: String,
+    pub merge_base: String,
+    pub head: Option<String>,
+    pub working_tree: bool,
 }
 
 /// Facts about the invocation environment gathered by adapters (host detection, snapshot
 /// selection). Context assembly never probes the environment itself.
 #[derive(Debug, Clone)]
 pub struct TaskEnv {
+    pub reference_date: Option<crate::freshness::ReferenceDate>,
     /// Registry repo id of the host repository, when identified.
     pub host_repo: Option<String>,
     /// How the host repo was identified (`argument`, `binding-file`, `remote`).
@@ -125,17 +166,59 @@ pub struct TaskEnv {
     /// Host code versions read from registry `version_file`s.
     pub host_versions: BTreeMap<String, semver::Version>,
     pub snapshot: SnapshotInfo,
+    /// Tracked file candidates supplied by a host/provider adapter, not filesystem reads.
+    pub inferred_paths: Vec<String>,
+    pub inferred_features: Vec<String>,
+    /// Paths proved to be files by a Git diff/listing, including extensionless files.
+    pub known_files: BTreeSet<String>,
+    /// A complete diff was supplied, even if it contained no ordinary files.
+    pub changed_scope: bool,
+    /// Zero-context patch from the selected host diff; used only as lexical evidence.
+    pub changed_text: String,
+    /// Adapter findings about the supplied facts (skipped names, dropped lexical evidence),
+    /// reported in the result's `issues`.
+    pub notes: Vec<Diagnostic>,
+    pub code_info: Option<code::CodeInfo>,
+    pub code_units: Vec<code::CodeEvidence>,
+    pub delivery: delivery::DeliveryState,
 }
 
 impl TaskEnv {
     /// An environment without host information.
     pub fn new(snapshot: SnapshotInfo) -> TaskEnv {
         TaskEnv {
+            reference_date: None,
             host_repo: None,
             host_repo_source: None,
             host_head: None,
             host_versions: BTreeMap::new(),
             snapshot,
+            inferred_paths: Vec::new(),
+            inferred_features: Vec::new(),
+            known_files: BTreeSet::new(),
+            changed_scope: false,
+            changed_text: String::new(),
+            notes: Vec::new(),
+            code_info: None,
+            code_units: Vec::new(),
+            delivery: delivery::DeliveryState::default(),
+        }
+    }
+
+    /// Use the patch text of the selected host diff as lexical evidence. An error (the patch
+    /// exceeded a bound of the adapter, described by its `Display`) skips the changed-text
+    /// hints with a note: they only add change-type candidates, so their absence never prunes
+    /// an obligation.
+    pub fn set_changed_text(&mut self, text: std::result::Result<String, impl std::fmt::Display>) {
+        match text {
+            Ok(text) => self.changed_text = text,
+            Err(limit) => self.notes.push(Diagnostic::info(
+                "CHANGED_TEXT_SKIPPED",
+                format!(
+                    "the host patch {limit}; changed-text identifier hints were skipped (pass \
+                     --change-type for explicit categories)"
+                ),
+            )),
         }
     }
 }
@@ -218,6 +301,8 @@ impl Tier {
 /// Content of a unit.
 #[derive(Debug, Clone)]
 pub enum UnitBody {
+    /// Static provider evidence, never an accepted knowledge record or obligation.
+    Code(Box<code::CodeEvidence>),
     /// A record core: all typed normative content.
     Record(Arc<ParsedRecord>),
     /// One optional Markdown section, verbatim.
@@ -229,6 +314,8 @@ pub enum UnitBody {
 /// A whole unit of output; units are never truncated.
 #[derive(Debug, Clone)]
 pub struct Unit {
+    pub reuse: Option<delivery::Reuse>,
+    pub content_digest: Option<String>,
     pub tier: Tier,
     /// Unique unit key: the record id; `proposal:<id>` for proposal units; `<unit id>#<section>`
     /// for section units.
@@ -251,6 +338,30 @@ pub struct Unit {
 }
 
 impl Unit {
+    fn code(evidence: code::CodeEvidence) -> Self {
+        let key = format!(
+            "{}:{}:{}",
+            evidence.repo, evidence.commit, evidence.symbol.id
+        );
+        let id = format!("code:{}", sha256_hex(key.as_bytes()));
+        Self {
+            reuse: None,
+            content_digest: None,
+            tier: Tier::Supplementary,
+            id: id.clone(),
+            record_id: id,
+            kind: Kind::Reference,
+            title: evidence.symbol.name.clone(),
+            status: Status::Draft,
+            origin: Origin::Proposal,
+            path: evidence.symbol.path.clone(),
+            why: evidence.reason.clone(),
+            labels: vec!["non-normative-code-evidence".into()],
+            score: None,
+            signals: Vec::new(),
+            body: UnitBody::Code(Box::new(evidence)),
+        }
+    }
     fn record(
         tier: Tier,
         entry: &MetaEntry,
@@ -259,6 +370,8 @@ impl Unit {
         labels: Vec<String>,
     ) -> Unit {
         Unit {
+            reuse: None,
+            content_digest: None,
             tier,
             id: entry.meta.id.clone(),
             record_id: entry.meta.id.clone(),
@@ -283,6 +396,8 @@ impl Unit {
             .sections
             .iter()
             .map(|s| Unit {
+                reuse: None,
+                content_digest: None,
                 tier: Tier::Section,
                 id: format!("{}#{}", self.id, s.id),
                 record_id: self.record_id.clone(),
@@ -319,6 +434,7 @@ pub struct UndeterminedEntry {
 /// Why a candidate is not in the output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ExcludedReason {
+    Temporal,
     /// Did not fit into the remaining budget.
     Budget,
     /// Beyond the `max_supplementary` cap.
@@ -335,6 +451,7 @@ pub enum ExcludedReason {
 impl ExcludedReason {
     pub fn as_str(self) -> &'static str {
         match self {
+            ExcludedReason::Temporal => "temporal",
             ExcludedReason::Budget => "budget",
             ExcludedReason::MaxSupplementary => "max-supplementary",
             ExcludedReason::BelowMinScore => "below-min-score",
@@ -412,6 +529,7 @@ pub struct BudgetReport {
 /// Receipt summary and budget (the last counted piece of the payload).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Footer {
+    pub snapshot_digest: Option<String>,
     /// `sha256:<hex>` of the canonical deterministic result (`to_json(result, false)`)
     /// without this field; see [`receipt_id_of`].
     pub receipt_id: String,
@@ -426,6 +544,10 @@ pub struct Footer {
 /// Everything rendered before the units.
 #[derive(Debug, Clone)]
 pub struct Header {
+    pub reference_date: Option<crate::freshness::ReferenceDate>,
+    pub pruned_change_types: Vec<String>,
+    pub delivery: delivery::DeliveryState,
+    pub code_info: Option<code::CodeInfo>,
     pub request: ContextRequest,
     /// Effective cap on supplementary records.
     pub max_supplementary: usize,
@@ -715,6 +837,24 @@ pub fn assemble(
     view: &dyn KnowledgeView,
     format: Format,
 ) -> Result<ContextResult> {
+    if env.snapshot.content_digest.is_none()
+        && (env.delivery.since_receipt.is_some() || env.delivery.core_receipt.is_some())
+    {
+        return Err(KbError::invalid_input(
+            "delivery reuse requires a snapshot content digest",
+        ));
+    }
+    if req.as_of.is_some() && req.include_proposals {
+        return Err(KbError::invalid_input(
+            "historical context cannot include proposal overlays",
+        ));
+    }
+    let temporal = req
+        .as_of
+        .as_ref()
+        .map(|point| temporal::TemporalView::new(view, point))
+        .transpose()?;
+    let view: &dyn KnowledgeView = temporal.as_ref().map_or(view, |v| v);
     let cfg = view.config().context.clone();
     let limit = req.budget.unwrap_or(cfg.default_budget);
     let unit = req.budget_unit.unwrap_or(cfg.default_budget_unit);
@@ -728,13 +868,68 @@ pub fn assemble(
         )));
     }
     let registry = view.registry();
-    let mut task = task::resolve(req, env, registry)?;
+    let mut scoped_env = env.clone();
+    if req.intent == Intent::Diagnose {
+        let tokens = crate::normalize::tokens(req.task.as_deref().unwrap_or_default());
+        for candidate in view.term_candidates(&req.concepts, &tokens)? {
+            if candidate.meta.status != Status::Accepted {
+                continue;
+            }
+            if let Some(id) = &candidate.meta.feature {
+                scoped_env.inferred_features.push(id.clone());
+            }
+            if matches!(candidate.meta.kind, Kind::Feature | Kind::Gap) {
+                scoped_env
+                    .inferred_features
+                    .extend(candidate.meta.scope.features.clone());
+            }
+        }
+        scoped_env.inferred_features.sort();
+        scoped_env.inferred_features.dedup();
+    }
+    let mut task = task::resolve(req, &scoped_env, registry)?;
     let mut f = Findings::default();
+    if let Some(slice) = &temporal
+        && slice.undated_accepted > 0
+    {
+        f.reason(
+            Completeness::Partial,
+            "AS_OF_UNDATED",
+            false,
+            &format!(
+                "withheld {} accepted record(s) without introduced evidence; see --explain",
+                slice.undated_accepted
+            ),
+        );
+    }
+    if let Some(slice) = &temporal
+        && slice.unresolved_accepted > 0
+    {
+        f.reason(
+            Completeness::Partial,
+            "AS_OF_BOUND_UNRESOLVED",
+            false,
+            &format!(
+                "withheld {} accepted record(s) scoped to other repositories whose commit \
+                 bounds cannot be resolved in this host; see --explain",
+                slice.unresolved_accepted
+            ),
+        );
+    }
+    if req.intent == Intent::Diagnose
+        && req.paths.is_empty()
+        && req.modules.is_empty()
+        && !env.changed_scope
+    {
+        f.reason(Completeness::Partial, "DIAGNOSE_SCOPE_PROVISIONAL", false,
+            "path-free diagnosis supplies candidate subsystem knowledge; confirm paths before editing");
+    }
     f.issues.extend(task.notes.iter().cloned());
 
     // Mandatory selection: accepted obligations whose applicability is Applies.
     let mut chosen: BTreeMap<String, Chosen> = BTreeMap::new();
     let mut undetermined: BTreeMap<String, (MetaEntry, Applicability)> = BTreeMap::new();
+    let mut pruned_changes = Vec::new();
     for e in view.metas_by_kind(&Kind::MANDATORY, Origin::Accepted)? {
         if e.meta.status != Status::Accepted || chosen.contains_key(&e.meta.id) {
             continue;
@@ -756,7 +951,16 @@ pub fn assemble(
             Verdict::Undetermined => {
                 undetermined.insert(e.meta.id.clone(), (e, app));
             }
-            Verdict::NotApplicable => {}
+            Verdict::NotApplicable => {
+                if app.not_applicable.contains(&Dim::ChangeTypes) {
+                    pruned_changes.push(Excluded {
+                        id: e.meta.id.clone(),
+                        reason: ExcludedReason::NotApplicable,
+                        score: None,
+                        detail: app.describe(),
+                    });
+                }
+            }
         }
     }
     let applying_policies: Vec<Arc<RecordMeta>> = chosen
@@ -810,6 +1014,25 @@ pub fn assemble(
     let supp = rank::supplementary(view, &input, &mut ambiguities)?;
     task.ambiguities = ambiguities;
     let mut excluded = supp.excluded;
+    let pruned_change_types: Vec<_> = pruned_changes
+        .iter()
+        .filter(|p| !chosen.contains_key(&p.id))
+        .map(|p| p.id.clone())
+        .collect();
+    for pruned in pruned_changes
+        .into_iter()
+        .filter(|p| !chosen.contains_key(&p.id))
+    {
+        if !excluded
+            .iter()
+            .any(|e| e.id == pruned.id && e.reason == pruned.reason)
+        {
+            excluded.push(pruned);
+        }
+    }
+    if let Some(slice) = &temporal {
+        excluded.extend(slice.excluded.clone());
+    }
 
     // Content of mandatory-tier and supplementary records.
     let mut ids: Vec<String> = chosen.keys().cloned().collect();
@@ -872,6 +1095,10 @@ pub fn assemble(
         u.signals = r.signals.clone();
         optional_units.push(u);
     }
+    optional_units.extend(env.code_units.iter().cloned().map(Unit::code));
+    for unit in mandatory_units.iter_mut().chain(optional_units.iter_mut()) {
+        delivery::annotate(unit, &env.delivery, env.snapshot.content_digest.is_some());
+    }
 
     // Completeness.
     status_reasons(&env.snapshot, view.diagnostics(), &task, &mut f);
@@ -902,10 +1129,27 @@ pub fn assemble(
         );
     }
     let mut issues = std::mem::take(&mut f.issues);
+    let dated = req.stale.is_some()
+        || mandatory_units.iter().chain(optional_units.iter()).any(
+            |u| matches!(&u.body, UnitBody::Record(p) if crate::freshness::has_dates(&p.record)),
+        );
+    for unit in mandatory_units.iter().chain(optional_units.iter()) {
+        if let UnitBody::Record(parsed) = &unit.body {
+            issues.extend(crate::freshness::warnings(
+                &parsed.record,
+                env.reference_date.as_ref(),
+                req.stale,
+            ));
+        }
+    }
     crate::diag::normalize(&mut issues);
     let mut diagnostics = view.diagnostics().to_vec();
     crate::diag::normalize(&mut diagnostics);
     let header = Header {
+        reference_date: dated.then(|| env.reference_date.clone()).flatten(),
+        pruned_change_types,
+        code_info: env.code_info.clone(),
+        delivery: env.delivery.clone(),
         request: req.clone(),
         max_supplementary,
         snapshot: env.snapshot.clone(),
@@ -1140,6 +1384,8 @@ fn proposal_units(
             }
             ProposalChange::Removes { id } => match included.get(id) {
                 Some(meta) => units.push(Unit {
+                    reuse: None,
+                    content_digest: None,
                     tier: Tier::Proposal,
                     id: format!("proposal:{id}"),
                     record_id: id.clone(),
@@ -1350,6 +1596,7 @@ fn pack_units(
         .collect();
     let footer_for =
         |counts: &TierCounts, excluded_budget: &[String], used: u64, limit: u64| Footer {
+            snapshot_digest: header.snapshot.content_digest.clone(),
             receipt_id: receipt_placeholder(),
             counts: counts.clone(),
             excluded_budget: excluded_budget.to_vec(),
@@ -1404,7 +1651,7 @@ fn pack_units(
         }
     };
     first_fit(optional, &mut included);
-    let section_units: Vec<Unit> = match sections {
+    let mut section_units: Vec<Unit> = match sections {
         SectionsMode::None => Vec::new(),
         SectionsMode::Mandatory => included
             .iter()
@@ -1413,6 +1660,13 @@ fn pack_units(
             .collect(),
         SectionsMode::All => included.iter().flat_map(|(u, _)| u.sections()).collect(),
     };
+    for unit in &mut section_units {
+        delivery::annotate(
+            unit,
+            &header.delivery,
+            header.snapshot.content_digest.is_some(),
+        );
+    }
     first_fit(section_units, &mut included);
 
     let units: Vec<Unit> = included.iter().map(|(u, _)| u.clone()).collect();

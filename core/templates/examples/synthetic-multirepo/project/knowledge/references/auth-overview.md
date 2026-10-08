@@ -1,5 +1,5 @@
 +++
-schema = 1
+schema = 2
 id = "example.reference.auth-overview"
 kind = "reference"
 title = "Authentication overview"
