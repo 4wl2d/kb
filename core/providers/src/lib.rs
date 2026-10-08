@@ -107,7 +107,7 @@ fn native(frozen: &frozen::Frozen, options: &Options, args: &[&str]) -> Result<V
     frozen.environment(&mut command);
     // Native tools and snapshot Git stay in the provider's process group, so the engine's
     // deadline ends them together with the provider. When this deadline stops one instead,
-    // `main` ends that group after the frozen tree is removed.
+    // `main` ends that group after the frozen tree is removed, if the engine created it.
     let output = capture_in_group(
         &mut command,
         &[],

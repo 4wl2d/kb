@@ -1,12 +1,15 @@
-//! Deadlines end everything the provider started and remove its frozen checkout, whether
-//! the engine's deadline or the adapter's own one fires. Synthetic host and native tool;
-//! no network.
+//! Under the engine, deadlines end everything the provider started and remove its frozen
+//! checkout, whether the engine's deadline or the adapter's own one fires. A standalone
+//! provider never ends a process group the engine did not create for it. Synthetic host
+//! and native tool; no network.
 #![cfg(unix)]
 
 use std::fs;
+use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::Duration;
 
 use kb::model::CodeRequest;
@@ -80,6 +83,10 @@ impl Setup {
         )
         .unwrap();
         fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
+        // The first exec of a new script can be slow (for example while the OS assesses it);
+        // take it outside the adapter's short per-command deadline.
+        let version = Command::new(&tool).arg("--version").output().unwrap();
+        assert!(version.status.success());
         let mut request: CodeRequest =
             serde_json::from_str(include_str!("fixtures/request.json")).unwrap();
         request.root = host.to_str().unwrap().into();
@@ -165,4 +172,62 @@ fn adapter_deadline_ends_native_descendants_and_removes_frozen_checkout() {
         "{error}"
     );
     setup.assert_cleaned_up();
+}
+
+#[test]
+fn standalone_group_leader_without_engine_marker_keeps_its_group() {
+    // Run directly as the leader of its own process group, as the first command of an
+    // interactive shell pipeline is. That group may hold the caller's pipeline peers, so
+    // without the engine's marker the adapter deadline ends only the native tool: the
+    // helper it started survives, and the provider reports its error and exits 1.
+    let setup = Setup::new(
+        "sleep 60 </dev/null >/dev/null 2>&1 &\n\
+         printf '%s\\n%s\\n' \"$!\" \"$(pwd -P)\" > \"$RECORD.tmp\"\n\
+         mv \"$RECORD.tmp\" \"$RECORD\"\n\
+         wait\n",
+    );
+    let tmp = setup.record.with_file_name("tmp");
+    fs::create_dir_all(&tmp).unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kb-code-provider"))
+        .args(["--backend", "ast-index", "--tool"])
+        .arg(&setup.tool)
+        .args(["--timeout", "1"])
+        .current_dir(&setup.request.root)
+        .env("TMPDIR", &tmp)
+        .env_remove(kb::code::PROVIDER_OWNS_GROUP_ENV)
+        .process_group(0)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(&serde_json::to_vec(&setup.request).unwrap())
+        .unwrap();
+    let out = child.wait_with_output().unwrap();
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    let recorded = fs::read_to_string(&setup.record)
+        .unwrap_or_else(|e| panic!("native tool did not start ({e}): {stderr}"));
+    let (pid, checkout) = recorded.trim_end().split_once('\n').unwrap();
+    let survived = running(pid);
+    if survived {
+        let _ = Command::new("kill").args(["-9", pid]).status();
+    }
+    assert_eq!(out.status.code(), Some(1), "{:?}: {stderr}", out.status);
+    assert!(
+        stderr.contains("subprocess exceeded its configured deadline"),
+        "{stderr}"
+    );
+    assert!(out.stdout.is_empty());
+    assert!(
+        survived,
+        "the provider killed a process group it does not own"
+    );
+    assert!(
+        !Path::new(checkout).exists(),
+        "frozen provider checkout {checkout} was left behind"
+    );
 }

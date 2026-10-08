@@ -18,7 +18,10 @@ entire invocation. Native tools and snapshot Git stay in the provider's process 
 the engine's deadline ends them too. When one exceeds the adapter's `--timeout` or an
 output limit, the provider removes its checkout and then ends that group, itself
 included, so nothing the command started survives. It does so only while it leads the
-group, as it does under the engine. The engine points `TMPDIR` at a private directory
+group and finds `KB_CODE_PROVIDER_OWNS_GROUP=1`, which the engine sets for a provider it
+starts in a process group of its own. Without that marker, as in a shell pipeline, it
+ends only the stopped command and exits 1 with its error: pipeline peers keep running,
+and so may anything the command started. The engine points `TMPDIR` at a private directory
 that it removes after every invocation, including the temporary checkout of a provider
 killed at the deadline. Plain invocation reads one request from stdin and writes one
 response to stdout. Schemas live in `core/schemas/code-{request,response}.v1.schema.json`.

@@ -42,6 +42,7 @@ impl Frozen {
             "GIT_NAMESPACE",
             "GIT_CONFIG_COUNT",
             "AST_INDEX_WALK_UP",
+            kb::code::PROVIDER_OWNS_GROUP_ENV,
         ] {
             command.env_remove(name);
         }

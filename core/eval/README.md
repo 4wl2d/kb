@@ -104,7 +104,8 @@ raw output, exit/signal, timeout and output-limit results remain available on fa
 
 Network is disabled by default. For an authorized model run, exact `api_hosts` permit only
 HTTPS CONNECT on port 443 through a local proxy. Other ports, arbitrary destinations and
-private/loopback DNS results are rejected, and a refused request receives `403 Forbidden`.
+private/loopback DNS results are rejected. Every refused request receives `403 Forbidden`,
+including one for an approved host that does not resolve or has no reachable public address.
 On macOS, Seatbelt can express the proxy rule only as `localhost:PORT`, which admits that
 port number on every local address: IPv4 and IPv6 loopback and the host's own interface
 addresses. The proxy listens on that port on both loopback addresses, but a host service

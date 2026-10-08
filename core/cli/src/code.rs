@@ -16,6 +16,10 @@ use crate::util::{check_rel_path, read_file_limited, sha256_hex};
 pub const MAX_PROVIDER_BYTES: usize = 64 * 1024 * 1024;
 pub const MAX_SYMBOLS: usize = 100_000;
 pub const MAX_REFS: usize = 500_000;
+/// Set to `1` in a provider program's environment. The engine starts the provider as the
+/// leader of a process group created for it alone, so a provider may end that whole group
+/// when it leads it; a group it leads without this marker may hold its caller's peers.
+pub const PROVIDER_OWNS_GROUP_ENV: &str = "KB_CODE_PROVIDER_OWNS_GROUP";
 
 #[derive(Debug, Clone)]
 pub struct Provider {
@@ -60,6 +64,7 @@ impl Provider {
                 .args(&self.args)
                 .current_dir(&request.root)
                 .env("TMPDIR", &scratch.0)
+                .env(PROVIDER_OWNS_GROUP_ENV, "1")
                 .env("CODEGRAPH_NO_DAEMON", "1")
                 .env("CODEGRAPH_TELEMETRY", "0")
                 .env("CODEGRAPH_NO_UPDATE_CHECK", "1")

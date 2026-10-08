@@ -64,10 +64,15 @@ fn main() {
 
 /// A native command or snapshot Git stopped at its own deadline or byte limit was killed
 /// alone, and anything it started still runs in this process group. `run` has returned, so
-/// the frozen tree is gone: end the group, this provider included, when the provider leads
-/// it, as it does under the engine. A group it merely joined belongs to its caller.
+/// the frozen tree is gone: end the group, this provider included, when the engine created
+/// it for this provider, which the engine's marker says and leading the group confirms. A
+/// group led without the marker, such as a shell job's, may hold the caller's pipeline peers
+/// and a group merely joined belongs to its caller; the provider then exits with its error.
 #[cfg(unix)]
 fn end_own_group() {
+    if std::env::var_os(kb::code::PROVIDER_OWNS_GROUP_ENV).is_none_or(|value| value != "1") {
+        return;
+    }
     // SAFETY: getpgrp and getpid cannot fail; kill receives a valid signal and 0, which
     // names the caller's own process group, verified to be led by this provider.
     unsafe {

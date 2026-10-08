@@ -174,23 +174,26 @@ fn request(client: &mut Socket, allowed: &[String]) -> Result<String> {
     authority(std::str::from_utf8(&header)?, allowed)
 }
 
-fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) -> Result<()> {
-    client.timeout()?;
-    let target = request(&mut client, allowed).inspect_err(|_| {
-        // A fixed refusal lets clients tell a rejected request from an unreachable proxy.
-        let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
-    })?;
-    let addresses = (target.as_str(), 443).to_socket_addrs()?;
-    let mut connected = None;
-    for address in addresses {
+fn connect(target: &str) -> Result<TcpStream> {
+    for address in (target, 443).to_socket_addrs()? {
         if !forbidden_address(address.ip())
             && let Ok(stream) = TcpStream::connect_timeout(&address, Duration::from_secs(5))
         {
-            connected = Some(stream);
-            break;
+            return Ok(stream);
         }
     }
-    let server = connected.ok_or("cannot connect to approved public API endpoint")?;
+    Err("cannot connect to approved public API endpoint".into())
+}
+
+fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) -> Result<()> {
+    client.timeout()?;
+    let server = request(&mut client, allowed)
+        .and_then(|target| connect(&target))
+        .inspect_err(|_| {
+            // A fixed refusal lets clients tell a refused request, including an approved host
+            // without a permitted reachable address, from an unreachable proxy.
+            let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
+        })?;
     client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
     tunnel(client, Socket::Tcp(server), id, active)
 }
@@ -457,6 +460,17 @@ mod tests {
             let client = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
             assert_eq!(reply(client, request.as_bytes()), FORBIDDEN, "{request}");
         }
+    }
+    #[test]
+    fn approved_hosts_without_a_permitted_address_are_refused_observably() {
+        // "127.1" passes the DNS-name check, but the resolver maps it to loopback offline.
+        let proxy = Proxy::start(&["127.1".into()]).unwrap();
+        let client = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+        assert_eq!(
+            reply(client, b"CONNECT 127.1:443 HTTP/1.1\r\n\r\n"),
+            FORBIDDEN,
+            "a loopback-only approved host was not refused"
+        );
     }
     #[cfg(target_os = "macos")]
     #[test]
