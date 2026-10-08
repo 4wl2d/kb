@@ -37,9 +37,13 @@ fn main() {
             .unwrap();
         let mut reply = Vec::new();
         let _ = proxy.read_to_end(&mut reply);
-        assert!(
-            !reply.starts_with(b"HTTP/1.1 200"),
-            "proxy tunnelled an unapproved host"
+        // Only the proxy's own refusal proves it was reached; an unreachable proxy (or a
+        // bridge that cannot reach its socket) just closes the connection.
+        assert_eq!(
+            reply,
+            b"HTTP/1.1 403 Forbidden\r\n\r\n",
+            "egress proxy did not refuse the unapproved host: {:?}",
+            String::from_utf8_lossy(&reply)
         );
     }
     if let Ok(port) = std::env::var("KB_EVAL_DENIED_PORT")

@@ -161,8 +161,7 @@ fn forbidden_address(address: std::net::IpAddr) -> bool {
     }
 }
 
-fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) -> Result<()> {
-    client.timeout()?;
+fn request(client: &mut Socket, allowed: &[String]) -> Result<String> {
     let mut header = Vec::new();
     while !header.ends_with(b"\r\n\r\n") {
         let mut b = [0];
@@ -172,7 +171,15 @@ fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) 
         )?;
         header.push(b[0]);
     }
-    let target = authority(std::str::from_utf8(&header)?, allowed)?;
+    authority(std::str::from_utf8(&header)?, allowed)
+}
+
+fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) -> Result<()> {
+    client.timeout()?;
+    let target = request(&mut client, allowed).inspect_err(|_| {
+        // A fixed refusal lets clients tell a rejected request from an unreachable proxy.
+        let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
+    })?;
     let addresses = (target.as_str(), 443).to_socket_addrs()?;
     let mut connected = None;
     for address in addresses {
@@ -186,6 +193,27 @@ fn serve(mut client: Socket, allowed: &[String], id: u64, active: &Connections) 
     let server = connected.ok_or("cannot connect to approved public API endpoint")?;
     client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
     tunnel(client, Socket::Tcp(server), id, active)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn loopback() -> Result<Vec<TcpListener>> {
+    Ok(vec![TcpListener::bind(("127.0.0.1", 0))?])
+}
+/// Seatbelt's `localhost:PORT` admits that port on every local address, so the proxy also
+/// owns it on IPv6 loopback instead of leaving `[::1]:PORT` to another host service.
+#[cfg(target_os = "macos")]
+fn loopback() -> Result<Vec<TcpListener>> {
+    for _ in 0..16 {
+        let v4 = TcpListener::bind(("127.0.0.1", 0))?;
+        match TcpListener::bind(("::1", v4.local_addr()?.port())) {
+            Ok(v6) => return Ok(vec![v4, v6]),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {}
+            // Without IPv6 loopback no other service can listen there either.
+            Err(e) if e.kind() == std::io::ErrorKind::AddrNotAvailable => return Ok(vec![v4]),
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err("no proxy port is free on both loopback addresses".into())
 }
 
 pub(super) struct Proxy {
@@ -202,9 +230,11 @@ pub(super) struct Proxy {
 }
 impl Proxy {
     pub fn start(allowed: &[String]) -> Result<Self> {
-        let listener = TcpListener::bind(("127.0.0.1", 0))?;
-        let port = listener.local_addr()?.port();
-        listener.set_nonblocking(true)?;
+        let listeners = loopback()?;
+        let port = listeners[0].local_addr()?.port();
+        for listener in &listeners {
+            listener.set_nonblocking(true)?;
+        }
         // A fresh 0700 directory directly under /tmp: `sun_path` holds at most 108 bytes,
         // and stage directories can be nested arbitrarily deep.
         #[cfg(target_os = "linux")]
@@ -230,10 +260,12 @@ impl Proxy {
                 let mut clients = Vec::new();
                 // BSD accept(2) copies O_NONBLOCK from the polled listener; client I/O must
                 // block (bounded by `Socket::timeout`) or reads fail with WouldBlock.
-                if let Ok((c, _)) = listener.accept()
-                    && c.set_nonblocking(false).is_ok()
-                {
-                    clients.push(Socket::Tcp(c));
+                for listener in &listeners {
+                    if let Ok((c, _)) = listener.accept()
+                        && c.set_nonblocking(false).is_ok()
+                    {
+                        clients.push(Socket::Tcp(c));
+                    }
                 }
                 #[cfg(target_os = "linux")]
                 if let Ok((c, _)) = unix.accept()
@@ -299,20 +331,29 @@ impl Drop for Proxy {
 pub(super) fn bridge(socket: &Path, program: &Path, args: &[String]) -> Result<i32> {
     #[cfg(unix)]
     {
+        let unreachable_socket = |e: std::io::Error, path: &Path| {
+            format!("egress proxy socket {} is unreachable: {e}", path.display())
+        };
+        // Fail before the client starts instead of giving it a bridge that drops every request.
+        UnixStream::connect(socket).map_err(|e| unreachable_socket(e, socket))?;
         let listener = TcpListener::bind(("127.0.0.1", 0))?;
         let port = listener.local_addr()?.port();
         let path = socket.to_path_buf();
         std::thread::spawn(move || {
             for client in listener.incoming().flatten() {
-                if let Ok(remote) = UnixStream::connect(&path) {
-                    std::thread::spawn(move || {
-                        let _ = tunnel(
-                            Socket::Tcp(client),
-                            Socket::Unix(remote),
-                            0,
-                            &Default::default(),
-                        );
-                    });
+                match UnixStream::connect(&path) {
+                    Ok(remote) => {
+                        std::thread::spawn(move || {
+                            let _ = tunnel(
+                                Socket::Tcp(client),
+                                Socket::Unix(remote),
+                                0,
+                                &Default::default(),
+                            );
+                        });
+                    }
+                    // The dropped client sees a closed connection; the stage log says why.
+                    Err(e) => eprintln!("kb-eval: {}", unreachable_socket(e, &path)),
                 }
             }
         });
@@ -370,6 +411,16 @@ mod tests {
             assert!(authority(h, &hosts).is_err());
         }
     }
+    const FORBIDDEN: &[u8] = b"HTTP/1.1 403 Forbidden\r\n\r\n";
+    fn reply(mut client: TcpStream, request: &[u8]) -> Vec<u8> {
+        client.write_all(request).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = client.read_to_end(&mut reply);
+        reply
+    }
     #[test]
     fn accepted_clients_wait_for_their_request() {
         let proxy = Proxy::start(&["api.example.invalid".into()]).unwrap();
@@ -387,14 +438,56 @@ mod tests {
             )),
             "proxy closed a client before its request arrived: {idle:?}"
         );
-        client
-            .write_all(b"CONNECT other.example.invalid:443 HTTP/1.1\r\n\r\n")
-            .unwrap();
-        client
-            .set_read_timeout(Some(Duration::from_secs(30)))
-            .unwrap();
-        let mut reply = Vec::new();
-        let _ = client.read_to_end(&mut reply);
-        assert!(reply.is_empty(), "an unapproved target received a reply");
+        assert_eq!(
+            reply(
+                client,
+                b"CONNECT other.example.invalid:443 HTTP/1.1\r\n\r\n"
+            ),
+            FORBIDDEN,
+            "an unapproved target was not refused"
+        );
+    }
+    #[test]
+    fn invalid_requests_are_refused_observably() {
+        let proxy = Proxy::start(&["api.example.invalid".into()]).unwrap();
+        for request in [
+            "CONNECT api.example.invalid:80 HTTP/1.1\r\n\r\n",
+            "GET http://api.example.invalid/ HTTP/1.1\r\n\r\n",
+        ] {
+            let client = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+            assert_eq!(reply(client, request.as_bytes()), FORBIDDEN, "{request}");
+        }
+    }
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_proxy_owns_its_port_on_ipv6_loopback() {
+        // Seatbelt's `localhost:PORT` rule also admits `[::1]:PORT`.
+        let proxy = Proxy::start(&["api.example.invalid".into()]).unwrap();
+        assert!(
+            TcpListener::bind(("::1", proxy.port)).is_err(),
+            "another service could listen on the proxy port"
+        );
+        let client = TcpStream::connect(("::1", proxy.port)).unwrap();
+        assert_eq!(
+            reply(
+                client,
+                b"CONNECT other.example.invalid:443 HTTP/1.1\r\n\r\n"
+            ),
+            FORBIDDEN
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn bridge_without_the_proxy_socket_fails_before_the_client_starts() {
+        let t = tempfile::tempdir().unwrap();
+        let started = t.path().join("started");
+        let error = bridge(
+            &t.path().join("missing.sock"),
+            Path::new("/usr/bin/touch"),
+            &[started.to_string_lossy().into_owned()],
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("unreachable"), "{error}");
+        assert!(!started.exists(), "the client ran without egress");
     }
 }

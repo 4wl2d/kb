@@ -150,7 +150,9 @@ pub fn seatbelt(
     }
     text.push_str("(allow file-read* file-write* (literal \"/dev/null\"))\n(allow file-read* (literal \"/dev/urandom\") (literal \"/dev/random\"))\n");
     if let Some(port) = proxy_port {
-        // Seatbelt accepts only `*` or `localhost` as the host; `localhost` means loopback.
+        // Seatbelt accepts only `*` or `localhost` as the host. `localhost` admits the port on
+        // every local address (IPv4/IPv6 loopback and the host's interface addresses), not
+        // only on the proxy's 127.0.0.1 listener; the proxy also holds the port on `[::1]`.
         text.push_str(&format!(
             "(allow network-outbound (remote ip \"localhost:{port}\"))\n"
         ));

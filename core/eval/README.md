@@ -104,9 +104,14 @@ raw output, exit/signal, timeout and output-limit results remain available on fa
 
 Network is disabled by default. For an authorized model run, exact `api_hosts` permit only
 HTTPS CONNECT on port 443 through a local proxy. Other ports, arbitrary destinations and
-private/loopback DNS results are rejected. macOS permits only the proxy's loopback port;
-Linux exposes its Unix socket, created in a fresh private directory under `/tmp` so its
-path fits the socket address limit, and bridges it inside the private network namespace.
+private/loopback DNS results are rejected, and a refused request receives `403 Forbidden`.
+On macOS, Seatbelt can express the proxy rule only as `localhost:PORT`, which admits that
+port number on every local address: IPv4 and IPv6 loopback and the host's own interface
+addresses. The proxy listens on that port on both loopback addresses, but a host service
+bound to the same port number on an interface address would still be reachable. Linux
+exposes the proxy's Unix socket, created in a fresh private directory under `/tmp` so its
+path fits the socket address limit, and bridges it inside the private network namespace;
+the bridge fails before starting the client when it cannot reach that socket.
 Proxy payloads and credentials are never logged. Clients that ignore proxy configuration
 fail instead of receiving unrestricted network access. The synthetic tests do not contact
 the network; real transport compatibility still needs an authorized pilot per client.
@@ -231,9 +236,11 @@ cargo test -p kb-eval --locked --test replay_workflow -- --ignored
 
 The second command explicitly runs the OS-dependent synthetic coder/judge fixture and
 makes no model or public network calls: its coder and judge send only an unapproved
-target to the egress proxy, and on macOS it also loads the generated Seatbelt profile
-and checks that only the proxy's port is reachable. The ordinary suite separately checks
-hidden/future Git object exclusion, accounting, pairing, missingness, bootstrap/sign-flip
-calculations, Holm, equivalence, ordering, duplicate cells, profile construction and the
-proxy waiting for a client's request. A synthetic fixture pass verifies the runner; it
-provides no evidence that a model or knowledge arm is better.
+target to the egress proxy and require its `403` refusal, which an unreachable proxy
+cannot produce. On macOS it also loads the generated Seatbelt profile and checks that
+only the proxy's port is reachable. The ordinary suite separately checks hidden/future
+Git object exclusion, accounting, pairing, missingness, bootstrap/sign-flip calculations,
+Holm, equivalence, ordering, duplicate cells, profile construction, the proxy waiting for
+a client's request and refusing it with `403`, the proxy holding its port on IPv6
+loopback (macOS) and the bridge failing without its socket. A synthetic fixture pass
+verifies the runner; it provides no evidence that a model or knowledge arm is better.
