@@ -46,7 +46,9 @@ Hash files, executables and directories with `kb-eval digest PATH`. A directory 
 covers sorted relative paths, bytes and executable bits, excluding Git metadata. Frozen
 knowledge/provider artifacts are full-commit arm overlays at new relative directories;
 their declared host cutoff must be an ancestor of the task base. They cannot overwrite
-existing host paths. Include the arm's precise invocation in `instructions`, or commit
+existing host paths. A pinned provider response replayed with `--provider-file` omits its
+task-specific precedent candidates, so such an arm delivers no code analog units, unlike
+a live provider. Include the arm's precise invocation in `instructions`, or commit
 its tested host integration into the chosen base/overlay. No implicit installation or
 network sync occurs. The runner includes the task's `--as-of` instruction, while the
 frozen input artifacts prevent later knowledge text from leaking through date metadata.

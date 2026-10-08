@@ -487,6 +487,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "kb",
+ "libc",
  "rusqlite",
  "serde",
  "serde_json",

@@ -422,14 +422,29 @@ fn pinned_response_does_not_replay_task_specific_similar_candidates() {
         "{units:?}"
     );
     assert!(code_limitations(&result).contains(&kb::code::PINNED_SIMILAR.into()));
+    // Commands that never read precedent candidates keep the pinned facts and report no
+    // omission of them.
+    let report = w.run(
+        &["coverage", "--provider-file", fixture.to_str().unwrap()],
+        0,
+    );
+    assert_eq!(report["code"]["commit"], w.base);
+    assert!(
+        !report["code"]["limitations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|l| l == kb::code::PINNED_SIMILAR),
+        "{}",
+        report["code"]
+    );
     let request = w.request(&w.base);
-    let replayed = kb::code::Provider {
+    let pinned = kb::code::Provider {
         files: vec![fixture],
         ..Default::default()
-    }
-    .load(&request)
-    .unwrap();
-    assert!(replayed.similar.is_empty());
+    };
+    assert_eq!(pinned.load(&request).unwrap().similar.len(), 1);
+    assert!(pinned.load_for_brief(&request).unwrap().similar.is_empty());
 }
 
 #[test]

@@ -106,10 +106,16 @@ impl Provider {
             }
             matching.remove(0)
         };
-        let mut response = validate(response, request)?;
+        validate(response, request)
+    }
+
+    /// [`Provider::load`] for [`brief`], the only consumer of `similar`, which it turns into
+    /// precedent candidates. Similarity answers the generating request's task and
+    /// identifiers, which a pinned response does not record; replaying it would mislabel
+    /// precedents, so files mode drops it and says so.
+    pub fn load_for_brief(&self, request: &CodeRequest) -> Result<CodeResponse> {
+        let mut response = self.load(request)?;
         if self.program.is_none() && !response.similar.is_empty() {
-            // Similarity answers the generating request's task and identifiers, which a
-            // pinned response does not record; replaying it would mislabel precedents.
             response.similar.clear();
             response.limitations.push(PINNED_SIMILAR.into());
             response.limitations.sort();

@@ -14,8 +14,13 @@ References name returned symbols and distinguish resolved from possible relation
 The engine validates the response, commit/repo identity, limits, references and source
 bytes against Git objects. It does not load a source parser, embed text, call an LLM or
 start a daemon. It never treats provider facts as accepted KB obligations. Repeated output
-is normalized with stable ordering. External commands have byte/deadline limits and owned
-process groups. Fixtures can supply identical responses without invoking a tool.
+is normalized with stable ordering. External commands have byte/deadline limits. The engine
+starts each provider in its own process group, where the reference adapters also run their
+native tools and snapshot Git, so the engine's deadline ends them all. When an adapter's
+own deadline or byte limit stops a nested command, the adapter removes its checkout and
+then ends that group, itself included. Fixtures can replay responses without invoking a
+tool. A response does not record the task it answered, so a replay omits its task-specific
+precedent candidates and reports the omission.
 
 Reference adapters live in `core/providers`, outside the engine crate. They support
 ast-index and CodeGraph through version-checked inputs and frozen host content. Any native

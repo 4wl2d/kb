@@ -301,7 +301,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
             code_request.paths.extend(env.inferred_paths.clone());
             code_request.paths.sort();
             code_request.paths.dedup();
-            let response = provider.load(&code_request)?;
+            let response = provider.load_for_brief(&code_request)?;
             let inferred =
                 crate::code::paths_for_task(&response, req.task.as_deref().unwrap_or_default());
             env.notes.extend(inferred.note("code symbols"));

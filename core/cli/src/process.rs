@@ -52,7 +52,9 @@ pub fn capture(command: &mut Command, input: &[u8], limits: Limits) -> Result<Ca
 
 /// [`capture`] for a program started by a process that itself runs under a caller's
 /// deadline, such as a code provider's native tool or Git. The child stays in the caller's
-/// process group, so the caller's group kill also ends it; this deadline kills the child.
+/// process group, so the caller's group kill also ends it. This deadline or a byte limit
+/// (error kind `timeout`, `stdout-limit` or `stderr-limit`) kills only the child itself;
+/// anything it started stays in the caller's group for the caller to end.
 pub fn capture_in_group(command: &mut Command, input: &[u8], limits: Limits) -> Result<Captured> {
     run(command, input, limits, false)
 }
