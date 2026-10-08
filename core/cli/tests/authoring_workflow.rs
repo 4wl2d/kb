@@ -328,6 +328,42 @@ fn submit_refuses_an_id_that_also_exists_at_another_local_path() {
 }
 
 #[test]
+fn submit_explains_a_committed_revision_of_an_approved_record() {
+    let w = World::new();
+    let local = w.kb.join("project/knowledge/references/alpha.md");
+    let fact = |status, summary| w.reference("alpha", status, summary, "app/auth/Client.rs");
+    write(&local, &fact("accepted", "A synthetic alpha fact."));
+    let commit = w.sb.commit_all(&w.kb, "accept synthetic alpha");
+    w.sb.git(&w.kb, &["update-ref", "refs/remotes/origin/main", &commit]);
+    // A first revision committed on a proposal branch; the working tree is clean.
+    let first = fact("draft", "A first revised synthetic alpha fact.");
+    write(&local, &first);
+    w.sb.commit_all(&w.kb, "propose synthetic alpha");
+    let input = w.sb.path().join("alpha.md");
+    let second = fact("draft", "A second revised synthetic alpha fact.");
+    write(&input, &second);
+    let submit = ["propose", "submit", input.to_str().unwrap(), "--apply"];
+    let refused = w.run_on("latest", &submit, 45);
+    let message = refused["error"]["message"].as_str().unwrap();
+    assert!(
+        message.contains("differs from the approved record in the selected snapshot")
+            && !message.contains("local changes"),
+        "{message}"
+    );
+    assert!(
+        refused["error"]["hint"]
+            .as_str()
+            .unwrap()
+            .contains("--snapshot working-tree")
+    );
+    assert_eq!(fs::read_to_string(&local).unwrap(), first);
+    // The working tree of the proposal branch is the snapshot that holds the revision.
+    let revised = w.run(&submit, 0);
+    assert_eq!(revised["result"]["draft"]["action"], "modify");
+    assert_eq!(fs::read_to_string(&local).unwrap(), second);
+}
+
+#[test]
 fn decision_template_change_anchor_is_verifiable_by_submit() {
     let w = World::new();
     let head = w.sb.git(&w.host, &["rev-parse", "HEAD"]);

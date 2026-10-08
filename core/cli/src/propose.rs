@@ -229,6 +229,19 @@ pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
             // draft on a proposal branch) may be revised in place; Git keeps its old bytes.
             (Some(_), None) if committed && local_path.as_deref() == Some(path.as_str()) => {}
             (None, None) => {}
+            // The file matches HEAD: it is a revision committed on this branch, or the
+            // checkout is not at the selected snapshot.
+            (Some(_), Some(_)) if committed => {
+                return Err(KbError::new(
+                    ErrorCode::Conflict,
+                    format!(
+                        "{path} is committed with text that differs from the approved record in the selected snapshot; submission will not overwrite it"
+                    ),
+                )
+                .with_hint(
+                    "to revise a draft committed on a KB proposal branch, retry from that branch with --snapshot working-tree --offline; otherwise update the KB checkout to the selected snapshot",
+                ));
+            }
             _ => {
                 return Err(KbError::new(
                     ErrorCode::Conflict,

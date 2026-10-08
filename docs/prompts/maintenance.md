@@ -25,7 +25,9 @@ you still retain. A receipt proves delivery, not compliance. Always-on omissions
 the engine to verify the installed core receipt and source.
 
 2. CAPTURE WHAT THE CHANGE TEACHES
-Keep host/KB dirty work and stable knowledge ids. Work on a KB proposal branch.
+Keep host/KB dirty work and stable knowledge ids. Work on a KB proposal branch and run
+capture and propose submit there with --snapshot working-tree --offline, so drafts are
+validated against that branch's registries and records.
 Use propose begin --from-change <BASE..HEAD> for committed work, or the team's
 kb.change.v1 export after the change is merged. Inspect touched modules, existing facts,
 added test candidates and review comments; none of these automatically proves a rule.
@@ -89,9 +91,10 @@ coverage/usage limitations; named acceptance decisions still needed.
 
 After each merged host MR, export the reviewed change and comments as `kb.change.v1`.
 Run `propose begin --from-change export.json`, have the configured agent prepare drafts,
-and run `propose submit` before putting them into a draft KB MR. The templates under
-`core/templates/ci/` keep this opt-in and separate model credentials from publishing
-credentials. A merged host MR does not auto-accept knowledge.
+and run `propose submit --snapshot working-tree --offline` on the KB proposal branch
+before putting them into a draft KB MR. The templates under `core/templates/ci/` keep
+this opt-in and separate model credentials from publishing credentials. A merged host MR
+does not auto-accept knowledge.
 
 ## Weekly owner review
 

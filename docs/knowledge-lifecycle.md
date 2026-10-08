@@ -38,12 +38,14 @@ draft status, stable id/kind, owner authority, scope, links, Git anchor availabi
 exact/near duplicates. It previews the path of the record that already has the id (in the
 snapshot or, for an unapproved draft, locally), otherwise a path under the profile's first
 knowledge root, then rechecks byte preconditions on `--apply`. Dirty destinations and
-conflicting identities (a kind change, or one id at two paths) are refused; a committed
-local draft may be revised in place. From an unmerged KB proposal branch, such as the
-adaptation branch, pass `--snapshot working-tree --offline` so the branch's own registries
-and records are validated. `--fill-consumers` with an explicit provider adds reviewable
-consumer candidates to a contract draft and retains the tool/commit/digest evidence. No
-commit, branch move or publication is performed.
+conflicting identities (a kind change, or one id at two paths) are refused. A committed
+local draft that the selected snapshot does not contain yet may be revised in place; a
+committed file that differs from the record's approved text in the selected snapshot is
+refused. From an unmerged KB proposal branch, such as the adaptation branch, pass
+`--snapshot working-tree --offline` so the branch's own registries and records are
+validated and its committed drafts can be revised. `--fill-consumers` with an explicit
+provider adds reviewable consumer candidates to a contract draft and retains the
+tool/commit/digest evidence. No commit, branch move or publication is performed.
 
 ```sh
 .kb/kbw capture decision --repo mobile --owner team-mobile \
@@ -139,11 +141,20 @@ advisory probes. Skipped probes are reported separately. Findings retain file/li
 evidence without echoing source or commit-message text. The optional Git commit-msg hook
 and host CI templates preserve native exit codes. They do not install themselves or grant
 branch-protection authority; these Git checks are distinct from optional agent pre-edit
-or stop hooks whose usefulness still needs a measured consultation gap. Like host CI, the
-hook reads the pinned KB revision (`KB_SNAPSHOT` overrides it; `KB_OFFLINE=1` skips the
-freshness check). It checks the index Git is committing (also for `commit -a` and pathspec
-commits), the message as Git will commit it (scissors cut, comments stripped as Git would)
-and, during a rebase, the rebased branch.
+or stop hooks whose usefulness still needs a measured consultation gap. The hook checks
+the index Git is committing (also for `commit -a` and pathspec commits), the message as
+Git will commit it (scissors cut, comments stripped as Git would) and, during a rebase,
+the rebased branch.
+
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+declares `selection`, the hook passes `auto` and the engine applies that selection.
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+`pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
+adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
+exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
+whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
+the committed message stays authoritative). A `git commit --cleanup=<mode>` flag is
+invisible to hooks; to skip the editor, use `GIT_EDITOR=true`.
 
 ## Local delivery observations
 

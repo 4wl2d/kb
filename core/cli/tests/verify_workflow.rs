@@ -655,17 +655,26 @@ pattern = '^feat: [a-z ]+$'
         &commit(&["commit", "-q"], "bad subject"),
         "VALIDATION_FAILED",
     );
-    // Without an editor Git keeps `#` lines, so the hook keeps them too.
-    let body = [
-        "commit",
-        "-q",
-        "-m",
-        "feat: synthetic subject",
-        "-m",
-        "#1 body",
-    ];
-    assert_rejected(&commit(&body, "unused"), "VALIDATION_FAILED");
-    assert_committed(&w.hooked(&[&body[..], &["--no-verify"][..]].concat(), &[]));
+    // A user's GIT_EDITOR=: skips the editor, yet Git still strips its comment template.
+    assert_committed(&w.hooked(&["commit", "-q", "--amend"], &[("GIT_EDITOR", ":")]));
+    assert_eq!(
+        w.sb.git(&w.host, &["log", "-1", "--format=%B"]),
+        "feat: synthetic verbose message"
+    );
+    // Without an editor Git keeps `#` lines. The hook cannot tell that case from the one
+    // above, so it rejects only a message that fails either way; CI rejects this one.
+    let message = |subject| ["commit", "-q", "-m", subject, "-m", "#1 body"];
+    let rejected = commit(&message("bad subject"), "unused");
+    assert_rejected(&rejected, "VALIDATION_FAILED");
+    assert_eq!(
+        common::stderr(&rejected)
+            .matches("VALIDATION_FAILED")
+            .count(),
+        1,
+        "{}",
+        common::stderr(&rejected)
+    );
+    assert_committed(&commit(&message("feat: synthetic subject"), "unused"));
     w.run(
         &[
             "--diff",
@@ -734,13 +743,12 @@ pattern = '^feature/'
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn shipped_hook_reads_the_host_pin_by_default_and_skips_freshness_on_request() {
-    let sb = Sandbox::new();
+/// A bare KB remote whose first approved revision asks for the `feat` prefix and whose
+/// approved tip asks for `chore`; returns the remote and the first revision.
+fn prefix_remote(sb: &Sandbox) -> (String, String) {
     let origin = sb.path().join("kb.git");
     sb.init_bare(&origin);
-    let origin = origin.to_str().unwrap();
+    let origin = origin.to_str().unwrap().to_string();
     let seed = sb.path().join("seed");
     sb.init_repo(&seed);
     common::write_min_project(&seed);
@@ -749,37 +757,63 @@ fn shipped_hook_reads_the_host_pin_by_default_and_skips_freshness_on_request() {
         &seed.join(PROBES),
         &policy_text("product = true", MESSAGE_PREFIX),
     );
-    sb.commit_all(&seed, "synthetic KB");
-    sb.git(&seed, &["push", "-q", origin, "main"]);
-    let host = sb.path().join("host");
-    sb.init_repo(&host);
-    write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
-    write(&host.join("app/auth/Client.kt"), "// Synthetic fixture\n");
-    sb.commit_all(&host, "feat: synthetic baseline");
-    sb.git(&host, &["submodule", "add", "-q", origin, ".kb"]);
-    sb.commit_all(&host, "feat: pin the synthetic KB");
-    // The approved tip moves past the pin and asks for another prefix.
+    let first = sb.commit_all(&seed, "synthetic KB");
     write(
         &seed.join(PROBES),
         &policy_text("product = true", &MESSAGE_PREFIX.replace("feat", "chore")),
     );
     sb.commit_all(&seed, "synthetic prefix change");
-    sb.git(&seed, &["push", "-q", origin, "main"]);
+    sb.git(&seed, &["push", "-q", &origin, "main"]);
+    (origin, first)
+}
+
+/// A host repository without a KB, with the shipped hook installed.
+fn prefix_host(sb: &Sandbox) -> PathBuf {
+    let host = sb.path().join("host");
+    sb.init_repo(&host);
+    write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+    write(&host.join("app/auth/Client.kt"), "// Synthetic fixture\n");
+    sb.commit_all(&host, "feat: synthetic baseline");
+    install_hooks_path(sb, &host);
+    host
+}
+
+/// Commit a synthetic edit through the hook, which runs the KB checkout at `.kb`.
+fn hook_commit(sb: &Sandbox, host: &Path, message: &str, envs: &[(&str, &str)]) -> Output {
+    write(&host.join("app/auth/Client.kt"), &format!("// {message}\n"));
+    sb.git(host, &["add", "app/auth/Client.kt"]);
     let kb = host.join(".kb");
+    let all = [&[("KB_ROOT", kb.to_str().unwrap())][..], envs].concat();
+    git_env(sb, host, &["commit", "-q", "-m", message], &all)
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_reads_the_host_pin_unless_the_binding_selects_and_skips_freshness_on_request() {
+    let sb = Sandbox::new();
+    let (origin, first) = prefix_remote(&sb);
+    let host = prefix_host(&sb);
+    let kb = host.join(".kb");
+    // The commit that first adds the KB gitlink has no pin in HEAD: the approved tip applies.
+    sb.git(&host, &["submodule", "add", "-q", &origin, ".kb"]);
+    sb.git(&kb, &["checkout", "-q", "--detach", &first]);
+    sb.git(&host, &["add", ".kb"]);
     fs::hard_link(common::kb_bin(), kb.join("kbw")).unwrap();
-    install_hooks_path(&sb, &host);
-    let kb_root = kb.to_str().unwrap();
-    let commit = |message: &str, envs: &[(&str, &str)]| {
-        write(&host.join("app/auth/Client.kt"), &format!("// {message}\n"));
-        sb.git(&host, &["add", "app/auth/Client.kt"]);
-        let all = [&[("KB_ROOT", kb_root)][..], envs].concat();
-        git_env(&sb, &host, &["commit", "-q", "-m", message], &all)
-    };
+    let commit = |message: &str, envs: &[(&str, &str)]| hook_commit(&sb, &host, message, envs);
+    assert_rejected(&commit("feat: mount the KB", &[]), "VALIDATION_FAILED");
+    assert_committed(&commit("chore: mount the KB", &[]));
     // No KB_SNAPSHOT: the pinned KB applies, not UPDATE_REQUIRED or the approved tip.
     assert_committed(&commit("feat: synthetic change", &[]));
     assert_rejected(&commit("chore: not yet pinned", &[]), "VALIDATION_FAILED");
+    // A selection that `.kbw.toml` declares is the engine's to apply.
+    let binding = host.join(".kbw.toml");
+    write(
+        &binding,
+        "schema = 1\nrepo = \"mobile\"\nselection = \"latest\"\n",
+    );
+    assert_committed(&commit("chore: selected latest", &[]));
+    write(&binding, "schema = 1\nrepo = \"mobile\"\n");
     // The pin-bump commit is checked against the pin it replaces.
-    sb.git(&kb, &["fetch", "-q", "origin"]);
     sb.git(&kb, &["checkout", "-q", "--detach", "origin/main"]);
     sb.git(&host, &["add", ".kb"]);
     assert_committed(&commit("feat: bump the KB pin", &[]));
@@ -787,4 +821,27 @@ fn shipped_hook_reads_the_host_pin_by_default_and_skips_freshness_on_request() {
     sb.git(&kb, &["remote", "set-url", "origin", &missing]);
     assert_rejected(&commit("chore: offline", &[]), "FRESHNESS_UNVERIFIED");
     assert_committed(&commit("chore: offline", &[("KB_OFFLINE", "1")]));
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_reads_the_approved_tip_for_a_separate_checkout_without_a_pin() {
+    let sb = Sandbox::new();
+    let (origin, first) = prefix_remote(&sb);
+    let host = prefix_host(&sb);
+    let kb = host.join(".kb");
+    // A KB clone that the host neither tracks nor pins.
+    sb.git(&host, &["clone", "-q", &origin, ".kb"]);
+    write(&host.join(".git/info/exclude"), ".kb/\n");
+    fs::hard_link(common::kb_bin(), kb.join("kbw")).unwrap();
+    let commit = |message: &str| hook_commit(&sb, &host, message, &[]);
+    assert_committed(&commit("chore: synthetic change"));
+    assert_rejected(&commit("feat: synthetic change"), "VALIDATION_FAILED");
+    // A `.kbw.toml` pin is a host pin too.
+    write(
+        &host.join(".kbw.toml"),
+        &format!("schema = 1\nrepo = \"mobile\"\npin = \"{first}\"\n"),
+    );
+    assert_committed(&commit("feat: synthetic pinned change"));
+    assert_rejected(&commit("chore: not pinned"), "VALIDATION_FAILED");
 }

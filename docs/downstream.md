@@ -225,10 +225,20 @@ protected publication job, handles reviewed merge/squash/rebase ranges without g
 parents, and never accepts a draft. Review the configuration and authority requirements
 in [the CI guide](../core/templates/ci/README.md) before enabling these optional jobs.
 
-Host CI and the commit-msg hook read the pinned KB revision (`--snapshot pinned`) because
-`auto` returns `UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the
-normal state between merging knowledge and updating the pin. Freshness is still verified;
-the hook skips that check only with `KB_OFFLINE=1`.
+Host CI reads the pinned KB revision (`--snapshot pinned`) because `auto` returns
+`UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the normal state
+between merging knowledge and updating the pin. Freshness is still verified. The
+commit-msg hook also works in a host without a pin and selects its snapshot as follows.
+
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+declares `selection`, the hook passes `auto` and the engine applies that selection.
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+`pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
+adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
+exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
+whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
+the committed message stays authoritative). A `git commit --cleanup=<mode>` flag is
+invisible to hooks; to skip the editor, use `GIT_EDITOR=true`.
 
 The `kb-impact` block (exactly one per description) is how a merge request acknowledges its
 knowledge impact:

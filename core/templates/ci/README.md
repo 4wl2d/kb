@@ -26,6 +26,21 @@ a cost/time bound, preserves raw model/tool logs separately, and writes only sch
 records. No wrapper is installed by default because model credentials, egress and spending
 authority belong to the team. Configure a separate approved CI environment for publication.
 
+`hooks/commit-msg` is an optional host Git hook: connect it to an existing hook rather than
+overwriting it and set `KB_PATH` to the host-relative KB checkout (default `.kb`). It checks
+only the pending message and branch probes against the index Git is committing and keeps
+native exit codes.
+
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+declares `selection`, the hook passes `auto` and the engine applies that selection.
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+`pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
+adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
+exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
+whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
+the committed message stays authoritative). A `git commit --cleanup=<mode>` flag is
+invisible to hooks; to skip the editor, use `GIT_EDITOR=true`.
+
 The knowledge check script keeps raw JSON/stderr and exit statuses for strict validation,
 routing, anchor checks, drift and the ledger even when one check fails. Host mappings are
 checked against full expected SHAs. Upload failures and skipped jobs are not evidence of a

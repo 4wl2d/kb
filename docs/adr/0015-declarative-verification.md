@@ -30,8 +30,19 @@ pass. Must/must-not findings block by default; `--strict` also blocks advisory f
 The supplied commit-msg hook checks only pending message and branch probes against the
 staged scope: the index Git is committing (`verify --index-file`, also for `commit -a` and
 pathspec commits), the message as Git will commit it (scissors cut, comments stripped as
-Git would) and, during a rebase, the rebased branch. Like host MR jobs it reads the pinned
-KB revision. Host MR jobs check the committed change. Both return native exit codes.
+Git would) and, during a rebase, the rebased branch. Host MR jobs read the pinned KB
+revision and check the committed change. Both return native exit codes.
+
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+declares `selection`, the hook passes `auto` and the engine applies that selection.
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+`pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
+adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
+exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
+whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
+the committed message stays authoritative). A `git commit --cleanup=<mode>` flag is
+invisible to hooks; to skip the editor, use `GIT_EDITOR=true`.
+
 Existing hooks and branch-protection settings remain under team control. These mechanical
 Git hooks are distinct from the empirical, optional harness pre-edit/stop gates.
 
