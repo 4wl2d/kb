@@ -276,8 +276,10 @@ impl Proxy {
                 {
                     clients.push(Socket::Unix(c));
                 }
-                for client in clients {
+                for mut client in clients {
                     if ac.lock().is_ok_and(|map| map.len() >= 32) {
+                        // Over the connection cap: the same fixed refusal as serve().
+                        let _ = client.write_all(b"HTTP/1.1 403 Forbidden\r\n\r\n");
                         client.close();
                         continue;
                     }
@@ -460,6 +462,24 @@ mod tests {
             let client = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
             assert_eq!(reply(client, request.as_bytes()), FORBIDDEN, "{request}");
         }
+    }
+    #[test]
+    fn connections_over_the_cap_are_refused_observably() {
+        let proxy = Proxy::start(&["api.example.invalid".into()]).unwrap();
+        // Idle clients stay in flight until their request arrives or times out.
+        let idle: Vec<TcpStream> = (0..32)
+            .map(|_| TcpStream::connect(("127.0.0.1", proxy.port)).unwrap())
+            .collect();
+        let mut over = TcpStream::connect(("127.0.0.1", proxy.port)).unwrap();
+        over.set_read_timeout(Some(Duration::from_secs(30)))
+            .unwrap();
+        let mut reply = Vec::new();
+        let _ = over.read_to_end(&mut reply);
+        assert_eq!(
+            reply, FORBIDDEN,
+            "a client over the cap was closed silently"
+        );
+        drop(idle);
     }
     #[test]
     fn approved_hosts_without_a_permitted_address_are_refused_observably() {

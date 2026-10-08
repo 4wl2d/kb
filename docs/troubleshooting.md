@@ -339,8 +339,10 @@ and exits with verify's code.
   message up, so the hook cleans it as Git will (scissors cut, comments stripped when Git
   strips them). When `GIT_EDITOR` is exactly `:` the hook cannot tell whether Git will strip
   comments, so it checks both the whitespace-cleaned and the comment-stripped message and
-  rejects only if both fail (CI on the committed message stays authoritative). A
-  `git commit --cleanup=<mode>` flag is invisible to hooks. To skip the editor, use
+  rejects only if both fail (CI on the committed message stays authoritative). A message
+  of only comments is checked whitespace-cleaned, because Git aborts an empty message, so
+  it is rejected when the comment lines fail the pattern. The `git commit --cleanup=<mode>`
+  and `--allow-empty-message` flags are invisible to hooks. To skip the editor, use
   `GIT_EDITOR=true`, not `:`.
 * **The hook never runs**: it usually lacks the executable bit. The template is mode
   `100755`; keep that mode when installing it (`chmod +x`), in the directory Git reads hooks

@@ -898,8 +898,10 @@ impl Op {
 }
 
 /// Longest-common-subsequence edit script after trimming the common prefix and suffix.
-/// Very large middles fall back to delete-all/insert-all to bound memory.
+/// Very large middles fall back to a greedy alignment with bounded look-ahead to bound
+/// memory: still a valid script that keeps runs of unchanged lines equal, not a minimal one.
 pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
+    const LOOKAHEAD: usize = 256;
     let pre = a.iter().zip(b).take_while(|(x, y)| x == y).count();
     let suf = a[pre..]
         .iter()
@@ -911,8 +913,18 @@ pub(crate) fn diff_ops<T: PartialEq>(a: &[T], b: &[T]) -> Vec<Op> {
     let mut ops: Vec<Op> = (0..pre).map(|i| Op::Equal(i, i)).collect();
     let (n, m) = (am.len(), bm.len());
     if n.saturating_mul(m) > 4_000_000 {
-        ops.extend((0..n).map(|i| Op::Delete(pre + i)));
-        ops.extend((0..m).map(|j| Op::Insert(pre + j)));
+        let mut i = 0;
+        for j in 0..m {
+            match (i..n.min(i + LOOKAHEAD)).find(|&k| am[k] == bm[j]) {
+                Some(k) => {
+                    ops.extend((i..k).map(|d| Op::Delete(pre + d)));
+                    ops.push(Op::Equal(pre + k, pre + j));
+                    i = k + 1;
+                }
+                None => ops.push(Op::Insert(pre + j)),
+            }
+        }
+        ops.extend((i..n).map(|d| Op::Delete(pre + d)));
     } else {
         // lcs[i][j] = LCS length of am[i..] and bm[j..].
         let mut lcs = vec![0u32; (n + 1) * (m + 1)];

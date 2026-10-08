@@ -87,8 +87,9 @@ case "$kb_hook_cleanup" in
 esac
 if [ "$kb_hook_cleanup" = either ]; then
     git stripspace --strip-comments <"$kb_hook_tmp/cut" >"$kb_hook_tmp/stripped"
-    # Git aborts a message that is empty after cleanup, so a message of only comment
-    # lines can land only whitespace-cleaned.
+    # Git aborts a message that is empty after cleanup (unless --allow-empty-message,
+    # which hooks cannot see), so a message of only comment lines is checked
+    # whitespace-cleaned.
     if cmp -s "$kb_hook_tmp/message" "$kb_hook_tmp/stripped" ||
         [ ! -s "$kb_hook_tmp/stripped" ]; then
         kb_hook_cleanup=space

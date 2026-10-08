@@ -143,8 +143,9 @@ Statements and obligations may declare `verify` arrays. Probe kinds are `commit-
 and `branch-name` (pattern), `forbidden-import` (from/to path globs), `naming` and `banned-api`
 (paths plus pattern). Regexes are validated with a bounded Rust regex compiler. Probes are
 data, contain no executable command, and have no side effects during parsing or retrieval.
-A probe glob whose text before the first `:` contains no `/`, `[` or `{` is repo-qualified
-(a `:` inside a class or brace group is pattern text), and that text must be a registry
+A probe glob with a `:` before any `/`, outside a `[...]` class or `{...}` group, is
+repo-qualified (a `:` inside a class or group is pattern text, while `{mobile,web}:` is a
+qualifier), and the text before that `:` must be a registry
 repo id as written (`UNKNOWN_REPO`): an unknown or mistyped qualifier, including a case
 change such as `Mobile:`, would never match and silently skip a blocking probe, so it
 fails validation and `verify`.
@@ -627,8 +628,9 @@ an explicit write. Comments, test commands and source text remain data. Confirme
 requires a merged fix plus regression evidence or an explicit reviewed decision, with a
 named reviewer. Neither command, a stamp nor a pipeline can accept knowledge (ADR 0014).
 
-`anchors stamp` edits only explicit records with fresh-byte preconditions and keeps the
-front matter's predominant line ending (CRLF stays CRLF); `check` verifies
+`anchors stamp` edits only explicit records with fresh-byte preconditions; untouched lines
+keep their original bytes and inserted or edited stamp lines take the front matter's
+predominant line ending (CRLF stays CRLF); `check` verifies
 Git bytes, not truth or test execution. Drift queues are grouped by owner; ledger reports
 supported/stale/unverifiable evidence and seeded draft audits. Freshness uses `--on` or a
 selected commit date; calendar SLA jobs must supply today's date explicitly. Warnings keep

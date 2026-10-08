@@ -311,7 +311,7 @@ text = "Print to standard output."
 
 [[rules.verify]]
 kind = "banned-api"
-paths = ["mobil:app/**", "mobile:app/**", "app/**", "Mobile:app/**", "app/x:y/**", "x[:]y.md"]
+paths = ["mobil:app/**", "mobile:app/**", "app/**", "Mobile:app/**", "app/x:y/**", "x[:]y.md", "{mobile,backend}:app/**"]
 pattern = "println"
 
 [[rules.verify]]
@@ -347,6 +347,7 @@ to = ["bakend:src/db/**"]
             "UNKNOWN_REPO verify: `Mobile:app/**` names unknown repo `Mobile`",
             "UNKNOWN_REPO verify: `bakend:src/db/**` names unknown repo `bakend`",
             "UNKNOWN_REPO verify: `mobil:app/**` names unknown repo `mobil`",
+            "UNKNOWN_REPO verify: `{mobile,backend}:app/**` names unknown repo `{mobile,backend}`",
         ]
     );
 }

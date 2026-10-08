@@ -403,11 +403,12 @@ fn submit_explains_a_clean_checkout_behind_the_selected_snapshot() {
             && !message.contains("local changes"),
         "{message}"
     );
+    // A working-tree retry would treat the id as new and write a second copy.
+    let hint = behind["hint"].as_str().unwrap();
     assert!(
-        behind["hint"]
-            .as_str()
-            .unwrap()
-            .contains("update the KB checkout to the selected snapshot")
+        hint.contains("update the KB checkout to the selected snapshot")
+            && !hint.contains("working-tree"),
+        "{hint}"
     );
     assert!(!local.exists());
     assert!(!w.kb.join("project/knowledge/drafts").exists());

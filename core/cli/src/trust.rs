@@ -451,4 +451,19 @@ mod tests {
         let parsed = stamped.parse::<DocumentMut>().unwrap();
         assert_eq!(parsed["text"].as_str(), Some("Persist synthetic\nstate."));
     }
+
+    #[test]
+    fn large_front_matter_edited_at_both_ends_keeps_untouched_bytes() {
+        // Edits at the top and the bottom leave a changed span too large for the LCS table;
+        // the bounded alignment must still keep every untouched line's original bytes.
+        let body: String = (0..2100).map(|i| format!("k{i} = {i}\r\n")).collect();
+        let text = "text = \"\"\"\r\nPersist synthetic\nstate.\"\"\"\r\n";
+        let original = format!("a = 1\r\n{body}{text}z = 1\r\n");
+        let edited = format!(
+            "v = 0\n{}z = 2\n",
+            original[7..original.len() - 7].replace("\r\n", "\n")
+        );
+        let restored = keep_line_endings(&original, &edited);
+        assert_eq!(restored, format!("v = 0\r\n{body}{text}z = 2\r\n"));
+    }
 }

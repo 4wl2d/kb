@@ -144,6 +144,9 @@ fn head_has(kb_root: &Path, path: &str) -> Result<bool> {
 }
 
 const SNAPSHOT_HINT: &str = "to revise a draft committed on a KB proposal branch, retry from that branch with --snapshot working-tree --offline; otherwise update the KB checkout to the selected snapshot";
+/// A checkout without the snapshot's record must catch up first: a working-tree submission
+/// would treat the id as new and create a second copy.
+const BEHIND_HINT: &str = "update the KB checkout to the selected snapshot (for example, merge it into the proposal branch), then submit again";
 
 pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
     let parsed = parse_record("submission", text.as_bytes()).map_err(|d| {
@@ -260,7 +263,7 @@ pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
                         "the KB checkout does not contain the approved record {path} from the selected snapshot; submission will not write it"
                     ),
                 )
-                .with_hint(SNAPSHOT_HINT));
+                .with_hint(BEHIND_HINT));
             }
             _ => {
                 return Err(KbError::new(

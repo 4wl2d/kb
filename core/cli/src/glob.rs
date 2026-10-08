@@ -76,14 +76,24 @@ pub fn split_repo(spec: &str) -> (Option<&str>, &str) {
     (None, spec)
 }
 
-/// The qualifier as written: the text before the first `:` when it contains no `/`, `[` or
-/// `{` (a `:` inside a class or brace group, as in `[a:b]/x.md`, is part of the pattern).
+/// The qualifier as written: the text before the first `:` outside any `[...]` class or
+/// `{...}` group, when no `/` precedes it (a `:` inside a class or group, as in
+/// `[a:b]/x.md`, is part of the pattern; `{mobile,web}:app/**` is qualified).
 /// [`split_repo`] only recognizes registry-id-shaped qualifiers, so `Mobile:app/**` parses
 /// as a literal pattern that never matches; validation checks this text against the registry.
 pub fn written_qualifier(spec: &str) -> Option<&str> {
-    spec.split_once(':')
-        .map(|(r, _)| r)
-        .filter(|r| !r.contains(['/', '[', '{']))
+    let (mut class, mut groups) = (false, 0usize);
+    for (i, c) in spec.char_indices() {
+        match c {
+            '[' if !class => class = true,
+            ']' if class => class = false,
+            '{' if !class => groups += 1,
+            '}' if !class && groups > 0 => groups -= 1,
+            ':' | '/' if !class && groups == 0 => return (c == ':').then(|| &spec[..i]),
+            _ => {}
+        }
+    }
+    None
 }
 
 fn literal_prefix(p: &str) -> &str {
@@ -144,6 +154,12 @@ mod tests {
         assert_eq!(RepoGlob::parse("Mobile:app/**").unwrap().repo, None);
         assert_eq!(written_qualifier("docs/a:b.md"), None);
         assert_eq!(written_qualifier("app/**"), None);
+        // A class or group that closes before the `:` is part of the written qualifier.
+        assert_eq!(
+            written_qualifier("{mobile,backend}:app/**"),
+            Some("{mobile,backend}")
+        );
+        assert_eq!(written_qualifier("[mb]obile:app/**"), Some("[mb]obile"));
         // A `:` inside a class or brace group is pattern text: the glob stays unqualified.
         for spec in ["[a:b]/x.md", "{a:b,c}/x.md", "x[:]y.md"] {
             assert_eq!(written_qualifier(spec), None, "{spec}");

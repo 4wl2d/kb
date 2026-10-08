@@ -156,8 +156,10 @@ Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.k
 adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
 exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
 whitespace-cleaned and the comment-stripped message and rejects only if both fail (CI on
-the committed message stays authoritative). A `git commit --cleanup=<mode>` flag is
-invisible to hooks; to skip the editor, use `GIT_EDITOR=true`.
+the committed message stays authoritative); a message of only comments is checked
+whitespace-cleaned, because Git aborts an empty message. The `git commit --cleanup=<mode>`
+and `--allow-empty-message` flags are invisible to hooks; to skip the editor, use
+`GIT_EDITOR=true`.
 
 ## Local delivery observations
 
