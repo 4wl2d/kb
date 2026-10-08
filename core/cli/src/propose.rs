@@ -135,6 +135,16 @@ fn current_bytes(path: &Path) -> Result<Option<Vec<u8>>> {
     }
 }
 
+/// Whether the KB checkout's HEAD commit has a file at `path`.
+fn head_has(kb_root: &Path, path: &str) -> Result<bool> {
+    let Some(head) = crate::git::Git::new(kb_root).resolve_commit("HEAD")? else {
+        return Ok(false);
+    };
+    Ok(crate::host::facts::blob_at(kb_root, &head, path, MAX_RECORD_BYTES as u64)?.is_some())
+}
+
+const SNAPSHOT_HINT: &str = "to revise a draft committed on a KB proposal branch, retry from that branch with --snapshot working-tree --offline; otherwise update the KB checkout to the selected snapshot";
+
 pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
     let parsed = parse_record("submission", text.as_bytes()).map_err(|d| {
         KbError::new(
@@ -238,9 +248,19 @@ pub fn prepare(ctx: &DraftContext<'_>, text: &str) -> Result<DraftPlan> {
                         "{path} is committed with text that differs from the approved record in the selected snapshot; submission will not overwrite it"
                     ),
                 )
-                .with_hint(
-                    "to revise a draft committed on a KB proposal branch, retry from that branch with --snapshot working-tree --offline; otherwise update the KB checkout to the selected snapshot",
-                ));
+                .with_hint(SNAPSHOT_HINT));
+            }
+            // Neither the working tree nor HEAD has the snapshot's record: the checkout is
+            // behind it, such as a proposal branch created before the record was accepted.
+            // A deletion that is not committed yet is a local change.
+            (None, Some(_)) if !head_has(ctx.kb_root, &path)? => {
+                return Err(KbError::new(
+                    ErrorCode::Conflict,
+                    format!(
+                        "the KB checkout does not contain the approved record {path} from the selected snapshot; submission will not write it"
+                    ),
+                )
+                .with_hint(SNAPSHOT_HINT));
             }
             _ => {
                 return Err(KbError::new(

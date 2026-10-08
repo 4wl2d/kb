@@ -364,6 +364,56 @@ fn submit_explains_a_committed_revision_of_an_approved_record() {
 }
 
 #[test]
+fn submit_explains_a_clean_checkout_behind_the_selected_snapshot() {
+    let w = World::new();
+    let base = w.sb.git(&w.kb, &["rev-parse", "HEAD"]);
+    let rel = "project/knowledge/references/alpha.md";
+    let local = w.kb.join(rel);
+    let fact = |status, summary| w.reference("alpha", status, summary, "app/auth/Client.rs");
+    write(&local, &fact("accepted", "A synthetic alpha fact."));
+    let commit = w.sb.commit_all(&w.kb, "accept synthetic alpha");
+    w.sb.git(&w.kb, &["update-ref", "refs/remotes/origin/main", &commit]);
+    let input = w.sb.path().join("alpha.md");
+    write(&input, &fact("draft", "A revised synthetic alpha fact."));
+    let submit = || {
+        w.run_on(
+            "latest",
+            &["propose", "submit", input.to_str().unwrap(), "--apply"],
+            45,
+        )["error"]
+            .clone()
+    };
+    // A deletion that is not committed is a genuine local change.
+    fs::remove_file(&local).unwrap();
+    let deleted = submit();
+    assert_eq!(
+        deleted["message"],
+        format!("{rel} has local changes; submission will not overwrite them")
+    );
+    assert!(!local.exists());
+    w.sb.git(&w.kb, &["checkout", "-q", "--", rel]);
+    // A clean proposal branch created before the record was accepted.
+    w.sb.git(&w.kb, &["checkout", "-q", "-b", "kb/proposal", &base]);
+    assert_eq!(w.sb.git(&w.kb, &["status", "--porcelain"]), "");
+    let behind = submit();
+    let message = behind["message"].as_str().unwrap();
+    assert!(
+        message.contains("does not contain the approved record")
+            && message.contains(rel)
+            && !message.contains("local changes"),
+        "{message}"
+    );
+    assert!(
+        behind["hint"]
+            .as_str()
+            .unwrap()
+            .contains("update the KB checkout to the selected snapshot")
+    );
+    assert!(!local.exists());
+    assert!(!w.kb.join("project/knowledge/drafts").exists());
+}
+
+#[test]
 fn decision_template_change_anchor_is_verifiable_by_submit() {
     let w = World::new();
     let head = w.sb.git(&w.host, &["rev-parse", "HEAD"]);

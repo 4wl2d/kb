@@ -690,6 +690,57 @@ pattern = '^feat: [a-z ]+$'
 
 #[cfg(unix)]
 #[test]
+fn shipped_hook_never_accepts_an_empty_comment_stripped_message_git_would_abort() {
+    let w = World::new(true);
+    // A subject length limit, which an empty message also satisfies.
+    w.policy(
+        r#"
+[[rules]]
+id = "message"
+level = "must"
+text = "Keep the synthetic subject short."
+[[rules.verify]]
+kind = "commit-message"
+pattern = '^[^\n]{0,20}(\n|$)'
+"#,
+    );
+    w.install_hook();
+    let commit = |subject| {
+        write(
+            &w.host.join("app/auth/Client.kt"),
+            &format!("// {subject}\n"),
+        );
+        w.sb.git(&w.host, &["add", "app/auth/Client.kt"]);
+        w.hooked(&["commit", "-q", "-m", subject], &[])
+    };
+    // Git keeps this `#` subject: stripping it would leave an empty message, which Git
+    // aborts, so only the whitespace-cleaned message can land and the hook checks just that.
+    let head = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    assert_rejected(
+        &commit("#123 a synthetic subject far over the limit"),
+        "VALIDATION_FAILED",
+    );
+    assert_eq!(w.sb.git(&w.host, &["rev-parse", "HEAD"]), head);
+    assert_committed(&commit("#123 short subject"));
+    assert_eq!(
+        w.sb.git(&w.host, &["log", "-1", "--format=%B"]),
+        "#123 short subject"
+    );
+    w.run(
+        &[
+            "--diff",
+            "HEAD~1",
+            "--head",
+            "HEAD",
+            "--only",
+            "commit-message",
+        ],
+        0,
+    );
+}
+
+#[cfg(unix)]
+#[test]
 fn shipped_hook_checks_the_rebased_branch_while_head_is_detached() {
     let w = World::new(true);
     w.policy(&format!(

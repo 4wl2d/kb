@@ -259,11 +259,21 @@ nothing is written:
 * **The id already exists elsewhere**: at several local paths, or at one local path while
   the selected snapshot has it at a different path. Submission never creates a second
   copy; resolve the duplicate through review first.
-* **A committed local record differs from the approved text** of the same id: usually a
-  draft that revises an already approved record on an unmerged KB proposal branch. Submit
-  from that branch with `--snapshot working-tree --offline`, so the branch's own records are
-  the base (see [knowledge-lifecycle.md](knowledge-lifecycle.md#find-the-gaps-and-prepare-a-draft)).
+* **`<path> is committed with text that differs from the approved record in the selected snapshot`**:
+  usually a draft that revises an already approved record on an unmerged KB proposal
+  branch. Submit from that branch with `--snapshot working-tree --offline`, so the branch's
+  own records are the base (see [knowledge-lifecycle.md](knowledge-lifecycle.md#find-the-gaps-and-prepare-a-draft));
+  otherwise update the KB checkout to the selected snapshot.
+* **`the KB checkout does not contain the approved record <path> from the selected snapshot`**:
+  the checkout is clean but behind the snapshot, for example a proposal branch created
+  before that record was accepted. Update the KB checkout to the selected snapshot, then
+  submit again.
 * **`<path> has uncommitted changes`**: edit and validate that draft file directly.
+* **`<path> has local changes; submission will not overwrite them`**: the destination
+  differs from HEAD in a way Git has not recorded, for example the record file was deleted
+  from the working tree while HEAD still has it, or the KB checkout has no commit yet. It
+  also appears when the default draft path already holds a file that is not this record.
+  Restore or commit that change (or move the file) first.
 * **`identical knowledge already exists under another id`**: revise the existing record
   (`details.duplicates`).
 * **`<path> changed after validation`** (on `--apply`): run the submission again.
