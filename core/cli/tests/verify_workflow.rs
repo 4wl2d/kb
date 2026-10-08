@@ -2,10 +2,56 @@
 mod common;
 
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output};
 
 use common::{Sandbox, json, write};
 use serde_json::{Value, json as value};
+
+const PROBES: &str = "project/knowledge/policies/probes.md";
+
+fn policy_text(scope: &str, rules: &str) -> String {
+    format!(
+        "+++\nschema = 2\nid = \"acme.policy.probes\"\nkind = \"policy\"\ntitle = \"Synthetic verification\"\nstatus = \"accepted\"\nowner = \"arch\"\n[scope]\n{scope}\n{rules}\n+++\n"
+    )
+}
+
+/// Point `core.hooksPath` at the shipped template directory: Git itself then decides
+/// whether the template is executable and which environment it receives.
+fn install_hooks_path(sb: &Sandbox, host: &Path) {
+    let hooks = common::repo_root().join("core/templates/ci/hooks");
+    sb.git(host, &["config", "core.hooksPath", hooks.to_str().unwrap()]);
+}
+
+/// Run Git in `dir` with an isolated configuration plus `envs` (inherited by hooks).
+fn git_env(sb: &Sandbox, dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Output {
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
+        .arg(dir)
+        .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
+        .args(args);
+    common::isolated_env(&mut cmd, &sb.home());
+    cmd.envs(envs.iter().copied());
+    cmd.output().unwrap()
+}
+
+fn assert_rejected(out: &Output, code: &str) {
+    assert!(!out.status.success(), "{}", common::stderr(out));
+    assert!(
+        common::stderr(out).contains(code),
+        "expected {code}:\n{}",
+        common::stderr(out)
+    );
+}
+
+fn assert_committed(out: &Output) {
+    assert!(
+        out.status.success(),
+        "{}\n{}",
+        common::stdout(out),
+        common::stderr(out)
+    );
+}
 
 struct World {
     sb: Sandbox,
@@ -44,12 +90,34 @@ impl World {
     }
 
     fn policy(&self, rules: &str) {
-        write(
-            &self.kb.join("project/knowledge/policies/probes.md"),
-            &format!(
-                "+++\nschema = 2\nid = \"acme.policy.probes\"\nkind = \"policy\"\ntitle = \"Synthetic verification\"\nstatus = \"accepted\"\nowner = \"arch\"\n[scope]\nproduct = true\n{rules}\n+++\n"
-            ),
-        );
+        self.scoped_policy("product = true", rules);
+    }
+
+    fn scoped_policy(&self, scope: &str, rules: &str) {
+        write(&self.kb.join(PROBES), &policy_text(scope, rules));
+    }
+
+    /// Install the shipped hook the way Git runs it (`core.hooksPath`, no `sh` wrapper), with
+    /// the engine at the hook's KB entry path.
+    fn install_hook(&self) {
+        fs::create_dir_all(self.host.join(".kb")).unwrap();
+        // The production launcher has separate e2e/launcher tests.
+        fs::hard_link(common::kb_bin(), self.host.join(".kb/kbw")).unwrap();
+        write(&self.host.join(".gitignore"), ".kb/\n");
+        self.sb.git(&self.host, &["add", ".gitignore"]);
+        self.sb
+            .git(&self.host, &["commit", "-q", "-m", "feat: ignore the KB"]);
+        install_hooks_path(&self.sb, &self.host);
+    }
+
+    /// Git with the hook's environment; the KB working tree holds the probes.
+    fn hooked(&self, args: &[&str], envs: &[(&str, &str)]) -> Output {
+        let mut all = vec![
+            ("KB_ROOT", self.kb.to_str().unwrap()),
+            ("KB_SNAPSHOT", "working-tree"),
+        ];
+        all.extend_from_slice(envs);
+        git_env(&self.sb, &self.host, args, &all)
     }
 
     fn run(&self, args: &[&str], exit: i32) -> Value {
@@ -444,4 +512,253 @@ pattern = '^feat:'
     );
     write(&message, "invalid synthetic prefix\n");
     assert_eq!(invoke().status.code(), Some(40));
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_commit_msg_hook_is_executable() {
+    use std::os::unix::fs::PermissionsExt;
+    let hook = common::repo_root().join("core/templates/ci/hooks/commit-msg");
+    // Git silently ignores a hook without the executable bit.
+    assert_ne!(fs::metadata(&hook).unwrap().permissions().mode() & 0o111, 0);
+}
+
+const MESSAGE_PREFIX: &str = r#"
+[[rules]]
+id = "message"
+level = "must"
+text = "Use the synthetic prefix."
+[[rules.verify]]
+kind = "commit-message"
+pattern = '^feat:'
+"#;
+
+/// An editor that writes `$KB_TEST_SUBJECT` above the text Git prepared, minus `drop`
+/// (a sed script).
+fn editor(w: &World, name: &str, drop: &str) -> String {
+    let path = w.sb.path().join(name);
+    write(
+        &path,
+        &format!(
+            "#!/bin/sh\n{{ printf '%s\\n' \"$KB_TEST_SUBJECT\"; sed '{drop}' \"$1\"; }} >\"$1.edit\" && mv \"$1.edit\" \"$1\"\n"
+        ),
+    );
+    format!("sh '{}'", path.display())
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_checks_the_index_git_commits_for_all_and_pathspec_commits() {
+    let w = World::new(true);
+    w.scoped_policy("modules = [\"mobile.auth\"]", MESSAGE_PREFIX);
+    w.install_hook();
+    let head = w.sb.git(&w.host, &["rev-parse", "HEAD"]);
+    write(
+        &w.host.join("app/auth/Client.kt"),
+        "// Synthetic auth edit\n",
+    );
+    // Nothing is staged in the default index: Git commits an index that only the hook's
+    // GIT_INDEX_FILE names, and the module-scoped probe applies to it.
+    for args in [
+        &["commit", "-q", "-a", "-m", "bad all message"][..],
+        &[
+            "commit",
+            "-q",
+            "-m",
+            "bad pathspec message",
+            "--",
+            "app/auth/Client.kt",
+        ],
+    ] {
+        assert_rejected(&w.hooked(args, &[]), "VALIDATION_FAILED");
+        assert_eq!(w.sb.git(&w.host, &["rev-parse", "HEAD"]), head);
+    }
+    assert_committed(&w.hooked(&["commit", "-q", "-a", "-m", "feat: synthetic auth"], &[]));
+    let missing = w.run(&["--staged", "--index-file", "missing-index"], 64);
+    assert_eq!(missing["error"]["code"], "INVALID_INPUT");
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_checks_the_message_git_commits_after_cleanup() {
+    let w = World::new(true);
+    w.policy(
+        r#"
+[[rules]]
+id = "message"
+level = "must"
+text = "Use a single synthetic subject line."
+[[rules.verify]]
+kind = "commit-message"
+pattern = '^feat: [a-z ]+$'
+"#,
+    );
+    w.install_hook();
+    let edit = editor(&w, "editor.sh", "");
+    let commit = |args: &[&str], subject: &str| {
+        write(
+            &w.host.join("app/auth/Client.kt"),
+            &format!("// {subject}\n"),
+        );
+        w.sb.git(&w.host, &["add", "app/auth/Client.kt"]);
+        w.hooked(args, &[("GIT_EDITOR", &edit), ("KB_TEST_SUBJECT", subject)])
+    };
+    // The editor keeps Git's comment template; `-v` adds a scissors line and the diff.
+    assert_committed(&commit(&["commit", "-q"], "feat: synthetic edited message"));
+    assert_eq!(
+        w.sb.git(&w.host, &["log", "-1", "--format=%B"]),
+        "feat: synthetic edited message"
+    );
+    // CI reads the committed message and agrees with the hook.
+    w.run(
+        &[
+            "--diff",
+            "HEAD~1",
+            "--head",
+            "HEAD",
+            "--only",
+            "commit-message",
+        ],
+        0,
+    );
+    assert_committed(&commit(
+        &["-c", "core.commentChar=;", "commit", "-q", "-v"],
+        "feat: synthetic verbose message",
+    ));
+    assert_rejected(
+        &commit(&["commit", "-q"], "bad subject"),
+        "VALIDATION_FAILED",
+    );
+    // Without an editor Git keeps `#` lines, so the hook keeps them too.
+    let body = [
+        "commit",
+        "-q",
+        "-m",
+        "feat: synthetic subject",
+        "-m",
+        "#1 body",
+    ];
+    assert_rejected(&commit(&body, "unused"), "VALIDATION_FAILED");
+    assert_committed(&w.hooked(&[&body[..], &["--no-verify"][..]].concat(), &[]));
+    w.run(
+        &[
+            "--diff",
+            "HEAD~1",
+            "--head",
+            "HEAD",
+            "--only",
+            "commit-message",
+        ],
+        40,
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_checks_the_rebased_branch_while_head_is_detached() {
+    let w = World::new(true);
+    w.policy(&format!(
+        "{MESSAGE_PREFIX}{}",
+        r#"
+[[rules]]
+id = "branch"
+level = "must"
+text = "Use the synthetic feature branch."
+[[rules.verify]]
+kind = "branch-name"
+pattern = '^feature/'
+"#
+    ));
+    w.install_hook();
+    w.sb.git(&w.host, &["checkout", "-qb", "feature/synthetic"]);
+    write(
+        &w.host.join("app/auth/Client.kt"),
+        "// Synthetic feature edit\n",
+    );
+    w.sb.git(&w.host, &["add", "app/auth/Client.kt"]);
+    assert_committed(&w.hooked(&["commit", "-q", "-m", "feat: synthetic feature"], &[]));
+    let todo = w.sb.path().join("todo.sh");
+    write(
+        &todo,
+        "#!/bin/sh\nsed 's/^pick /reword /' \"$1\" >\"$1.edit\" && mv \"$1.edit\" \"$1\"\n",
+    );
+    let todo = format!("sh '{}'", todo.display());
+    let reword = editor(&w, "reword.sh", "1d");
+    let rebase = |subject: &str| {
+        w.hooked(
+            &["rebase", "-q", "-i", "HEAD~1"],
+            &[
+                ("GIT_SEQUENCE_EDITOR", &todo),
+                ("GIT_EDITOR", &reword),
+                ("KB_TEST_SUBJECT", subject),
+            ],
+        )
+    };
+    // The hook runs for the reword while HEAD is detached.
+    assert_rejected(&rebase("bad reword"), "VALIDATION_FAILED");
+    w.sb.git(&w.host, &["rebase", "--abort"]);
+    assert_committed(&rebase("feat: synthetic reword"));
+    assert_eq!(
+        w.sb.git(&w.host, &["log", "-1", "--format=%s"]),
+        "feat: synthetic reword"
+    );
+    assert_eq!(
+        w.sb.git(&w.host, &["symbolic-ref", "--short", "HEAD"]),
+        "feature/synthetic"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_hook_reads_the_host_pin_by_default_and_skips_freshness_on_request() {
+    let sb = Sandbox::new();
+    let origin = sb.path().join("kb.git");
+    sb.init_bare(&origin);
+    let origin = origin.to_str().unwrap();
+    let seed = sb.path().join("seed");
+    sb.init_repo(&seed);
+    common::write_min_project(&seed);
+    write(&seed.join(".gitignore"), ".cache/\n");
+    write(
+        &seed.join(PROBES),
+        &policy_text("product = true", MESSAGE_PREFIX),
+    );
+    sb.commit_all(&seed, "synthetic KB");
+    sb.git(&seed, &["push", "-q", origin, "main"]);
+    let host = sb.path().join("host");
+    sb.init_repo(&host);
+    write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+    write(&host.join("app/auth/Client.kt"), "// Synthetic fixture\n");
+    sb.commit_all(&host, "feat: synthetic baseline");
+    sb.git(&host, &["submodule", "add", "-q", origin, ".kb"]);
+    sb.commit_all(&host, "feat: pin the synthetic KB");
+    // The approved tip moves past the pin and asks for another prefix.
+    write(
+        &seed.join(PROBES),
+        &policy_text("product = true", &MESSAGE_PREFIX.replace("feat", "chore")),
+    );
+    sb.commit_all(&seed, "synthetic prefix change");
+    sb.git(&seed, &["push", "-q", origin, "main"]);
+    let kb = host.join(".kb");
+    fs::hard_link(common::kb_bin(), kb.join("kbw")).unwrap();
+    install_hooks_path(&sb, &host);
+    let kb_root = kb.to_str().unwrap();
+    let commit = |message: &str, envs: &[(&str, &str)]| {
+        write(&host.join("app/auth/Client.kt"), &format!("// {message}\n"));
+        sb.git(&host, &["add", "app/auth/Client.kt"]);
+        let all = [&[("KB_ROOT", kb_root)][..], envs].concat();
+        git_env(&sb, &host, &["commit", "-q", "-m", message], &all)
+    };
+    // No KB_SNAPSHOT: the pinned KB applies, not UPDATE_REQUIRED or the approved tip.
+    assert_committed(&commit("feat: synthetic change", &[]));
+    assert_rejected(&commit("chore: not yet pinned", &[]), "VALIDATION_FAILED");
+    // The pin-bump commit is checked against the pin it replaces.
+    sb.git(&kb, &["fetch", "-q", "origin"]);
+    sb.git(&kb, &["checkout", "-q", "--detach", "origin/main"]);
+    sb.git(&host, &["add", ".kb"]);
+    assert_committed(&commit("feat: bump the KB pin", &[]));
+    let missing = format!("{origin}-missing");
+    sb.git(&kb, &["remote", "set-url", "origin", &missing]);
+    assert_rejected(&commit("chore: offline", &[]), "FRESHNESS_UNVERIFIED");
+    assert_committed(&commit("chore: offline", &[("KB_OFFLINE", "1")]));
 }

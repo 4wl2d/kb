@@ -12,6 +12,8 @@ use crate::util::{read_file_limited, safe_join};
 
 pub struct Options<'a> {
     pub mode: &'a str,
+    /// Index read by staged mode instead of the default (a commit hook's pending index).
+    pub index_file: Option<&'a Path>,
     pub branch: Option<&'a str>,
     pub commit_message: Option<&'a Path>,
     pub only: &'a BTreeSet<String>,
@@ -115,6 +117,8 @@ pub fn gather(
         Vec::new()
     };
     let patterns = super::globs(&patterns)?;
+    // Staged patches read the index being committed (only staged mode names one).
+    let patch_git = Git::new(root).with_index_file(options.index_file);
     let mut files = Vec::new();
     let mut total = 0usize;
     for file in &diff.files {
@@ -162,7 +166,7 @@ pub fn gather(
                 if let Some(old) = &file.old_path {
                     args.push(old);
                 }
-                let patch = git.run_bytes_limited(&args, 8 * 1024 * 1024)?;
+                let patch = patch_git.run_bytes_limited(&args, 8 * 1024 * 1024)?;
                 if patch.is_empty()
                     && options.mode == "working-tree"
                     && file.status == ChangeStatus::Added

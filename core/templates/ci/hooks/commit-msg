@@ -1,7 +1,10 @@
 #!/bin/sh
 # Host-repository template. Connect to an existing hook rather than overwriting it.
-# KB_PATH is the host-relative KB checkout; KB_SNAPSHOT may be pinned or latest when
-# the team chooses an explicit selection. No record text is executed by verify.
+# KB_PATH is the host-relative KB checkout. Like host CI, the hook reads the KB revision
+# the host pins; a team may set KB_SNAPSHOT=latest or working-tree instead. KB_OFFLINE=1
+# skips the remote freshness check, which host CI still performs. The hook checks the
+# index Git is committing and the message as Git will commit it. No record text is
+# executed by verify.
 set -eu
 
 if [ "$#" -ne 1 ]; then
@@ -12,6 +15,13 @@ kb_hook_message=$1
 case "$kb_hook_message" in
     /*) ;;
     *) kb_hook_message="$(pwd)/$kb_hook_message" ;;
+esac
+# `commit -a` and pathspec commits stage into an index that only GIT_INDEX_FILE names;
+# Git may pass it relative to the directory it runs the hook in.
+kb_hook_index=${GIT_INDEX_FILE:-}
+case "$kb_hook_index" in
+    ''|/*) ;;
+    *) kb_hook_index="$(pwd)/$kb_hook_index" ;;
 esac
 kb_hook_root=$(git rev-parse --show-toplevel)
 cd "$kb_hook_root"
@@ -28,6 +38,60 @@ case "/$kb_hook_path/" in
         exit 2
         ;;
 esac
-exec "$kb_hook_path/kbw" verify --diff HEAD --staged \
+
+# HEAD is detached while a rebase rewords or squashes; branch-name probes check the
+# branch being rebased.
+kb_hook_branch=
+if ! git symbolic-ref --quiet HEAD >/dev/null; then
+    for kb_hook_state in rebase-merge rebase-apply; do
+        kb_hook_head=$(git rev-parse --git-path "$kb_hook_state/head-name")
+        if [ -f "$kb_hook_head" ]; then
+            kb_hook_branch=$(sed -n '1s|^refs/heads/||p' "$kb_hook_head")
+            break
+        fi
+    done
+fi
+
+# Git runs this hook before it cleans the message up. Check what Git will commit (and CI
+# will read): cut at the scissors line, then strip comments when Git would. Git strips
+# them by default only from a message opened in an editor and sets GIT_EDITOR=: otherwise.
+kb_hook_cut=$(printf '%s\n' '------------------------ >8 ------------------------' |
+    git stripspace --comment-lines)
+case "$(git config --get commit.cleanup || :)" in
+    verbatim) kb_hook_cleanup=none ;;
+    whitespace|scissors) kb_hook_cleanup=space ;;
+    strip) kb_hook_cleanup=comments ;;
+    *)
+        if [ "${GIT_EDITOR-}" = : ]; then
+            kb_hook_cleanup=space
+        else
+            kb_hook_cleanup=comments
+        fi
+        ;;
+esac
+kb_hook_tmp=$(mktemp -d "${TMPDIR:-/tmp}/kb-commit-msg.XXXXXX")
+trap 'rm -f "$kb_hook_tmp/cut" "$kb_hook_tmp/message"; rmdir "$kb_hook_tmp"' EXIT
+trap 'exit 1' HUP INT TERM
+KB_HOOK_CUT=$kb_hook_cut awk '$0 == ENVIRON["KB_HOOK_CUT"] { exit } { print }' \
+    "$kb_hook_message" >"$kb_hook_tmp/cut"
+case "$kb_hook_cleanup" in
+    none) cp "$kb_hook_tmp/cut" "$kb_hook_tmp/message" ;;
+    space) git stripspace <"$kb_hook_tmp/cut" >"$kb_hook_tmp/message" ;;
+    *) git stripspace --strip-comments <"$kb_hook_tmp/cut" >"$kb_hook_tmp/message" ;;
+esac
+
+set -- --snapshot "${KB_SNAPSHOT:-pinned}"
+if [ "${KB_OFFLINE:-}" = 1 ]; then
+    set -- "$@" --offline
+fi
+if [ -n "$kb_hook_index" ]; then
+    set -- "$@" --index-file "$kb_hook_index"
+fi
+if [ -n "$kb_hook_branch" ]; then
+    set -- "$@" --branch "$kb_hook_branch"
+fi
+kb_hook_status=0
+"$kb_hook_path/kbw" verify --diff HEAD --staged \
     --only commit-message --only branch-name \
-    --commit-message "$kb_hook_message" --snapshot "${KB_SNAPSHOT:-auto}" --quiet
+    --commit-message "$kb_hook_tmp/message" "$@" --quiet || kb_hook_status=$?
+exit "$kb_hook_status"

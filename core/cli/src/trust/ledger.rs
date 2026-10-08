@@ -80,7 +80,8 @@ pub fn report(
             State::Changed => Support::Stale,
             State::Unverifiable => Support::Unverifiable,
         };
-        if !freshness.is_empty() {
+        // Proven drift stays stale; an unknown calendar date cannot weaken it.
+        if !freshness.is_empty() && support != Support::Stale {
             support = if future {
                 Support::Unverifiable
             } else {

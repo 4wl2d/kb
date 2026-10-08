@@ -409,6 +409,9 @@ pub struct VerifyArgs {
     /// Verify the staged index, not unstaged edits (commit-msg hook)
     #[arg(long)]
     pub staged: bool,
+    /// Index file to read for --staged; a commit hook passes $GIT_INDEX_FILE (`commit -a`)
+    #[arg(long, requires = "staged", value_name = "FILE")]
+    pub index_file: Option<PathBuf>,
     #[arg(long)]
     pub repo: Option<String>,
     #[arg(long = "id")]

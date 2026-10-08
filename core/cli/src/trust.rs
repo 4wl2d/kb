@@ -219,6 +219,20 @@ pub fn plan_stamps(
                     options.at
                 ))
             })?;
+            // A change anchor's own commit names the reviewed change: it is never rewritten,
+            // and a stamp from another commit would contradict it.
+            let reviewed = anchor
+                .commit
+                .as_deref()
+                .filter(|_| anchor.kind == AnchorKind::Change);
+            if let Some(reviewed) = reviewed
+                && !commit.starts_with(&reviewed.to_ascii_lowercase())
+            {
+                skipped.push(format!(
+                    "{id} anchor {index}: change anchor keeps its reviewed commit {reviewed}; stamp it with --at {reviewed}"
+                ));
+                continue;
+            }
             let bytes =
                 crate::host::facts::blob_at(root, &commit, path, provenance::MAX_ANCHOR_BYTES)?
                     .ok_or_else(|| {
@@ -285,7 +299,9 @@ pub fn plan_stamps(
                     .and_then(Value::as_inline_table_mut)
                     .ok_or_else(|| KbError::invalid_input("anchors must be tables"))?
             };
-            put(table, "commit", Value::from(commit));
+            if anchor.kind != AnchorKind::Change {
+                put(table, "commit", Value::from(commit));
+            }
             if table.get("stamp").is_none() {
                 table.insert("stamp", Item::Value(Value::InlineTable(InlineTable::new())));
             }

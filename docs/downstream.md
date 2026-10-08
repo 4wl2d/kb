@@ -225,9 +225,10 @@ protected publication job, handles reviewed merge/squash/rebase ranges without g
 parents, and never accepts a draft. Review the configuration and authority requirements
 in [the CI guide](../core/templates/ci/README.md) before enabling these optional jobs.
 
-Host CI reads the pinned KB revision (`--snapshot pinned`) because `auto` returns
-`UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the normal state
-between merging knowledge and updating the pin. Freshness is still verified.
+Host CI and the commit-msg hook read the pinned KB revision (`--snapshot pinned`) because
+`auto` returns `UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the
+normal state between merging knowledge and updating the pin. Freshness is still verified;
+the hook skips that check only with `KB_OFFLINE=1`.
 
 The `kb-impact` block (exactly one per description) is how a merge request acknowledges its
 knowledge impact:

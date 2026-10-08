@@ -27,7 +27,7 @@ fn report(ctx: &Ctx, args: &UsageReportArgs) -> Result<CommandOutput> {
     let found: BTreeSet<_> = log.calls.iter().map(|c| c.receipt.clone()).collect();
     let missing: Vec<_> = receipts.difference(&found).cloned().collect();
     let diff = if host.head.is_none() && args.diff == "HEAD" && args.head.is_none() {
-        crate::impact::initial_diff(&host.root, false, host.kb_submodule_path.as_deref())?
+        crate::impact::initial_diff(&host.root, false, host.kb_submodule_path.as_deref(), None)?
     } else {
         crate::impact::host_diff(
             &host.root,

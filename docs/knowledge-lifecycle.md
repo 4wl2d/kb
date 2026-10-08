@@ -88,7 +88,9 @@ preserves ids, kind, status, comments and body. The stamp contains the full Git 
 inclusive line span and SHA-256 of those exact bytes. A unique provider definition may
 supply its span; otherwise the entire file is stamped conservatively. Unstamped symbol
 checks recognize spelling at identifier boundaries, not semantic identity. Stamped checks
-verify stored bytes without rediscovering a moved/renamed qualified symbol.
+verify stored bytes without rediscovering a moved/renamed qualified symbol. A change
+anchor's own `commit` names the reviewed change and is never rewritten or added: such an
+anchor is stamped only with `--at` that commit and is otherwise reported as skipped.
 
 `--verified-at` and `--review-by` on stamping are optional explicit human-review claims,
 never inferred from a matching source hash. `anchors check --strict` additionally requires
@@ -99,7 +101,8 @@ change knowledge. Uncommitted host edits cannot become a Git stamp.
 Drift compares the selected evidence baseline (`verified`, revision or date) to `--at` and
 groups review work by owner. A missing baseline or non-ancestor cannot prove support.
 Ledger classifies each statement as supported, stale or unverifiable and chooses a seeded
-draft sample for human audit; `--check` concerns accepted statements. Matching bytes do not
+draft sample for human audit; `--check` concerns accepted statements. A changed stamped span
+stays stale even when a freshness date is missing or unknown. Matching bytes do not
 certify truth. Drafts stay drafts regardless of the audit result.
 
 `validate --stale DAYS --on DATE` and context freshness checks warn about overdue review,
@@ -121,7 +124,8 @@ final-path naming regexes, forbidden static import edges and banned patterns in 
 source lines. Probe kind defines its positive/negative meaning; statement level determines
 blocking severity. Banned-API matching is lexical, including comments and strings. No
 command, interpreter or script can be embedded in a record. A first commit uses an empty
-baseline; `--staged` reads the index, and `--head` reads committed content and version files.
+baseline; `--staged` reads the index (`--index-file` names the one a commit hook receives in
+`GIT_INDEX_FILE`), and `--head` reads committed content and version files.
 
 Natural-language conditions and exceptions cannot be inferred mechanically. Repeatable
 `--applicable RECORD#STATEMENT` asserts that conditions hold and no exception applies; the
@@ -135,7 +139,11 @@ advisory probes. Skipped probes are reported separately. Findings retain file/li
 evidence without echoing source or commit-message text. The optional Git commit-msg hook
 and host CI templates preserve native exit codes. They do not install themselves or grant
 branch-protection authority; these Git checks are distinct from optional agent pre-edit
-or stop hooks whose usefulness still needs a measured consultation gap.
+or stop hooks whose usefulness still needs a measured consultation gap. Like host CI, the
+hook reads the pinned KB revision (`KB_SNAPSHOT` overrides it; `KB_OFFLINE=1` skips the
+freshness check). It checks the index Git is committing (also for `commit -a` and pathspec
+commits), the message as Git will commit it (scissors cut, comments stripped as Git would)
+and, during a rebase, the rebased branch.
 
 ## Local delivery observations
 

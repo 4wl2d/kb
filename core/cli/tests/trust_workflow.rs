@@ -213,6 +213,138 @@ fn committed_drift_is_grouped_by_owner_and_changes_ledger_support() {
 }
 
 #[test]
+fn proven_drift_stays_stale_when_the_review_date_is_unknown() {
+    let w = World::new();
+    w.policy("persist");
+    // No --verified-at: an age check adds VERIFIED_AT_MISSING.
+    w.run(
+        &[
+            "anchors",
+            "stamp",
+            "--id",
+            "acme.policy.evidence",
+            "--apply",
+        ],
+        0,
+    );
+    write(
+        &w.host.join("app/auth/Store.rs"),
+        "// Synthetic changed source\npub fn persist() -> u32 {\n    2\n}\n",
+    );
+    w.sb.commit_all(&w.host, "synthetic behavior change");
+    let args = [
+        "ledger",
+        "--id",
+        "acme.policy.evidence",
+        "--stale",
+        "90",
+        "--check",
+    ];
+    let ledger = w.run(&args, 42);
+    assert_eq!(ledger["result"]["ledger"]["accepted_counts"]["stale"], 1);
+    assert_eq!(
+        ledger["result"]["ledger"]["accepted_counts"]["unverifiable"],
+        0
+    );
+    let statement = &ledger["result"]["ledger"]["statements"][0];
+    assert_eq!(statement["support"], "stale");
+    let reasons = statement["reasons"].as_array().unwrap();
+    assert!(
+        reasons
+            .iter()
+            .any(|r| r.as_str().unwrap().starts_with("VERIFIED_AT_MISSING"))
+    );
+}
+
+#[test]
+fn stamping_never_rewrites_or_invents_a_change_anchor_commit() {
+    let w = World::new();
+    let reviewed = &w.base[..12];
+    let path = w.kb.join("project/knowledge/policies/evidence.md");
+    write(
+        &path,
+        &format!(
+            r#"+++
+schema = 2
+id = "acme.policy.evidence"
+kind = "policy"
+title = "Synthetic persistence contract"
+status = "accepted"
+owner = "arch"
+[scope]
+modules = ["mobile.auth"]
+[[rules]]
+id = "persist"
+level = "must"
+text = "Persist synthetic state."
+[[anchors]]
+kind = "change"
+repo = "mobile"
+change = "!42"
+commit = "{reviewed}"
+path = "app/auth/Store.rs"
+[[anchors]]
+kind = "change"
+repo = "mobile"
+change = "!43"
+path = "app/auth/Store.rs"
++++
+"#
+        ),
+    );
+    write(
+        &w.host.join("app/auth/Store.rs"),
+        "// Synthetic later source\npub fn persist() -> u32 {\n    2\n}\n",
+    );
+    let head = w.sb.commit_all(&w.host, "synthetic later change");
+    // (anchor commit, stamp commit) per anchor.
+    let anchors = || {
+        let bytes = fs::read(&path).unwrap();
+        let parsed = kb::parse::parse_record("record", &bytes).unwrap();
+        parsed
+            .record
+            .common()
+            .anchors
+            .iter()
+            .map(|a| {
+                (
+                    a.commit.as_ref().map(ToString::to_string),
+                    a.stamp.as_ref().map(|s| s.commit.to_string()),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let stamp = |at: &str| {
+        w.run(
+            &[
+                "anchors",
+                "stamp",
+                "--id",
+                "acme.policy.evidence",
+                "--at",
+                at,
+                "--apply",
+            ],
+            0,
+        )
+    };
+    // At a later commit the reviewed change keeps its commit and stays unstamped.
+    let later = stamp("HEAD");
+    assert!(
+        later["result"]["plan"]["skipped"][0]
+            .as_str()
+            .unwrap()
+            .contains("anchor 0: change anchor keeps its reviewed commit")
+    );
+    let reviewed = Some(reviewed.to_string());
+    assert_eq!(anchors(), [(reviewed.clone(), None), (None, Some(head))]);
+    // At the reviewed commit the span is stamped and the anchor's own text is preserved.
+    stamp(reviewed.as_deref().unwrap());
+    let base = Some(w.base.clone());
+    assert_eq!(anchors(), [(reviewed, base.clone()), (None, base)]);
+}
+
+#[test]
 fn freshness_is_date_bound_visible_in_context_and_never_drops_the_rule() {
     let w = World::new();
     w.policy("persist");

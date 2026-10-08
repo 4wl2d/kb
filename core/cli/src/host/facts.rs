@@ -113,8 +113,17 @@ pub fn history_window(root: &Path, since: &str) -> Result<HistoryWindow> {
 /// Tracked names only. Historical requests use an immutable tree; ordinary requests use
 /// `ls-files` so staged additions are visible without reading source files from disk.
 pub fn tracked_files(root: &Path, revision: Option<&str>) -> Result<Vec<String>> {
+    listed_files(&Git::new(root), revision)
+}
+
+/// Names in `index_file` (a commit hook's pending index), else in the default index.
+pub fn index_files(root: &Path, index_file: Option<&Path>) -> Result<Vec<String>> {
+    listed_files(&Git::new(root).with_index_file(index_file), None)
+}
+
+fn listed_files(git: &Git, revision: Option<&str>) -> Result<Vec<String>> {
     let mut paths = BTreeSet::new();
-    for bytes in tracked_names(root, revision)?.split(|b| *b == 0) {
+    for bytes in tracked_names(git, revision)?.split(|b| *b == 0) {
         if bytes.is_empty() {
             continue;
         }
@@ -132,7 +141,7 @@ pub fn tracked_files(root: &Path, revision: Option<&str>) -> Result<Vec<String>>
 pub fn discoverable_files(root: &Path, revision: Option<&str>) -> Result<(Vec<String>, usize)> {
     let mut paths = BTreeSet::new();
     let mut skipped = 0;
-    for bytes in tracked_names(root, revision)?.split(|b| *b == 0) {
+    for bytes in tracked_names(&Git::new(root), revision)?.split(|b| *b == 0) {
         match std::str::from_utf8(bytes) {
             Ok("") => {}
             Ok(path) if check_rel_path(path).is_ok() => {
@@ -145,8 +154,7 @@ pub fn discoverable_files(root: &Path, revision: Option<&str>) -> Result<(Vec<St
 }
 
 /// NUL-separated tracked names at `revision`, or of the index.
-fn tracked_names(root: &Path, revision: Option<&str>) -> Result<Vec<u8>> {
-    let git = Git::new(root);
+fn tracked_names(git: &Git, revision: Option<&str>) -> Result<Vec<u8>> {
     match revision {
         Some(rev) => {
             let commit = git
@@ -392,9 +400,15 @@ pub fn for_each_blob_at(
 
 /// Ordinary stage-0 index blob, independent of unstaged changes. Unmerged files have no
 /// single version and return None instead of borrowing a version from the work tree.
-pub fn index_blob(root: &Path, path: &str, max_bytes: usize) -> Result<Option<Vec<u8>>> {
+/// `index_file` replaces the default index (a commit hook's pending index).
+pub fn index_blob(
+    root: &Path,
+    path: &str,
+    max_bytes: usize,
+    index_file: Option<&Path>,
+) -> Result<Option<Vec<u8>>> {
     check_rel_path(path).map_err(KbError::unsafe_path)?;
-    let git = Git::new(root);
+    let git = Git::new(root).with_index_file(index_file);
     let listing = git.run_bytes_limited(
         &[
             "--literal-pathspecs",

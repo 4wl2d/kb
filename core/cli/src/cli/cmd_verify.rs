@@ -21,10 +21,29 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
     } else {
         "working-tree"
     };
+    // During `commit -a` or a pathspec commit, Git commits a temporary index that only the
+    // hook's GIT_INDEX_FILE names; a missing file would read as an empty index.
+    let index_file = args.index_file.as_ref().map(|p| ctx.env.cwd.join(p));
+    if index_file.as_ref().is_some_and(|p| !p.is_file()) {
+        return Err(KbError::invalid_input(
+            "--index-file must name an existing Git index file",
+        ));
+    }
+    let index_file = index_file.as_deref();
     let diff = if host.head.is_none() && args.diff == "HEAD" && args.head.is_none() {
-        crate::impact::initial_diff(&host.root, args.staged, host.kb_submodule_path.as_deref())?
+        crate::impact::initial_diff(
+            &host.root,
+            args.staged,
+            host.kb_submodule_path.as_deref(),
+            index_file,
+        )?
     } else if args.staged {
-        crate::impact::staged_diff(&host.root, &args.diff, host.kb_submodule_path.as_deref())?
+        crate::impact::staged_diff(
+            &host.root,
+            &args.diff,
+            host.kb_submodule_path.as_deref(),
+            index_file,
+        )?
     } else {
         crate::impact::host_diff(
             &host.root,
@@ -79,7 +98,7 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
             let bytes = if let Some(head) = &diff.head {
                 crate::host::facts::blob_at(&host.root, head, path, 64 * 1024)?
             } else if args.staged {
-                crate::host::facts::index_blob(&host.root, path, 64 * 1024)?
+                crate::host::facts::index_blob(&host.root, path, 64 * 1024, index_file)?
             } else {
                 None
             };
@@ -105,6 +124,7 @@ pub fn run(ctx: &Ctx, args: &VerifyArgs) -> Result<CommandOutput> {
             &records,
             &crate::verify::git::Options {
                 mode,
+                index_file,
                 branch: args.branch.as_deref(),
                 commit_message: message.as_deref(),
                 only: &only,

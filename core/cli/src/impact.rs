@@ -148,17 +148,28 @@ pub fn host_diff(
         head,
         working_tree,
         false,
+        None,
         kb_submodule_path,
     )
 }
 
-/// The staged index is a separate target from both the work tree and HEAD.
+/// The staged index is a separate target from both the work tree and HEAD. `index_file`
+/// replaces the default index (a commit hook's pending index for `commit -a`/pathspecs).
 pub fn staged_diff(
     host_root: &Path,
     base: &str,
     kb_submodule_path: Option<&str>,
+    index_file: Option<&Path>,
 ) -> Result<HostDiff> {
-    host_diff_inner(host_root, base, None, true, true, kb_submodule_path)
+    host_diff_inner(
+        host_root,
+        base,
+        None,
+        true,
+        true,
+        index_file,
+        kb_submodule_path,
+    )
 }
 
 fn host_diff_inner(
@@ -167,6 +178,7 @@ fn host_diff_inner(
     head: Option<&str>,
     working_tree: bool,
     staged: bool,
+    index_file: Option<&Path>,
     kb_submodule_path: Option<&str>,
 ) -> Result<HostDiff> {
     check_revision_arg(base)?;
@@ -192,7 +204,7 @@ fn host_diff_inner(
             format!("`{}` is not inside a Git work tree", host_root.display()),
         )
     })?;
-    let git = Git::new(&top);
+    let git = Git::new(&top).with_index_file(index_file);
     let base_oid = resolve(&git, base, "base")?;
     let head_oid = resolve(&git, head.unwrap_or("HEAD"), "head")?;
     let merge_base = merge_base(&git, &base_oid, &head_oid)?;
@@ -269,10 +281,16 @@ fn resolve(git: &Git, rev: &str, what: &str) -> Result<String> {
 }
 
 /// An unborn repository has an empty-tree baseline. Used by first-commit verification;
-/// unlike ordinary impact, there is no invented commit or merge-base object.
-pub fn initial_diff(root: &Path, staged: bool, kb_path: Option<&str>) -> Result<HostDiff> {
+/// unlike ordinary impact, there is no invented commit or merge-base object. `index_file`
+/// (staged only) replaces the default index, as in [`staged_diff`].
+pub fn initial_diff(
+    root: &Path,
+    staged: bool,
+    kb_path: Option<&str>,
+    index_file: Option<&Path>,
+) -> Result<HostDiff> {
     let git = Git::new(root);
-    let mut paths: BTreeSet<_> = crate::host::facts::tracked_files(root, None)?
+    let mut paths: BTreeSet<_> = crate::host::facts::index_files(root, index_file)?
         .into_iter()
         .collect();
     if !staged {
