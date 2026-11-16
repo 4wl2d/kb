@@ -31,6 +31,7 @@ The engine keeps its knowledge commands and adds an agent surface in front of th
 | feature documentation of a path or symbol | `kb doc <path\|symbol>` | knowledge (symbols located through route `sym`) |
 | search the repository | `kb find "<text>"` | route `find` |
 | run the checks for changed files | `kb check [files] [--base REV]` | registry command tools, knowledge validation, declared probes |
+| a project capability (any tool connected by configuration) | `kb run <capability> [args]` | route `<capability>` (`exec` tools) |
 | status of the connected tools | `kb tools` | registry |
 | check the environment | `kb doctor` | adds `tools` and `code-index` checks |
 
@@ -55,12 +56,17 @@ on, and their contracts are unchanged.
   this machine; the first tool that finds the requested symbol answers; a tool that is
   missing, fails or does not know the symbol hands over to the next and the hand-over is
   reported as a note. `--tool <id>` forces one tool. No model decision is involved.
-* **Adapters** are engine code, one per kind of tool: `codegraph` (live index),
-  `code-provider` (any `kb.code.v1` provider, ADR 0011), `ripgrep`, `git-grep` (built in;
-  also the lexical fallback for symbol requests) and `command` (checks). A new tool of an
-  existing kind is a registry entry; a new kind of tool needs a new adapter, or is wrapped
-  as a `kb.code.v1` provider and connected through `code-provider` without engine changes.
-  Skills name kb commands only, so neither case changes a skill.
+* **Adapters** are engine code: `codegraph` (live index), `code-provider` (any `kb.code.v1`
+  provider, ADR 0011), `ripgrep`, `git-grep` (built in; also the lexical fallback for
+  symbol requests), `command` (checks) and `exec`, which connects **any** command-line tool
+  by configuration: an argv template with placeholders, an optional `prepare` step (for an
+  index), the exit codes that mean success, and an output mapping (`lines`, `grep`, or JSON
+  with an item path and field mapping, or the native item protocol). An `exec` tool answers
+  a built-in request from its route or declares **project capabilities** that agents call
+  with `kb run <capability>` and discover with `kb tools`. Connecting a tool is therefore
+  always a registry entry; only a tool that needs engine logic of its own (CodeGraph's
+  sync-and-status handling, validated `kb.code.v1` facts) has a dedicated adapter. Skills
+  name kb commands only, so no case changes a skill.
 * **Output**: every agent command returns one answer (`kb.answer.v1` inside the unchanged
   `kb.cli.v1` envelope): sources (tool id, adapter, version, state of what it read),
   items (kind, name, path, line, end line, detail, confidence, source), notes, follow-ups,
@@ -135,9 +141,10 @@ the `kb-impact` acknowledgement that the CI gate checks.
 
 CodeGraph (live adapter, the reference backend), ripgrep and the built-in git grep are in
 the defaults. ast-index stays connected through the `kb.code.v1` reference adapter
-(`code-provider`); its live CLI is not adapted, because its symbol search requires an
-index kb does not create and its caller search is lexical, which the built-in git grep
-already covers.
+(`code-provider`); its live CLI needs no dedicated adapter: it connects as an `exec` entry
+(its symbol search needs an index kb does not create, its caller search is lexical, which
+the built-in git grep already covers). The maintainer registry dogfoods `exec` with
+CodeGraph's `callees` and `affected` commands as project capabilities.
 
 ## Consequences
 
@@ -147,7 +154,8 @@ already covers.
 * Static answers remain navigation evidence: CodeGraph's graph is not runtime
   reachability, lexical matches are labelled, and the skills tell agents to confirm
   decisive facts in the source.
-* `kb check` executes configured programs. That widens what the engine does at runtime;
+* `kb check`, `kb run` and every routed tool execute configured programs. That widens what
+  the engine does at runtime;
   the registry is therefore trusted configuration, `SECURITY.md` says so, and a malicious
   registry is equivalent to a malicious engine checkout.
 * README non-goals change: kb still is not an MCP server, daemon, web UI, telemetry

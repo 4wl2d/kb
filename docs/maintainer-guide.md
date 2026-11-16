@@ -214,13 +214,15 @@ Without a runtime, the debug build does the same: `target/debug/kb --root . sche
 
 The agent commands reach code tools through the tool registry and engine-owned adapters
 ([ADR 0016](adr/0016-agent-cli.md), [agent-cli.md](agent-cli.md#connecting-a-new-tool)).
-Another tool of a supported kind is a registry entry, and a new kind of code-intelligence
-tool can be wrapped as a `kb.code.v1` provider and connected with `adapter = "code-provider"`;
-neither changes the engine. A new adapter kind (another live index protocol) is an engine
-change:
+Any command-line tool connects as an `exec` entry (argv template, `prepare` step, output
+mapping; [agent-cli.md](agent-cli.md#connecting-any-tool-exec)), another tool of a supported
+kind is a registry entry, and commit-bound facts can come from a `kb.code.v1` provider
+connected with `adapter = "code-provider"`; none of these changes the engine. A dedicated
+adapter is for a tool that needs engine logic of its own (an index protocol with status and
+freshness handling, like `codegraph.rs`) and is an engine change:
 
 1. Add one module in `core/cli/src/tools/` next to `codegraph.rs`, `provider.rs`,
-   `grep.rs` and `command.rs`. It turns a `CodeQuery` into an `Outcome`: items with path,
+   `grep.rs`, `exec.rs` and `command.rs`. It turns a `CodeQuery` into an `Outcome`: items with path,
    line, confidence and a `Source` that names the tool, its version and the state of what
    it read. Start the program through `run_tool`, which applies the deadline, the output
    limits and the shared environment (telemetry, update checks and daemons off). The

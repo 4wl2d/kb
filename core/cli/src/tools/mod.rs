@@ -8,6 +8,7 @@
 
 pub mod codegraph;
 pub mod command;
+pub mod exec;
 pub mod grep;
 pub mod provider;
 
@@ -151,7 +152,12 @@ pub fn probe(tool: &ToolSpec, roots: &Roots, ask_version: bool) -> Probe {
     if tool.adapter == AdapterKind::GitGrep {
         p.available = true;
         if ask_version {
-            p.version = version_of(Path::new("git"), &[]).ok();
+            p.version = version_of(
+                Path::new("git"),
+                &["--version".to_string()],
+                &std::collections::BTreeMap::new(),
+            )
+            .ok();
         }
         return p;
     }
@@ -167,22 +173,45 @@ pub fn probe(tool: &ToolSpec, roots: &Roots, ask_version: bool) -> Probe {
     };
     p.program = Some(path.display().to_string());
     p.available = true;
-    if ask_version && tool.adapter != AdapterKind::Command {
-        match version_of(&path, &tool.args) {
+    let version_args: Vec<String> = match tool.adapter {
+        AdapterKind::Command => Vec::new(),
+        AdapterKind::Exec => tool
+            .version_args
+            .clone()
+            .unwrap_or_else(|| vec!["--version".into()]),
+        AdapterKind::CodeProvider => tool
+            .args
+            .iter()
+            .cloned()
+            .chain(["--version".to_string()])
+            .collect(),
+        _ => vec!["--version".into()],
+    };
+    if ask_version && !version_args.is_empty() {
+        match version_of(&path, &version_args, &tool.env) {
             Ok(v) => p.version = Some(v),
             Err(e) => {
                 p.available = false;
-                p.reason = Some(format!("`{program} --version` failed: {}", e.message));
+                p.reason = Some(format!(
+                    "`{program} {}` failed: {}",
+                    version_args.join(" "),
+                    e.message
+                ));
             }
         }
     }
     p
 }
 
-fn version_of(program: &Path, prefix: &[String]) -> Result<String> {
+fn version_of(
+    program: &Path,
+    args: &[String],
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<String> {
     let mut cmd = Command::new(program);
-    cmd.args(prefix).arg("--version");
+    cmd.args(args);
     tool_env(&mut cmd);
+    cmd.envs(env);
     let out = capture(
         &mut cmd,
         &[],
@@ -264,7 +293,58 @@ pub fn answer_code(
     query: &CodeQuery,
     forced: Option<&str>,
 ) -> Result<Outcome> {
-    let route = route_for(registry, query.capability, forced)?;
+    let name = query.capability.as_str();
+    let route = route_for(registry, name, forced)?;
+    let exec_request = exec::ExecRequest {
+        capability: name.to_string(),
+        subject: query.name.clone(),
+        file: query.file.clone(),
+        kind: query.kind.clone(),
+        depth: query.depth,
+        limit: query.limit,
+        ..exec::ExecRequest::default()
+    };
+    run_route(route, roots, name, &query.name, |tool, probe| {
+        match tool.adapter {
+            AdapterKind::Codegraph => Some(codegraph::query(tool, probe, roots, query)),
+            AdapterKind::CodeProvider => Some(provider::query(tool, probe, roots, query)),
+            AdapterKind::GitGrep => Some(grep::lexical(tool, probe, roots, query)),
+            AdapterKind::Exec => Some(exec::query(tool, probe, roots, &exec_request)),
+            AdapterKind::Ripgrep | AdapterKind::Command => None,
+        }
+    })
+}
+
+/// Route a request to `exec` tools (project capabilities of `kb run`, or a built-in request
+/// an exec tool answers), with the same fallback rules as [`answer_code`].
+pub fn answer_exec(
+    registry: &Registry,
+    roots: &Roots,
+    request: &exec::ExecRequest,
+    forced: Option<&str>,
+) -> Result<Outcome> {
+    let route = route_for(registry, &request.capability, forced)?;
+    run_route(
+        route,
+        roots,
+        &request.capability,
+        &request.subject,
+        |tool, probe| {
+            (tool.adapter == AdapterKind::Exec).then(|| exec::query(tool, probe, roots, request))
+        },
+    )
+}
+
+/// Try `route` in order: skip unavailable tools, return the first outcome that found what
+/// was asked; otherwise the first non-empty outcome, otherwise the first outcome. Every
+/// hand-over is a note; with no outcome at all the request is `TOOL_UNAVAILABLE`.
+fn run_route(
+    route: Vec<&ToolSpec>,
+    roots: &Roots,
+    request: &str,
+    subject: &str,
+    mut call: impl FnMut(&ToolSpec, &Probe) -> Option<Result<Outcome>>,
+) -> Result<Outcome> {
     let mut notes = Vec::new();
     let mut outcomes: Vec<Outcome> = Vec::new();
     for tool in route {
@@ -277,18 +357,17 @@ pub fn answer_code(
             ));
             continue;
         }
-        let result = match tool.adapter {
-            AdapterKind::Codegraph => codegraph::query(tool, &probe, roots, query),
-            AdapterKind::CodeProvider => provider::query(tool, &probe, roots, query),
-            AdapterKind::GitGrep => grep::lexical(tool, &probe, roots, query),
-            AdapterKind::Ripgrep | AdapterKind::Command => continue,
+        let Some(result) = call(tool, &probe) else {
+            continue;
         };
         match result {
-            Ok(outcome) if outcome.found => {
-                return Ok(finish(outcome, notes));
-            }
+            Ok(outcome) if outcome.found => return Ok(finish(outcome, notes)),
             Ok(outcome) => {
-                notes.push(format!("{} did not find `{}`", tool.id, query.name));
+                notes.push(if subject.is_empty() {
+                    format!("{} returned nothing", tool.id)
+                } else {
+                    format!("{} did not find `{subject}`", tool.id)
+                });
                 outcomes.push(outcome);
             }
             Err(e) => notes.push(format!("{} failed: {}", tool.id, e.message)),
@@ -297,12 +376,12 @@ pub fn answer_code(
     if let Some(i) = outcomes
         .iter()
         .position(|o| !o.items.is_empty())
-        .or(if outcomes.is_empty() { None } else { Some(0) })
+        .or((!outcomes.is_empty()).then_some(0))
     {
         let best = outcomes.remove(i);
         return Ok(finish(best, notes));
     }
-    Err(unavailable(query.capability, notes))
+    Err(unavailable(request, notes))
 }
 
 /// Hand-over notes of earlier tools first, then the answering tool's own notes.
@@ -312,10 +391,10 @@ fn finish(mut outcome: Outcome, mut notes: Vec<String>) -> Outcome {
     outcome
 }
 
-/// The tools to try for `capability`, in order.
+/// The tools to try for a request (built-in name or project capability), in order.
 pub fn route_for<'a>(
     registry: &'a Registry,
-    capability: Capability,
+    request: &str,
     forced: Option<&str>,
 ) -> Result<Vec<&'a ToolSpec>> {
     if let Some(id) = forced {
@@ -325,24 +404,23 @@ pub fn route_for<'a>(
                 registry.origin()
             ))
         })?;
-        if !tool.supports(capability) {
+        if !tool.answers(request) {
             return Err(KbError::invalid_input(format!(
-                "tool `{id}` (adapter `{}`) cannot answer `{}`",
-                tool.adapter.as_str(),
-                capability.as_str()
+                "tool `{id}` (adapter `{}`) cannot answer `{request}`",
+                tool.adapter.as_str()
             )));
         }
         return Ok(vec![tool]);
     }
-    Ok(registry.config.route(capability))
+    Ok(registry.config.route_named(request))
 }
 
-pub fn unavailable(capability: Capability, attempts: Vec<String>) -> KbError {
+pub fn unavailable(request: &str, attempts: Vec<String>) -> KbError {
     KbError::new(
         ErrorCode::ToolUnavailable,
         format!(
             "no connected tool could answer `{}`{}",
-            capability.as_str(),
+            request,
             if attempts.is_empty() {
                 " (the route is empty)".to_string()
             } else {
@@ -350,7 +428,7 @@ pub fn unavailable(capability: Capability, attempts: Vec<String>) -> KbError {
             }
         ),
     )
-    .with_details(json!({ "capability": capability.as_str(), "attempts": attempts }))
+    .with_details(json!({ "capability": request, "attempts": attempts }))
     .with_hint(
         "run `kbw tools` to see the registry and what is installed; `kbw doctor` checks the setup",
     )
@@ -363,9 +441,27 @@ pub fn run_tool(
     roots: &Roots,
     timeout: u64,
 ) -> Result<crate::process::Captured> {
+    run_with_env(
+        program,
+        args,
+        roots,
+        timeout,
+        &std::collections::BTreeMap::new(),
+    )
+}
+
+/// [`run_tool`] with the tool's configured environment on top of the shared one.
+pub fn run_with_env(
+    program: &Path,
+    args: &[String],
+    roots: &Roots,
+    timeout: u64,
+    env: &std::collections::BTreeMap<String, String>,
+) -> Result<crate::process::Captured> {
     let mut cmd = Command::new(program);
     cmd.args(args).current_dir(&roots.code);
     tool_env(&mut cmd);
+    cmd.envs(env);
     capture(
         &mut cmd,
         &[],
@@ -422,12 +518,7 @@ mod tests {
             id: "t".into(),
             adapter: AdapterKind::Ripgrep,
             program: Some("{kb}/bin/tool".into()),
-            args: vec![],
-            sync: None,
-            run: vec![],
-            paths: vec![],
-            description: None,
-            timeout_seconds: None,
+            ..ToolSpec::default()
         };
         let p = probe(&spec, &roots, true);
         assert!(p.available, "{p:?}");

@@ -28,6 +28,34 @@ program = "{kb}/target/release/kb-code-provider"
 args = ["--backend", "ast-index"]
 timeout_seconds = 300
 
+# Any other command-line tool: exec entries with an argv template and an output mapping.
+# They add project capabilities that agents call with `kb run <capability> [args]`.
+[[tool]]
+id = "callees"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]
+args = ["callees", "{subject}", "--path", "{root}", "--json"]
+capabilities = ["callees"]
+description = "functions a symbol calls (CodeGraph)"
+output = "json"
+items = "/definitions/*/callees"
+fields = { path = "filePath", line = "startLine", detail = "kind" }
+kind = "callee"
+
+[[tool]]
+id = "affected-tests"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]
+args = ["affected", "--path", "{root}", "--json", "{args}"]
+capabilities = ["affected-tests"]
+description = "test files affected by changed source files (CodeGraph)"
+output = "json"
+items = "/affectedTests"
+strings = "path"
+kind = "test"
+
 # Checks of AGENTS.md, triggered by the files they cover.
 [[tool]]
 id = "rustfmt"

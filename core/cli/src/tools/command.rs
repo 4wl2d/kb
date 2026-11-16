@@ -94,8 +94,6 @@ mod tests {
             id: "lint".into(),
             adapter: AdapterKind::Command,
             program: Some("eslint".into()),
-            args: vec![],
-            sync: None,
             run: vec![
                 "--config".into(),
                 "{kb}/lint.json".into(),
@@ -103,8 +101,7 @@ mod tests {
                 "x{files}".into(),
             ],
             paths: vec!["**/*.ts".into()],
-            description: None,
-            timeout_seconds: None,
+            ..ToolSpec::default()
         };
         let roots = Roots {
             kb: "/k".into(),

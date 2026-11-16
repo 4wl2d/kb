@@ -29,16 +29,37 @@ pub fn run(ctx: &Ctx, args: &ToolsArgs) -> Result<CommandOutput> {
         .iter()
         .map(|t| (t.id.clone(), tools::probe(t, &ws.roots, true)))
         .collect();
-    for cap in Capability::ROUTED {
-        let route = ws.registry.config.route(cap);
+    let custom: Vec<&str> = ws
+        .registry
+        .config
+        .custom_capabilities()
+        .into_iter()
+        .collect();
+    let names: Vec<&str> = Capability::ROUTED
+        .iter()
+        .map(|c| c.as_str())
+        .chain(custom.iter().copied())
+        .collect();
+    for name in names {
+        let route = ws.registry.config.route_named(name);
         let order: Vec<&str> = route.iter().map(|t| t.id.as_str()).collect();
         let answering = route.iter().find(|t| probes[&t.id].available);
+        let call = if custom.contains(&name) {
+            let description = route
+                .iter()
+                .find_map(|t| t.description.as_deref())
+                .map(|d| format!(" · {d}"))
+                .unwrap_or_default();
+            format!(" · call: kb run {name} [args]{description}")
+        } else {
+            String::new()
+        };
         let detail = match answering {
-            Some(t) => format!("{} (route: {})", t.id, order.join(" → ")),
+            Some(t) => format!("{} (route: {}){call}", t.id, order.join(" → ")),
             None => {
-                answer.note(format!("nothing available answers `{}`", cap.as_str()));
+                answer.note(format!("nothing available answers `{name}`"));
                 format!(
-                    "unavailable (route: {})",
+                    "unavailable (route: {}){call}",
                     if order.is_empty() {
                         "empty".into()
                     } else {
@@ -47,11 +68,9 @@ pub fn run(ctx: &Ctx, args: &ToolsArgs) -> Result<CommandOutput> {
                 )
             }
         };
-        answer.items.push(
-            Item::new("route", "registry")
-                .name(cap.as_str())
-                .detail(detail),
-        );
+        answer
+            .items
+            .push(Item::new("route", "registry").name(name).detail(detail));
     }
     answer.items.push(
         Item::new("route", "registry")
@@ -72,12 +91,15 @@ pub fn run(ctx: &Ctx, args: &ToolsArgs) -> Result<CommandOutput> {
         )));
     for tool in &ws.registry.config.tools {
         let p = &probes[&tool.id];
-        let caps: Vec<&str> = tool
-            .adapter
-            .capabilities()
-            .iter()
-            .map(|c| c.as_str())
-            .collect();
+        let caps: Vec<&str> = if tool.adapter == AdapterKind::Exec {
+            tool.capabilities.iter().map(String::as_str).collect()
+        } else {
+            tool.adapter
+                .capabilities()
+                .iter()
+                .map(|c| c.as_str())
+                .collect()
+        };
         let mut detail = match &p.version {
             Some(v) => format!("{v} · "),
             None => String::new(),

@@ -41,8 +41,9 @@ so reporters see the downstream policy. On hosts without that convention, link
 
 ## Configured checks and code tools
 
-* **`kb check` executes configured programs.** It runs the argv of the `command` tools in
-  the tool registry `<profile>/tools.toml` (`project/tools.toml`, or
+* **kb executes configured programs.** `kb check` runs the argv of the `command` tools,
+  and `kb sym`, `callers`, `impact`, `find` and `kb run` run the routed tools (`exec` tools
+  with their `args` template and `prepare` step) of the tool registry `<profile>/tools.toml` (`project/tools.toml`, or
   `core/maintainer-knowledge/tools.toml` for the maintainer profile): without a shell, in
   the host repository, under a deadline and output limits. The registry is read only from
   the working tree of the KB checkout that supplies the engine, never from a fetched

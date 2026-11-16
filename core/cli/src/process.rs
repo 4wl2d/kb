@@ -72,9 +72,7 @@ fn run(command: &mut Command, input: &[u8], limits: Limits, own_group: bool) -> 
         use std::os::unix::process::CommandExt;
         command.process_group(0);
     }
-    let mut child = command
-        .spawn()
-        .map_err(|e| KbError::io("cannot start subprocess", e))?;
+    let mut child = spawn_retrying(command)?;
     let mut stdin = child.stdin.take().expect("piped stdin");
     let stdout = child.stdout.take().expect("piped stdout");
     let stderr = child.stderr.take().expect("piped stderr");
@@ -189,4 +187,22 @@ fn timeout(limits: Limits) -> KbError {
         "subprocess exceeded its configured deadline",
     )
     .with_details(serde_json::json!({"kind":"timeout", "timeout_ms":limits.timeout.as_millis()}))
+}
+
+/// Start `command`, retrying briefly while the executable is busy (`ETXTBSY`): on Linux a
+/// program just written, or being replaced by a build, stays busy while any process that
+/// forked with its write descriptor open has not yet executed. That window is short; other
+/// spawn errors are returned at once.
+pub fn spawn_retrying(command: &mut Command) -> Result<Child> {
+    let mut attempt = 0u32;
+    loop {
+        match command.spawn() {
+            Ok(child) => return Ok(child),
+            Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 50 => {
+                attempt += 1;
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            Err(e) => return Err(KbError::io("cannot start subprocess", e)),
+        }
+    }
 }

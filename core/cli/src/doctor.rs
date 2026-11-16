@@ -1207,6 +1207,26 @@ fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> 
         .filter(|t| t.adapter == AdapterKind::Command && !tools::probe(t, &roots, false).available)
         .map(|t| t.id.as_str())
         .collect();
+    // Project capabilities (`kb run`) whose route has no available tool.
+    let custom: Vec<&str> = registry.config.custom_capabilities().into_iter().collect();
+    let custom_missing: Vec<&str> = custom
+        .iter()
+        .copied()
+        .filter(|c| {
+            !registry
+                .config
+                .route_named(c)
+                .iter()
+                .any(|t| tools::probe(t, &roots, false).available)
+        })
+        .collect();
+    let commands: Vec<&str> = commands
+        .into_iter()
+        .chain(custom_missing.iter().copied())
+        .collect();
+    if !custom.is_empty() {
+        answering.push(format!("run: {}", custom.join(",")));
+    }
     let msg = format!(
         "{}: {}{}",
         registry.origin(),
@@ -1214,7 +1234,7 @@ fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> 
         if commands.is_empty() {
             String::new()
         } else {
-            format!("; check programs not found: {}", commands.join(", "))
+            format!("; not available here: {}", commands.join(", "))
         }
     );
     let tools_check = if !missing.is_empty() {
@@ -1226,7 +1246,7 @@ fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> 
     } else if !lexical.is_empty() || !commands.is_empty() {
         let c = Check::warn("tools", msg);
         if lexical.is_empty() {
-            c.hint("install the check programs or remove their entries from tools.toml")
+            c.hint("install the missing programs (check commands, `kb run` capabilities) or remove their entries from tools.toml")
         } else {
             c.hint(format!(
                 "{} answer lexically only; install CodeGraph and create its index for structural answers",

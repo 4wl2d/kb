@@ -18,6 +18,7 @@ mod cmd_init;
 mod cmd_integrate;
 mod cmd_migrate;
 mod cmd_propose;
+mod cmd_run;
 mod cmd_schema;
 mod cmd_search;
 mod cmd_show;
@@ -88,6 +89,7 @@ fn command_name(c: &Command) -> &'static str {
         Command::Doc(_) => "doc",
         Command::Find(_) => "find",
         Command::Check(_) => "check",
+        Command::Run(_) => "run",
         Command::Tools(_) => "tools",
         Command::Init(_) => "init",
         Command::Doctor(_) => "doctor",
@@ -202,6 +204,7 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
         Command::Doc(a) => cmd_doc::run(&ctx, a),
         Command::Find(a) => cmd_find::run(&ctx, a),
         Command::Check(a) => cmd_check::run(&ctx, a),
+        Command::Run(a) => cmd_run::run(&ctx, a),
         Command::Tools(a) => cmd_tools::run(&ctx, a),
         Command::Init(a) => cmd_init::run(&ctx, a),
         Command::Doctor(a) => cmd_doctor::run(&ctx, a),

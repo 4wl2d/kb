@@ -30,7 +30,11 @@ pub fn run(ctx: &Ctx, args: &FindArgs) -> Result<CommandOutput> {
     };
     let mut notes = Vec::new();
     let mut result = None;
-    for tool in tools::route_for(&ws.registry, Capability::Find, args.answer.tool.as_deref())? {
+    for tool in tools::route_for(
+        &ws.registry,
+        Capability::Find.as_str(),
+        args.answer.tool.as_deref(),
+    )? {
         let probe = tools::probe(tool, &ws.roots, true);
         if !probe.available {
             notes.push(format!(
@@ -40,7 +44,29 @@ pub fn run(ctx: &Ctx, args: &FindArgs) -> Result<CommandOutput> {
             ));
             continue;
         }
-        match grep::find(tool, &probe, &ws.roots, &query) {
+        let found = if tool.adapter == crate::model::tools::AdapterKind::Exec {
+            if args.regex {
+                notes.push(format!(
+                    "{} receives the text as given; --regex is up to the tool",
+                    tool.id
+                ));
+            }
+            tools::exec::query(
+                tool,
+                &probe,
+                &ws.roots,
+                &tools::exec::ExecRequest {
+                    capability: "find".into(),
+                    subject: args.text.clone(),
+                    globs: args.globs.clone(),
+                    limit: lines,
+                    ..tools::exec::ExecRequest::default()
+                },
+            )
+        } else {
+            grep::find(tool, &probe, &ws.roots, &query)
+        };
+        match found {
             Ok(outcome) => {
                 result = Some(outcome);
                 break;
@@ -48,7 +74,8 @@ pub fn run(ctx: &Ctx, args: &FindArgs) -> Result<CommandOutput> {
             Err(e) => notes.push(format!("{} failed: {}", tool.id, e.message)),
         }
     }
-    let outcome = result.ok_or_else(|| tools::unavailable(Capability::Find, notes.clone()))?;
+    let outcome =
+        result.ok_or_else(|| tools::unavailable(Capability::Find.as_str(), notes.clone()))?;
     let mut answer = Answer::new("find", format!("{:?}", args.text));
     answer.source(outcome.source.clone());
     for n in notes.into_iter().chain(outcome.notes) {

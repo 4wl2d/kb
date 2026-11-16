@@ -515,3 +515,176 @@ fn check_with_a_base_also_evaluates_declared_probes() {
     assert_eq!(code(&o), 0);
     assert!(stdout(&o).contains("would evaluate declared probes against HEAD"));
 }
+
+/// Any command-line tool, connected by configuration alone (`exec`): a project capability
+/// called with `kb run`, and a tool answering a built-in request.
+const EXEC_TOOLS: &str = r#"schema = 1
+[[tool]]
+id = "deps"
+adapter = "exec"
+program = "{kb}/fake/deps"
+args = ["--for", "{subject}", "--root={root}"]
+capabilities = ["deps"]
+description = "synthetic dependency lookup"
+output = "json"
+items = "/modules/*/uses"
+fields = { name = "module", path = "file", line = "at", detail = "why" }
+env = { DEPS_MODE = "strict" }
+version_args = []
+[[tool]]
+id = "quiet"
+adapter = "exec"
+program = "{kb}/fake/quiet"
+args = ["{args}"]
+capabilities = ["deps", "owners"]
+output = "lines"
+ok_exit = [0, 1]
+version_args = []
+[[tool]]
+id = "symgrep"
+adapter = "exec"
+program = "{kb}/fake/symgrep"
+args = ["{subject}"]
+capabilities = ["sym"]
+output = "grep"
+confidence = "lexical"
+version_args = ["-V"]
+[[tool]]
+id = "graph"
+adapter = "exec"
+program = "{kb}/fake/graph"
+prepare = ["prep", "{root}"]
+args = ["q", "{args}"]
+capabilities = ["graph"]
+output = "json"
+version_args = []
+[[tool]]
+id = "git-grep"
+adapter = "git-grep"
+[routes]
+sym = ["symgrep", "git-grep"]
+deps = ["quiet", "deps"]
+find = ["git-grep"]
+"#;
+
+fn exec_world() -> World {
+    let w = World::new(EXEC_TOOLS);
+    executable(
+        &w.kb.join("fake/deps"),
+        "#!/bin/sh\n# SYNTHETIC tool printing its own JSON shape.\n[ \"$DEPS_MODE\" = strict ] || exit 9\ncat <<JSON\n{\"modules\": [{\"uses\": [{\"module\": \"auth\", \"file\": \"app/src/auth/Login.kt\", \"at\": 3, \"why\": \"calls refresh for $2\"}]},\n {\"uses\": [{\"module\": \"net\", \"file\": \"app/src/net/Http.kt\", \"at\": \"7\", \"why\": \"transport\"}]}]}\nJSON\n",
+    );
+    executable(
+        &w.kb.join("fake/quiet"),
+        "#!/bin/sh\n# exit 1 = nothing found\nexit 1\n",
+    );
+    executable(
+        &w.kb.join("fake/graph"),
+        concat!(
+            "#!/bin/sh\n# SYNTHETIC indexed tool: `prep` builds the index, `q` reads it.\n",
+            "d=$(dirname \"$0\")\n",
+            "if [ \"$1\" = prep ]; then touch \"$d/prepared\"; exit 0; fi\n",
+            "[ -f \"$d/prepared\" ] || exit 7\n",
+            "shift\n",
+            "if [ \"$1\" = known ]; then printf '{\"items\": [{\"name\": \"n\", \"detail\": \"%s\"}]}\\n' \"$2\"; ",
+            "else echo \"Symbol not found\"; fi\n",
+        ),
+    );
+    executable(
+        &w.kb.join("fake/symgrep"),
+        "#!/bin/sh\n[ \"$1\" = -V ] && { echo symgrep 2.0; exit 0; }\necho \"app/src/auth/TokenRefresher.kt:2:5:    fun $1(): Token {\"\n",
+    );
+    w
+}
+
+#[test]
+fn project_capabilities_run_any_tool_through_the_registry() {
+    let w = exec_world();
+    let o = w.kb(&["--json", "run", "deps", "TokenRefresher"]);
+    assert_eq!(code(&o), 0, "{}", stdout(&o));
+    let v = json(&o);
+    assert_eq!(v["result"]["command"], "run");
+    assert_eq!(v["result"]["subject"], "deps TokenRefresher");
+    assert_eq!(
+        v["result"]["sources"][0]["id"], "deps",
+        "quiet found nothing and handed over"
+    );
+    assert_eq!(v["result"]["sources"][0]["adapter"], "exec");
+    let items = items(&v);
+    assert_eq!(items.len(), 2, "`*` flattens every module: {items:#?}");
+    assert_eq!(items[0]["name"], "auth");
+    assert_eq!(items[0]["path"], "app/src/auth/Login.kt");
+    assert_eq!(items[0]["line"], 3);
+    assert_eq!(items[0]["detail"], "calls refresh for TokenRefresher");
+    assert_eq!(items[1]["line"], 7, "string line numbers are read");
+    let notes = v["result"]["notes"].to_string();
+    assert!(notes.contains("quiet did not find"), "{notes}");
+
+    // `ok_exit` makes exit 1 an empty answer, not a failure.
+    let o = w.kb(&["run", "owners", "x"]);
+    assert_eq!(code(&o), 0, "{}", common::stderr(&o));
+    assert!(stdout(&o).contains("note: the tool returned nothing"));
+
+    // Misuse is rejected before any tool runs.
+    let o = w.kb(&["run", "sym", "refresh"]);
+    assert_eq!(code(&o), 64);
+    assert!(common::stderr(&o).contains("is a kb command"));
+    let o = w.kb(&["run", "lint"]);
+    assert_eq!(code(&o), 64);
+    assert!(common::stderr(&o).contains("declared capabilities: deps, graph, owners"));
+
+    // `kb tools` advertises project capabilities with how to call them.
+    let text = stdout(&w.kb(&["tools", "--lines", "40"]));
+    assert!(text.contains("route  deps  quiet (route: quiet → deps) · call: kb run deps [args] · synthetic dependency lookup"), "{text}");
+}
+
+#[test]
+fn exec_tools_can_answer_built_in_requests() {
+    let w = exec_world();
+    let v = json(&w.kb(&["--json", "sym", "refresh"]));
+    assert_eq!(v["ok"], true, "{v:#}");
+    let source = &v["result"]["sources"][0];
+    assert_eq!(source["id"], "symgrep");
+    assert_eq!(
+        source["version"], "symgrep 2.0",
+        "version_args are used for the probe"
+    );
+    let items = items(&v);
+    assert_eq!(items[0]["kind"], "definition");
+    assert_eq!(items[0]["path"], "app/src/auth/TokenRefresher.kt");
+    assert_eq!(items[0]["line"], 2);
+    assert_eq!(items[0]["confidence"], "lexical");
+    // A tool whose argv ignores the input cannot silently drop it.
+    let w = World::new(
+        "schema = 1\n[[tool]]\nid = \"st\"\nadapter = \"exec\"\nprogram = \"{kb}/fake/codegraph\"\nargs = [\"status\"]\ncapabilities = [\"status\"]\nversion_args = []\n",
+    );
+    let o = w.kb(&["run", "status", "extra"]);
+    assert_eq!(code(&o), 65, "{}", stdout(&o));
+    assert!(common::stderr(&o).contains("takes no input"));
+    let o = w.kb(&["run", "status"]);
+    assert_eq!(code(&o), 0, "{}", common::stderr(&o));
+}
+
+#[test]
+fn exec_prepare_steps_run_first_and_plain_text_is_an_empty_answer() {
+    let w = exec_world();
+    // kb options may follow the capability; `--` passes tool arguments that start with `-`.
+    let o = w.kb(&[
+        "--json", "run", "graph", "known", "--lines", "5", "--", "--flag",
+    ]);
+    assert_eq!(code(&o), 0, "{}", common::stderr(&o));
+    let v = json(&o);
+    assert!(w.kb.join("fake/prepared").exists(), "the prepare step ran");
+    assert_eq!(v["result"]["sources"][0]["state"], "working tree, prepared");
+    assert_eq!(
+        items(&v)[0]["detail"],
+        "--flag",
+        "native items need no mapping"
+    );
+    let o = w.kb(&["run", "graph", "unknown"]);
+    assert_eq!(code(&o), 0);
+    assert!(
+        stdout(&o).contains("note: graph printed no JSON: Symbol not found"),
+        "{}",
+        stdout(&o)
+    );
+}

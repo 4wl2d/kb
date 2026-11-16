@@ -458,6 +458,7 @@
             "migrate",
             "outline",
             "propose",
+            "run",
             "schema",
             "search",
             "show",

@@ -133,6 +133,8 @@ pub enum Command {
     Find(FindArgs),
     /// Run the configured checks for changed files (and validate changed knowledge)
     Check(CheckArgs),
+    /// Run a project capability an exec tool declares in tools.toml (see `kb tools`)
+    Run(RunArgs),
     /// Show the tool registry, the routes and which tools are available here
     Tools(ToolsArgs),
     /// Check environment, configuration, tools, runtime, Git binding and index
@@ -929,4 +931,17 @@ pub struct ToolsArgs {
     /// Maximum lines of text output, 5..200 (default 30)
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
     pub lines: Option<u16>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RunArgs {
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+    /// Project capability declared by an exec tool in tools.toml (listed by `kb tools`)
+    #[arg(value_name = "CAPABILITY")]
+    pub capability: String,
+    /// Arguments for the tool (`{args}`; joined as `{subject}`); put `--` before arguments
+    /// that start with `-`
+    #[arg(value_name = "ARG")]
+    pub args: Vec<String>,
 }

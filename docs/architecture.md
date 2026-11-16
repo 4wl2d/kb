@@ -509,7 +509,7 @@ Global options: `--root`, `--config`, `--profile project|maintainer`, `--format
 compact|terse|human|json` (`--json`), `--offline`, `--snapshot`, `--host`, `--quiet`,
 `--skill-protocol <n>` (mismatch → `SKILL_OUTDATED`). Unknown arguments are rejected.
 
-Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools` (§13),
+Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `find`, `check`, `run`, `tools` (§13),
 and `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`, `show`, `sync`,
 `coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`, `drift`,
 `ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
@@ -676,12 +676,15 @@ speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every re
 
 * **Registry**: `<profile>/tools.toml` (schema 1, `core/schemas/tools.v1.schema.json`),
   read from the KB working tree, never from a fetched snapshot. `[[tool]]` entries: `id`
-  (kebab-case, unique), `adapter` (`codegraph`, `code-provider`, `ripgrep`, `git-grep`,
-  `command`), `program` (bare name → PATH; `{kb}/…` → KB root; `{host}/…` and other relative
+  (kebab-case, unique), `adapter` (`codegraph`, `code-provider`, `exec`, `ripgrep`,
+  `git-grep`, `command`), `program` (bare name → PATH; `{kb}/…` → KB root; `{host}/…` and other relative
   paths → code root; no `..`; `git-grep` takes none), `args` (`code-provider` only), `sync`
   (`codegraph` only: `auto` default, `never`), `run`/`paths`/`description` (`command` only;
-  `paths` are optionally repo-qualified globs), `timeout_seconds` 1..3600. `routes.{sym,
-  callers,impact,find}` order tools whose adapter supports the capability. Unknown fields,
+  `paths` are optionally repo-qualified globs), `timeout_seconds` 1..3600, `env` (not `git-grep`), and for `exec`:
+  `capabilities`, `output` (`lines`, `grep`, `json`), `items`, `fields`, `strings`, `kind`,
+  `confidence`, `ok_exit`, `prepare`, `version_args`, `description`. `routes` maps any request
+  (`sym`, `callers`, `impact`, `find` or a project capability an `exec` tool declares) to an
+  ordered list of tools that answer it. Unknown fields,
   unknown tools in routes, unsupported capabilities and duplicate ids are errors
   (`CONFIG_INVALID` at run time, `TOOLS_INVALID` in `validate`). Absent file: defaults
   `codegraph` → `rg` → `git-grep`.
@@ -703,6 +706,19 @@ speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every re
   also answers symbol requests lexically (definition keywords; references by whole word),
   labelled `lexical`. Every tool starts without a shell, in the code root, with telemetry,
   update checks and daemons disabled, under its deadline, 16 MiB stdout and 1 MiB stderr.
+* **`exec`** (any command-line tool): expands the `args` template (`{subject}`, `{args}`,
+  `{file}`, `{kind}`, `{depth}`, `{limit}`, `{globs}`, `{root}`, `{kb}`; an argument with an
+  absent optional value is dropped; input a template cannot carry is refused), runs the
+  optional `prepare` step, then the tool; exit codes outside `ok_exit` are failures. stdout
+  becomes items per `output`: one per line, `path:line[:col]:text`, or JSON — `items` selects
+  the array (pointer segments, `*` flattens), `fields` maps keys or pointers to item fields,
+  `strings` names the field of string elements; a native `{"items": [...], "found"?,
+  "state"?, "notes"?}` document needs no mapping; plain text instead of JSON is an empty
+  answer with a note. At most 10,000 items are read.
+* **Project capabilities**: `kb run <capability> [ARG...]` routes a capability an `exec`
+  tool declares (built-in names and `check`, `doc`, `context`, `run` are reserved) with the
+  same fallback rules and answer; an empty result exits 0. `kb tools` lists them with their
+  description; `doctor` warns when one has no available tool.
 * **Answer** (`kb.answer.v1`, the `result` of the agent commands inside `kb.cli.v1`):
   `command`, `subject`, `sources[]` (`id`, `adapter`, `version?`, `state`), `items[]` (`kind`,
   `name?`, `path?`, `line?`, `end_line?`, `detail?`, `confidence?`, `source`), `shown`,

@@ -26,6 +26,7 @@ coding agent  --skills-->  kb: routing · tool registry · adapters · bounded a
 | text in the repository | `kbw find "<text>"` |
 | the checks for changed files | `kbw check [files] [--base <target>]` |
 | every obligation before an edit, with a receipt | `kbw context --intent implement --path <file>` |
+| any other connected tool (project capability) | `kbw run <capability> [args]` |
 | the connected tools; the environment | `kbw tools`; `kbw doctor` |
 
 Behind the agent surface sits a typed knowledge engine: it assembles **task-scoped,
@@ -44,11 +45,14 @@ kb is:
   index state, items with paths, lines, symbols and kinds, notes and follow-ups, bounded to
   30 lines (`--lines` up to 200). Skills (`kb`, `kb-change`, `kb-review`, `kb-document`)
   call these commands; they never name a tool.
-* **Routed by code and configuration.** A tool registry (`project/tools.toml`) connects
-  tools through engine adapters (CodeGraph's live index, any `kb.code.v1` provider,
-  ripgrep, the built-in `git grep`, check commands) and orders them per request. Missing
-  tools, absent indexes and failures fall back to the next tool and are reported. A new
-  tool is a registry entry; skills do not change.
+* **An umbrella for any tool, routed by code and configuration.** A tool registry
+  (`project/tools.toml`) connects tools through engine adapters (CodeGraph's live index, any
+  `kb.code.v1` provider, ripgrep, the built-in `git grep`, check commands) and through the
+  generic `exec` adapter, which wraps **any** command-line tool with an argv template and
+  an output mapping (lines, grep format, or JSON with field mapping). An `exec` tool joins a
+  built-in route or adds a project capability (`kbw run <capability>`). Missing tools,
+  absent indexes and failures fall back to the next tool and are reported. A new tool is a
+  registry entry; skills do not change.
 * **One strict authoring format.** Markdown files with TOML front matter between `+++`
   lines, eight record kinds (policy, feature, invariant, contract, decision, procedure,
   reference, gap), atomic typed obligations with conditions and exceptions, and project
@@ -275,6 +279,7 @@ that change files are dry-runs unless given `--apply`.
 | `doc` | Feature documentation of a path or symbol: feature, purpose, invariant statements, contracts, entry points, limits, gaps | `.kb/kbw doc app/auth/TokenRefresher.kt` |
 | `find` | Repository text search through route `find` (`--regex`, `--glob`), sorted, at most 20 matches per file | `.kb/kbw find "refresh token"` |
 | `check` | Configured check commands for changed files, validation of changed knowledge, and with `--base` the declared probes; `--plan` runs nothing | `.kb/kbw check --base origin/main` |
+| `run` | A project capability: any command-line tool connected as an `exec` entry of `tools.toml`, routed and answered like the built-in requests | `.kb/kbw run affected-tests src/a.kt` |
 | `tools` | Routes, connected tools, versions, availability and the CodeGraph index state | `.kb/kbw tools` |
 | `init` | Create schema-2 project/domain scaffolding, GitHub/GitLab KB CI and review templates, or the synthetic example; preserve existing files | `./kbw init --name "<Product>" --namespace <ns> --apply` |
 | `doctor` | Check environment, configuration, runtime, approved source, host binding and pin, engine compatibility of the approved tip and the pin, index, tool registry and routes, CodeGraph index, skill, bundle, engine divergence (`--online` also fetches; not with `--offline`) | `.kb/kbw doctor --online` |

@@ -14,6 +14,7 @@ kb:  routing · tool registry · adapters · bounded answers
     |- codegraph      symbols, callers, impact (live index)
     |- knowledge      features, invariants, contracts, gaps (typed records in Git)
     |- code-provider  any kb.code.v1 provider, commit-bound (e.g. ast-index)
+    |- exec           any other command-line tool, by configuration (kb run <capability>)
     |- ripgrep / git grep   text search; lexical fallback
     `- command        the checks configured for changed files
 ```
@@ -32,6 +33,7 @@ describes.
 | `kb doc <path\|symbol>` | the feature documentation: feature, purpose, invariant statements, contracts, entry points, limits, gaps | knowledge (a symbol is located through route `sym` first) |
 | `kb find "<text>" [--regex] [--glob GLOB]...` | matching lines in the repository, sorted, at most 20 per file | route `find` |
 | `kb check [FILE...] [--base REV] [--plan]` | the result of the checks for the changed files | registry command tools, knowledge validation, declared probes |
+| `kb run <capability> [ARG...]` | a project capability: any tool connected as an `exec` entry | route `<capability>` |
 | `kb tools` | the routes, the tools and whether each is available here | registry |
 | `kb doctor` | the environment, including `tools` and `code-index` | all |
 
@@ -151,30 +153,124 @@ find = ["rg", "git-grep"]
 | field | applies to | meaning |
 |---|---|---|
 | `id` | all | lowercase kebab-case, unique; used by `routes` and `--tool` |
-| `adapter` | all | `codegraph`, `code-provider`, `ripgrep`, `git-grep`, `command` |
+| `adapter` | all | `codegraph`, `code-provider`, `exec`, `ripgrep`, `git-grep`, `command` |
 | `program` | all but `git-grep` | executable; a bare name is looked up on PATH, `{kb}/` and `{host}/` prefixes resolve against the KB and host roots, other relative paths against the host root |
-| `args` | `code-provider` | arguments placed before the provider protocol |
+| `args` | `code-provider`, `exec` | `code-provider`: arguments before the provider protocol; `exec`: the argv template (placeholders below) |
+| `env` | all but `git-grep` | environment variables for the tool, on top of kb's (telemetry, update checks and daemons off) |
 | `sync` | `codegraph` | `auto` (default) or `never` |
-| `run`, `paths`, `description` | `command` | argv, trigger globs, one-line label |
+| `capabilities` | `exec` | requests it answers: `sym`, `callers`, `impact`, `find`, or project capabilities (kebab-case) called with `kb run` |
+| `output` | `exec` | `lines` (default: one item per line), `grep` (`path:line[:col]:text`), `json` |
+| `items` | `exec`, json | path of the item array: JSON pointer segments, `*` flattens arrays (`/definitions/*/callers`); default: the document if it is an array, else `/items` |
+| `fields` | `exec`, json | item field ← element key or JSON pointer: `{ name = "symbol", path = "filePath", line = "/range/start" }`; unmapped fields use their own names (`kind`, `name`, `path`, `line`, `end_line`, `detail`, `confidence`) |
+| `strings` | `exec`, json | the field a string element fills (default `detail`; `path` for a list of files) |
+| `kind`, `confidence` | `exec` | item kind (wins over an element's `kind` unless `fields.kind` maps it) and a confidence label for every item |
+| `ok_exit` | `exec` | exit codes meaning success (default `[0]`; `[0, 1]` for grep-like tools where 1 is "nothing found") |
+| `prepare` | `exec` | argv of a step run before every request with the same program, e.g. `["sync", "{root}"]` for an index |
+| `version_args` | `exec` | argv that prints the version for `kb tools` (default `["--version"]`; `[]` only checks that the program exists) |
+| `run`, `paths` | `command` | argv after `program` (`{files}` expands to the matched files) and the globs that trigger the check |
+| `description` | `command`, `exec` | one-line purpose shown by `kb tools`, `kb check` and `kb run` |
 | `timeout_seconds` | all | 1..3600 (`code-provider`: at most 600, the `kb.code.v1` limit); defaults 60 (lookups), 300 (`code-provider`), 900 (`command`) |
 
 Capabilities per adapter: `codegraph` and `code-provider` answer `sym`, `callers`,
 `impact`; `ripgrep` answers `find`; `git-grep` answers all four (lexically for symbols);
-`command` is a check. A route may list only tools whose adapter can answer it. A capability
-without a route uses every declared tool that can answer it, structural adapters first.
-Without `tools.toml` the defaults are the first three tools above with those routes.
-`kb validate` and `kb validate --templates` report an invalid registry as `TOOLS_INVALID`.
+`exec` answers what it declares; `command` is a check. `routes` maps any request — built in
+or a project capability — to an ordered list of tools that can answer it. A request
+without a route uses every declared tool that can answer it, structural adapters first,
+then declaration order. Without `tools.toml` the defaults are `codegraph`, `rg` and
+`git-grep` with the routes above. `kb validate` and `kb validate --templates` report an
+invalid registry as `TOOLS_INVALID`.
+
+### Connecting any tool (`exec`)
+
+Every command-line tool can be connected by configuration alone. The `exec` adapter runs
+`program` with the `args` template (no shell, in the host root, under the deadline and
+output limits) and turns stdout into answer items:
+
+```toml
+# Test files affected by changed files, as a project capability: kb run affected-tests <files>
+[[tool]]
+id = "affected-tests"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]            # bring the index up to date first
+args = ["affected", "--path", "{root}", "--json", "{args}"]
+capabilities = ["affected-tests"]
+description = "test files affected by changed source files"
+output = "json"
+items = "/affectedTests"                # ["core/cli/tests/a.rs", ...]
+strings = "path"
+kind = "test"
+
+# Functions a symbol calls: kb run callees <symbol>
+[[tool]]
+id = "callees"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]
+args = ["callees", "{subject}", "--path", "{root}", "--json"]
+capabilities = ["callees"]
+output = "json"
+items = "/definitions/*/callees"
+fields = { path = "filePath", line = "startLine", detail = "kind" }
+kind = "callee"
+
+# A live symbol index answering a built-in request (here before the lexical fallback).
+[[tool]]
+id = "ast-index-symbols"
+adapter = "exec"
+program = "ast-index"
+args = ["symbol", "{subject}", "--in-file={file}", "--format", "json"]
+capabilities = ["sym"]
+output = "json"
+version_args = ["version"]
+
+# Any grep-format tool: compilers, linters, semgrep --emacs, ...
+[[tool]]
+id = "todo"
+adapter = "exec"
+program = "rg"
+args = ["--line-number", "--no-heading", "TODO|FIXME", "{args}"]
+capabilities = ["todo"]
+output = "grep"
+ok_exit = [0, 1]
+
+[routes]
+sym = ["codegraph", "ast-index-symbols", "git-grep"]
+```
+
+Placeholders in `args` and `prepare`: `{subject}` (the symbol, text or joined `kb run`
+arguments), `{args}` (the `kb run` arguments, one argv element each), `{file}` and
+`{kind}` (`--file`/`--kind`; an argument whose value is absent is dropped, so write
+`--in-file={file}`), `{depth}`, `{limit}`, `{globs}` (`find --glob` values, one element
+each), `{root}` (the code root) and `{kb}` (the KB root). `{args}` and `{globs}` must be
+whole arguments. A template that uses neither `{subject}` nor `{args}` takes no input, and
+kb refuses to call it with input rather than drop it silently.
+
+A tool may also print the native item protocol, which `output = "json"` reads without
+any mapping: `{"items": [{"kind": "...", "name": "...", "path": "...", "line": 1,
+"detail": "..."}], "found": true, "state": "index fresh", "notes": ["..."]}` (all members
+optional except `items`). Plain text printed instead of the configured JSON (a "not found"
+message) is an empty answer with that text as a note; exit codes outside `ok_exit` are
+tool failures, and routing falls back to the next tool.
+
+**Project capabilities.** A capability an `exec` tool declares that is not a built-in
+request becomes a project command: `kb run <capability> [args...]`, routed like the
+built-in requests (route order, availability, fallback) and answered in the same bounded
+format. `kb tools` lists every project capability with its description and how to call
+it, so agents discover new tools without any skill change. kb options may come anywhere;
+put `--` before tool arguments that start with `-`.
 
 ### Connecting a new tool
 
-* **Another tool of a supported kind** (a second CodeGraph build, a ripgrep wrapper, a test
-  runner): add a `[[tool]]` entry and put its id into a route or give it `paths`. Skills do
-  not change: they name kb commands, never tools.
-* **A new kind of code-intelligence tool**: wrap it as a one-shot `kb.code.v1` provider
-  (stdin request, stdout response; [core/providers/README.md](../core/providers/README.md))
-  and connect it with `adapter = "code-provider"`. The engine validates its facts against
-  Git objects.
-* **A new adapter kind** (another live index protocol) is an engine change: one module in
+* **Any command-line tool**: an `exec` entry, as above — as a project capability, or in
+  the route of `sym`, `callers`, `impact` or `find`. No engine change, no skill change.
+* **Another tool of a supported kind** (a second CodeGraph build, a test runner for
+  `kb check`): add a `[[tool]]` entry and put its id into a route or give it `paths`.
+* **Commit-bound, validated code facts**: wrap the tool as a one-shot `kb.code.v1`
+  provider ([core/providers/README.md](../core/providers/README.md)) and connect it with
+  `adapter = "code-provider"`; the engine validates its facts against Git objects.
+* **A new built-in adapter** (an index protocol that needs engine logic, such as
+  CodeGraph's sync-and-status handling) is an engine change: one module in
   `core/cli/src/tools/`, one `AdapterKind` variant, tests with a synthetic stand-in.
 
 ### Routing, freshness and fallbacks

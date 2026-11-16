@@ -31,6 +31,16 @@ code tools ([ADR 0016](docs/adr/0016-agent-cli.md), guide `docs/agent-cli.md`).
   host repository, evaluates declared probes; `--plan` runs nothing. Records are never
   executed.
 - `kb doctor` adds the checks `tools` and `code-index`.
+- The generic `exec` adapter connects any command-line tool by configuration: an argv
+  template (`{subject}`, `{args}`, `{file}`, `{root}`, ...), an optional `prepare` step,
+  `ok_exit`, `env`, and an output mapping (`lines`, `grep`, or JSON with an `items` path
+  using `*` wildcards, `fields` and `strings`, or the native `{"items": [...]}` protocol).
+  `exec` tools join built-in routes or declare project capabilities called with
+  `kb run <capability> [args]`; `routes` accepts any request name. `kb tools` and
+  `kb doctor` list project capabilities.
+- The process runner retries a spawn briefly while the executable is busy (`ETXTBSY`),
+  which also removes a race in the provider deadline test on Linux.
+- CI and release builds use the `macos-15` runner; GitHub no longer runs `macos-14`.
 - The generated bundle is a skill set installed side by side: `kb`, `kb-change`,
   `kb-review` and `kb-document`, with one `.claude/commands/<skill>.md` alias per skill for
   mixed Claude installs, the template placeholder `{{skills_dir}}` and the always-on block

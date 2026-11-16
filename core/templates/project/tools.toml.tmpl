@@ -35,6 +35,22 @@ adapter = "git-grep"
 # args = ["--backend", "ast-index"]
 # timeout_seconds = 300
 
+# Any other command-line tool: an exec entry with an argv template and an output mapping
+# (docs/agent-cli.md#connecting-any-tool-exec). It can answer a built-in request (add its id to
+# that route) or add a project capability agents call with `kbw run <capability> [args]`.
+# [[tool]]
+# id = "affected-tests"
+# adapter = "exec"
+# program = "codegraph"
+# prepare = ["sync", "{root}"]
+# args = ["affected", "--path", "{root}", "--json", "{args}"]
+# capabilities = ["affected-tests"]
+# description = "test files affected by changed source files"
+# output = "json"
+# items = "/affectedTests"
+# strings = "path"
+# kind = "test"
+
 # Checks for changed files. `{files}` expands to the matched files; `repo:` qualifies a glob
 # to one registry repository of a multi-repository KB.
 # [[tool]]
