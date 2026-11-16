@@ -302,7 +302,7 @@ Steps:
 3. The owner tags and pushes: `git tag -s v<engine_version> <commit>` and
    `git push origin v<engine_version>`.
 4. The workflow runs `verify` (the tag must equal `v` + `engine_version`, and the crate
-   version must match), `build` on `macos-14` (`aarch64-apple-darwin`) and `ubuntu-latest`
+   version must match), `build` on `macos-15` (`aarch64-apple-darwin`) and `ubuntu-latest`
    (`x86_64-unknown-linux-gnu`) with `./kbw --kbw-package dist`, verifies each archive by
    installing it with `--kbw-install-artifact`, then `publish` writes `SHA256SUMS` and creates
    the GitHub release with `kb-<version>-<target>.tar.gz`, their `.sha256` files and
@@ -330,7 +330,7 @@ then skipped and a `v*` tag publishes nothing (see
 ## Continuous integration
 
 `.github/workflows/upstream-ci.yml` runs on every push and pull request with
-`contents: read` and no secrets, on `ubuntu-latest` (x86_64 Linux) and `macos-14` (arm64
+`contents: read` and no secrets, on `ubuntu-latest` (x86_64 Linux) and `macos-15` (arm64
 macOS). After a checkout without persisted credentials it runs:
 
 1. install the pinned toolchain (`rustup toolchain install`);
