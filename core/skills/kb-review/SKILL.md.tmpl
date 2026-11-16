@@ -1,0 +1,36 @@
+---
+name: kb-review
+description: Procedure for reviewing a change in this project through kb. Collect the obligations that apply to the diff, check the changed code against the invariants and contracts of its features, look for affected callers, run the checks and report findings with evidence. Use when asked to review a branch, merge request, commit or diff.
+---
+
+# Review a change with kb
+
+Review is read-only unless the user asks for fixes. Command details are in
+`{{skills_dir}}/kb/SKILL.md`. `<target>` is the branch the change merges
+into.
+
+1. **Obligations for the diff.**
+
+   ```sh
+   {{kb_path}}/kbw context --intent review --changed --base <target> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
+   ```
+
+   Every mandatory statement is a review criterion; exit 30 lists what could not be
+   determined.
+2. **Feature documentation of the changed paths.** `{{kb_path}}/kbw doc <changed file>{{snapshot_arg}}` for each
+   changed area: check the diff against each invariant, contract and known limit.
+3. **Affected code.** For each changed public symbol, `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and
+   `{{kb_path}}/kbw callers <symbol>`: callers that the change breaks or that need the same change are
+   findings.
+4. **Checks.** `{{kb_path}}/kbw check --base <target> --plan{{snapshot_arg}}` shows what the configuration would run;
+   run `{{kb_path}}/kbw check --base <target>{{snapshot_arg}}` when running checks is within the review's authority.
+5. **Knowledge travels with the code.** `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}`
+   (or `--head <commit>` for a committed change) lists affected knowledge and unknown
+   coverage. Changed behaviour without a documentation update or a `kb-impact`
+   acknowledgement is a finding.
+6. **Report** each finding with its evidence: `path:line`, the record and statement id
+   (`<record>#<statement>`), and what fails. Separate confirmed defects from questions,
+   and list the gaps kb reported.
+
+Static analysis and text matches are navigation evidence, not proof of runtime behaviour:
+confirm a finding in the source before reporting it as a defect.

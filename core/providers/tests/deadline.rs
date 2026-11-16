@@ -84,8 +84,19 @@ impl Setup {
         .unwrap();
         fs::set_permissions(&tool, fs::Permissions::from_mode(0o755)).unwrap();
         // The first exec of a new script can be slow (for example while the OS assesses it);
-        // take it outside the adapter's short per-command deadline.
-        let version = Command::new(&tool).arg("--version").output().unwrap();
+        // take it outside the adapter's short per-command deadline. On Linux a script just
+        // written stays busy (ETXTBSY) while a process another test thread forked still holds
+        // its write descriptor before exec; retry briefly.
+        let mut attempt = 0;
+        let version = loop {
+            match Command::new(&tool).arg("--version").output() {
+                Err(e) if e.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 50 => {
+                    attempt += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                other => break other.unwrap(),
+            }
+        };
         assert!(version.status.success());
         let mut request: CodeRequest =
             serde_json::from_str(include_str!("fixtures/request.json")).unwrap();

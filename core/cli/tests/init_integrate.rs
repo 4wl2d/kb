@@ -555,6 +555,7 @@ fn templates_use_only_documented_placeholders() {
         "core_lines",
         "core_arg",
         "managed_instructions",
+        "skills_dir",
     ] {
         v.text(k, "x");
     }
@@ -564,6 +565,9 @@ fn templates_use_only_documented_placeholders() {
         "core/templates/ownership",
         "core/templates/security",
         "core/skills/kb",
+        "core/skills/kb-change",
+        "core/skills/kb-review",
+        "core/skills/kb-document",
         "core/skills/blocks",
     ] {
         for f in render_dir(&root, dir, &v).unwrap() {
@@ -768,7 +772,7 @@ fn edited_generated_file_or_block_is_a_conflict_until_forced() {
     // A hand-edited managed block.
     let agents = host.join("AGENTS.md");
     let text = fs::read(&agents).unwrap();
-    let marker = b"## Engineering knowledge base (kb)";
+    let marker = b"## Code, knowledge and tools (kb)";
     let pos = text
         .windows(marker.len())
         .position(|w| w == marker)

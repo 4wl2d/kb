@@ -1,7 +1,8 @@
 # Maintenance prompt v2
 
-Use this with the generated skill protocol 2. Code and knowledge changes remain separately
-reviewable. Fill in the parameters and paste the fenced prompt into the host session.
+Use this with the generated skill set (skill protocol 3); its `kb-change` skill is the short
+form of the same procedure. Code and knowledge changes remain separately reviewable. Fill
+in the parameters and paste the fenced prompt into the host session.
 
 ~~~~text
 Maintain the product's knowledge while implementing the requested host change.
@@ -13,7 +14,11 @@ PARAMETERS
 - Approved KB revision: <resolved commit>; reviewer: <name or unknown>
 
 1. DIAGNOSE BEFORE THE FIRST EDIT
-Run <.kb>/kbw context --intent diagnose --task "<symptom/task>" --skill-protocol 2.
+Locate the code with <.kb>/kbw sym <name> or <.kb>/kbw find "<text>"; read
+<.kb>/kbw doc <path-or-symbol> and analyse <.kb>/kbw impact <symbol> and callers <symbol>.
+Answers are bounded and name their source; lexical or static answers are navigation
+evidence, so confirm decisive facts in the source.
+Run <.kb>/kbw context --intent diagnose --task "<symptom/task>" --skill-protocol 3.
 Path-free scope is provisional. Once files/modules are known, run scoped implement/debug/
 review context before editing. Use explicit repo:path for other repositories.
 Mandatory units include their typed conditions and exceptions. Resolve gaps and conflicts;
@@ -50,6 +55,9 @@ Never delete accepted knowledge, silently weaken it, or reuse a retired id.
 Obligations and exceptions stay typed; explanatory Markdown is non-normative.
 
 3. KEEP THE SUBSYSTEM PACK CURRENT
+Feature documentation follows the kb-document skill: one compact feature record per
+feature (at most 60 lines; FEATURE_TOO_LONG) with the purpose in summary, entry points as
+source anchors with a symbol and limits in boundaries; rules stay separate invariants.
 Update evidenced states/transitions, clocks/data sources, consumers, failure/recovery
 scenarios, canonical tests, platform quirks and change-type checklists where affected.
 Missing evidence becomes a gap. Set introduced/retired from evidence, never guessed dates.
@@ -59,6 +67,9 @@ Pending draft expectations stay comments until review. Use Tier A to check order
 and response-size limits, not as proof of agent solution quality.
 
 4. VERIFY THE ACTUAL FINAL SCOPE
+Run <.kb>/kbw check --base <target>: the configured checks for the changed files, validation
+of changed knowledge and the declared probes. Fix every failure (exit 46); never weaken a
+check or edit tools.toml to pass it.
 Run <.kb>/kbw impact --base <target> --working-tree.
 Run <.kb>/kbw verify --diff <target> for declared probes; committed changes may use
 --head <commit>, and the commit hook uses --staged plus the pending message file.

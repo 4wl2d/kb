@@ -10,11 +10,15 @@ Normative contract: [architecture.md §5](architecture.md#5-context-assembly),
 [ADR 0003](adr/0003-applicability-vs-relevance.md) and
 [ADR 0007](adr/0007-budgets-and-receipts.md). Record fields are described in
 [format.md](format.md); snapshot selection and freshness in
-[snapshots-and-trust.md](snapshots-and-trust.md).
+[snapshots-and-trust.md](snapshots-and-trust.md). `kb doc` and the knowledge part of
+`kb impact <symbol>` ([agent-cli.md](agent-cli.md)) use the same scope rules for a bounded
+orientation answer; they do not replace `context` before an edit, which adds required
+dependencies, effective settings, a completeness status and a receipt.
 
 Long output excerpts below were captured from the schema-1 synthetic baseline; their
 historical hashes, counts and skill-protocol headers are illustrative, not current-run
-claims. The options and behavior described here include schema/skill protocol 2. The baseline used
+claims. The options and behavior described here are those of document schema 2 and skill
+protocol 3. The baseline used
 (`kb init --example synthetic-multirepo --apply`, committed and published to a local bare
 repository used as `origin`). The local origin path is shown as `<kb-origin.git>`.
 

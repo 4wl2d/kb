@@ -1,0 +1,42 @@
+# SYNTHETIC EXAMPLE tool registry (invented product). Format: docs/agent-cli.md#tool-registry.
+schema = 1
+
+[[tool]]
+id = "codegraph"
+adapter = "codegraph"
+program = "codegraph"
+
+[[tool]]
+id = "rg"
+adapter = "ripgrep"
+program = "rg"
+
+[[tool]]
+id = "git-grep"
+adapter = "git-grep"
+
+# Checks per repository of the product: repo-qualified globs match only files of the host
+# repository the registry identifies.
+[[tool]]
+id = "mobile-unit-tests"
+adapter = "command"
+program = "./gradlew"
+run = ["testDebugUnitTest"]
+paths = ["mobile:app/**/*.kt"]
+description = "Android unit tests (synthetic)"
+timeout_seconds = 1800
+
+[[tool]]
+id = "backend-tests"
+adapter = "command"
+program = "go"
+run = ["test", "./..."]
+paths = ["backend:**/*.go"]
+description = "Go tests (synthetic)"
+timeout_seconds = 1800
+
+[routes]
+sym = ["codegraph", "git-grep"]
+callers = ["codegraph", "git-grep"]
+impact = ["codegraph", "git-grep"]
+find = ["rg", "git-grep"]

@@ -1032,6 +1032,7 @@ pub fn validate_corpus(corpus: &Corpus) -> ValidationReport {
         .map(|(entry, p)| (entry.path.clone(), p.as_ref()))
         .collect();
     diagnostics.extend(lint_records(&parsed));
+    diagnostics.extend(compactness(corpus));
     ValidationReport::new(
         corpus.location.profile.as_str(),
         corpus.entries.len(),
@@ -1309,6 +1310,7 @@ fn check_profile_toml(path: &str, dest: &str, text: &str) -> Vec<Diagnostic> {
         "registry/concepts.toml" => registry(path, dest, text, |f: &ConceptsFile| f.schema).err(),
         "skill-config/skill.toml" => typed::<SkillConfig>(path, text),
         "upstream.toml" => typed::<UpstreamConfig>(path, text),
+        "tools.toml" => tools_problems(path, text),
         d if d.starts_with("routing-tests/") => typed::<RoutingTestFile>(path, text),
         _ => typed::<toml::Table>(path, text),
     }
@@ -1385,4 +1387,54 @@ fn check_examples(kb_root: &Path, out: &mut Vec<Diagnostic>) -> Result<()> {
         }));
     }
     Ok(())
+}
+
+/// Maximum lines of a feature record: one compact document per feature (ADR 0016).
+pub const MAX_FEATURE_LINES: usize = 60;
+
+/// `FEATURE_TOO_LONG` warnings for feature records over [`MAX_FEATURE_LINES`] lines.
+pub fn compactness(corpus: &Corpus) -> Vec<Diagnostic> {
+    corpus
+        .entries
+        .iter()
+        .filter(|e| {
+            e.parsed
+                .as_ref()
+                .is_some_and(|p| matches!(p.record, crate::model::Record::Feature(_)))
+        })
+        .filter_map(|e| {
+            let lines = e.raw.lines().count();
+            (lines > MAX_FEATURE_LINES).then(|| {
+                Diagnostic::warning(
+                    "FEATURE_TOO_LONG",
+                    format!(
+                        "feature record has {lines} lines; keep it at most {MAX_FEATURE_LINES} (move rules into invariant records, details into references)"
+                    ),
+                )
+                .at_path(e.path.clone())
+            })
+        })
+        .collect()
+}
+
+/// `TOOLS_INVALID` errors for a tool registry (`<profile>/tools.toml`).
+pub fn tools_problems(path: &str, text: &str) -> Option<Diagnostic> {
+    crate::model::tools::parse_tools(text)
+        .err()
+        .map(|problems| Diagnostic::error("TOOLS_INVALID", problems.join("; ")).at_path(path))
+}
+
+/// Validate the profile's tool registry in `source`, if it has one.
+pub fn validate_tools_file(
+    source: &dyn crate::source::SourceTree,
+    loc: &crate::model::ProfileLocation,
+) -> Result<Vec<Diagnostic>> {
+    let path = format!("{}/{}", loc.dir, crate::model::tools::TOOLS_FILE);
+    let Some(bytes) = source.read_path(&path)? else {
+        return Ok(Vec::new());
+    };
+    Ok(match std::str::from_utf8(&bytes) {
+        Ok(text) => tools_problems(&path, text).into_iter().collect(),
+        Err(_) => vec![Diagnostic::error("TOOLS_INVALID", "not UTF-8").at_path(path)],
+    })
 }

@@ -1,0 +1,114 @@
+# Tool registry of the maintainer profile: the tools `./kbw --profile maintainer <command>`
+# routes to when working on the kb engine itself. Format: docs/agent-cli.md#tool-registry.
+schema = 1
+
+# Code navigation over the live CodeGraph index of this checkout (create it once with
+# `codegraph init --yes .`; kb never creates tool indexes).
+[[tool]]
+id = "codegraph"
+adapter = "codegraph"
+program = "codegraph"
+
+[[tool]]
+id = "rg"
+adapter = "ripgrep"
+program = "rg"
+
+[[tool]]
+id = "git-grep"
+adapter = "git-grep"
+
+# Commit-bound kb.code.v1 facts through the reference adapter (build it with
+# `cargo build --release -p kb-code-provider --locked`). Not routed by default; ask for it
+# with `--tool ast-index`.
+[[tool]]
+id = "ast-index"
+adapter = "code-provider"
+program = "{kb}/target/release/kb-code-provider"
+args = ["--backend", "ast-index"]
+timeout_seconds = 300
+
+# Any other command-line tool: exec entries with an argv template and an output mapping.
+# They add project capabilities that agents call with `kb run <capability> [args]`.
+[[tool]]
+id = "callees"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]
+args = ["callees", "{subject}", "--path", "{root}", "--json"]
+capabilities = ["callees"]
+description = "functions a symbol calls (CodeGraph)"
+output = "json"
+items = "/definitions/*/callees"
+fields = { path = "filePath", line = "startLine", detail = "kind" }
+kind = "callee"
+
+[[tool]]
+id = "affected-tests"
+adapter = "exec"
+program = "codegraph"
+prepare = ["sync", "{root}"]
+args = ["affected", "--path", "{root}", "--json", "{args}"]
+capabilities = ["affected-tests"]
+description = "test files affected by changed source files (CodeGraph)"
+output = "json"
+items = "/affectedTests"
+strings = "path"
+kind = "test"
+
+# Checks of AGENTS.md, triggered by the files they cover.
+[[tool]]
+id = "rustfmt"
+adapter = "command"
+program = "cargo"
+run = ["fmt", "--all", "--check"]
+paths = ["**/*.rs"]
+description = "cargo fmt --all --check"
+
+[[tool]]
+id = "clippy"
+adapter = "command"
+program = "cargo"
+run = ["clippy", "--workspace", "--all-targets", "--locked", "--", "-D", "warnings"]
+paths = ["**/*.rs", "Cargo.toml", "Cargo.lock", "**/Cargo.toml"]
+description = "cargo clippy --workspace --all-targets --locked -- -D warnings"
+timeout_seconds = 1800
+
+[[tool]]
+id = "tests"
+adapter = "command"
+program = "cargo"
+run = ["test", "--workspace", "--locked"]
+paths = ["core/**", "kbw", "Cargo.toml", "Cargo.lock"]
+description = "cargo test --workspace --locked"
+timeout_seconds = 3600
+
+[[tool]]
+id = "shellcheck"
+adapter = "command"
+program = "shellcheck"
+run = ["{files}"]
+paths = ["kbw", "core/templates/ci/*.sh", "core/templates/ci/hooks/commit-msg"]
+description = "shellcheck on the changed launcher and CI scripts"
+
+[[tool]]
+id = "schemas"
+adapter = "command"
+program = "{kb}/kbw"
+run = ["schema", "--check"]
+paths = ["core/cli/src/model/**", "core/cli/src/schema_export.rs", "core/cli/src/cli/args.rs", "core/cli/src/error.rs", "core/schemas/**"]
+description = "./kbw schema --check"
+
+[[tool]]
+id = "templates"
+adapter = "command"
+program = "{kb}/kbw"
+run = ["validate", "--profile", "maintainer", "--templates"]
+paths = ["core/templates/**", "core/maintainer-knowledge/**", "core/skills/**"]
+description = "./kbw validate --profile maintainer --templates"
+
+[routes]
+sym = ["codegraph", "git-grep"]
+callers = ["codegraph", "git-grep"]
+impact = ["codegraph", "git-grep"]
+find = ["rg", "git-grep"]

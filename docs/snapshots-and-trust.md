@@ -18,9 +18,10 @@ KB as a submodule at `.kb` and declares `repo = "mobile"` in `.kbw.toml`.
 ## Freshness: one remote check per call
 
 `kb context`, `kb show`, `kb search` and `kb impact` fetch the configured approved ref on
-**every call** before reading knowledge; `kb sync` does the same and only reports. There is no
-TTL and no automatic offline fallback: if the fetch fails, the command fails with
-`FRESHNESS_UNVERIFIED` (exit 20).
+**every call** before reading knowledge; `kb sync` does the same and only reports. So do
+`kb doc` and the knowledge part of `kb impact <symbol>`; `kb sym`, `kb callers`, `kb find`
+and `kb tools` read no knowledge and fetch nothing. There is no TTL and no automatic offline
+fallback: if the fetch fails, the command fails with `FRESHNESS_UNVERIFIED` (exit 20).
 
 ```text
 error[FRESHNESS_UNVERIFIED]: cannot verify `refs/heads/main` on remote `origin` (https://***@git.example.invalid/example/kb.git): fatal: unable to access 'https://git.example.invalid/example/kb.git/': Could not resolve host: git.example.invalid
@@ -353,6 +354,12 @@ described above.
 * **Documents are data.** kb never executes commands, procedures, hooks or download
   instructions found in records. Paths are validated, symlinks are refused, and text output
   escapes control and bidirectional characters. `kb show --raw` returns the exact bytes.
+* **Configured commands come from the KB checkout.** The tool registry
+  (`<profile>/tools.toml`) is read from the KB working tree, the checkout that also supplies
+  the engine, never from the snapshot being read. `kb check` runs only the argv of its
+  `command` tools, without a shell; text from records, procedures, commit messages or tool
+  output is never executed. A registry change is reviewed like engine code
+  ([SECURITY.md](../SECURITY.md)).
 * **Typing does not make text safe or true.** Typed, atomic fields reduce ambiguity, but a
   record's natural-language text can still try to instruct an agent (prompt injection), and
   a valid schema does not establish that the knowledge is correct. Harness and system

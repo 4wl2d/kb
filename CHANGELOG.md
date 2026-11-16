@@ -10,6 +10,54 @@ schema, skill protocol) are independent integers in `core/release.toml`.
 First complete version of the upstream repository. No release has been published yet;
 the release workflow builds archives when an owner pushes a `v0.1.0` tag.
 
+### Agent CLI (unreleased)
+
+kb becomes the single CLI between a coding agent, the code, the project knowledge and the
+code tools ([ADR 0016](docs/adr/0016-agent-cli.md), guide `docs/agent-cli.md`).
+
+- New commands `sym`, `callers`, `doc`, `find`, `check` and `tools`; `impact <symbol>` adds
+  a symbol mode next to the unchanged diff mode.
+- Every agent command returns one bounded answer, `kb.answer.v1` inside the unchanged
+  `kb.cli.v1` envelope: sources with tool, version and state, prioritized items, notes and
+  follow-ups; text output is at most 30 lines (`--lines 5..200`) of at most 200 characters.
+- Tool registry `<profile>/tools.toml` (schema 1, `core/schemas/tools.v1.schema.json`) with
+  engine-owned adapters `codegraph` (live index, incremental sync before each query; kb
+  never creates the index), `code-provider` (any `kb.code.v1` provider, commit-bound),
+  `ripgrep`, `git-grep` and `command`. Ordered routes per capability with reported
+  fallbacks; built-in defaults codegraph → rg → git grep without a file; `--tool <id>`
+  forces one tool. The registry is read from the KB working tree; it is not a plugin system.
+- `kb check` runs the configured `command` tools whose globs match the changed files (argv,
+  no shell, deadline and output limits), validates changed knowledge and, with `--base` in a
+  host repository, evaluates declared probes; `--plan` runs nothing. Records are never
+  executed.
+- `kb doctor` adds the checks `tools` and `code-index`.
+- The generic `exec` adapter connects any command-line tool by configuration: an argv
+  template (`{subject}`, `{args}`, `{file}`, `{root}`, ...), an optional `prepare` step,
+  `ok_exit`, `env`, and an output mapping (`lines`, `grep`, or JSON with an `items` path
+  using `*` wildcards, `fields` and `strings`, or the native `{"items": [...]}` protocol).
+  `exec` tools join built-in routes or declare project capabilities called with
+  `kb run <capability> [args]`; `routes` accepts any request name. `kb tools` and
+  `kb doctor` list project capabilities.
+- The process runner retries a spawn briefly while the executable is busy (`ETXTBSY`),
+  which also removes a race in the provider deadline test on Linux.
+- CI and release builds use the `macos-15` runner; GitHub no longer runs `macos-14`. Upstream
+  CI runs once per pull request commit (pushes only on `main`, plus `workflow_dispatch`), and
+  one `ci` job aggregates the platform checks as the single required check.
+- The generated bundle is a skill set installed side by side: `kb`, `kb-change`,
+  `kb-review` and `kb-document`, with one `.claude/commands/<skill>.md` alias per skill for
+  mixed Claude installs, the template placeholder `{{skills_dir}}` and the always-on block
+  "Code, knowledge and tools (kb)". Skill protocol 3.
+- Error codes `CHECKS_FAILED` (46) and `TOOL_UNAVAILABLE` (65); agent commands use
+  `NOT_FOUND` (16) for an unknown symbol or no match and still print the answer.
+- Validation: warning `FEATURE_TOO_LONG` for feature records over 60 lines (a feature
+  record is the compact per-feature document with entry-point anchors) and error
+  `TOOLS_INVALID` for an invalid registry; the feature template shows an entry-point anchor.
+- `kbw init` writes `project/tools.toml`; the synthetic example and the maintainer profile
+  ship a registry with checks.
+
+CLI protocol stays `kb.cli.v1` (version 1; the additions are additive), document schema
+and index schema stay 2, the engine stays 0.1.0.
+
 ### Knowledge upgrade (unreleased)
 
 - Document schema 2 with lossless adjacent migration, structured subsystem/scenario and

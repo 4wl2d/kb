@@ -6,8 +6,11 @@
 //!
 //! ```text
 //! manifest.toml                   versions, harnesses, kb_path, sha256 of every other file
-//! skills/kb/SKILL.md              one SKILL.md valid for Claude Code, Codex and Cursor
+//! skills/kb/SKILL.md              querying kb (commands, answers, recovery), shared by every harness
 //! skills/kb/references/*.md       lazily read references
+//! skills/kb-change/SKILL.md       the universal code-change procedure
+//! skills/kb-review/SKILL.md       reviewing a change against code and knowledge
+//! skills/kb-document/SKILL.md     creating or updating feature documentation
 //! blocks/AGENTS.md.block          managed block for AGENTS.md (codex, cursor)
 //! blocks/CLAUDE.md.block          managed block for CLAUDE.md (claude)
 //! ```
@@ -28,12 +31,19 @@ use crate::versions::{ENGINE_VERSION, SKILL_PROTOCOL};
 
 /// Canonical skill sources (KB-root-relative).
 pub const SKILL_SOURCE_DIR: &str = "core/skills/kb";
+/// The skill set: installed name and source directory. `kb` comes first and is required.
+pub const SKILLS: [(&str, &str); 4] = [
+    ("kb", SKILL_SOURCE_DIR),
+    ("kb-change", "core/skills/kb-change"),
+    ("kb-review", "core/skills/kb-review"),
+    ("kb-document", "core/skills/kb-document"),
+];
 pub const AGENTS_BLOCK_SOURCE: &str = "core/skills/blocks/agents.md.tmpl";
 pub const CLAUDE_BLOCK_SOURCE: &str = "core/skills/blocks/claude.md.tmpl";
 
 /// Bundle-relative paths.
 pub const MANIFEST_FILE: &str = "manifest.toml";
-pub const SKILL_PREFIX: &str = "skills/kb/";
+pub const SKILL_PREFIX: &str = "skills/";
 pub const SKILL_FILE: &str = "skills/kb/SKILL.md";
 pub const AGENTS_BLOCK_FILE: &str = "blocks/AGENTS.md.block";
 pub const CLAUDE_BLOCK_FILE: &str = "blocks/CLAUDE.md.block";
@@ -45,6 +55,26 @@ pub const GROK_SKILL_DIR: &str = ".grok/skills/kb";
 pub const PORTABLE_SKILL_DIR: &str = ".kbw/skills/kb";
 pub const CURSOR_RULE_FILE: &str = "rules/cursor.mdc";
 pub const CLAUDE_COMMAND_FILE: &str = "commands/claude-kb.md";
+/// Mixed Claude installs: one short `.claude/commands/<skill>.md` alias per skill (bundle file,
+/// host file, skill name).
+pub const CLAUDE_COMMAND_FILES: [(&str, &str, &str); 4] = [
+    (CLAUDE_COMMAND_FILE, ".claude/commands/kb.md", "kb"),
+    (
+        "commands/claude-kb-change.md",
+        ".claude/commands/kb-change.md",
+        "kb-change",
+    ),
+    (
+        "commands/claude-kb-review.md",
+        ".claude/commands/kb-review.md",
+        "kb-review",
+    ),
+    (
+        "commands/claude-kb-document.md",
+        ".claude/commands/kb-document.md",
+        "kb-document",
+    ),
+];
 
 pub const BUNDLE_SCHEMA: u32 = 1;
 pub const SKILL_CONFIG_SCHEMA: u32 = 1;
@@ -246,11 +276,13 @@ pub fn layout(harnesses: &[Harness]) -> Layout {
         Vec::new()
     };
     if claude && skill_dirs[0] != CLAUDE_SKILL_DIR {
-        files.push(FileTarget {
-            host_file: ".claude/commands/kb.md",
-            bundle_file: CLAUDE_COMMAND_FILE,
-            source: "core/skills/blocks/claude-command.md.tmpl",
-        });
+        for (bundle_file, host_file, _) in CLAUDE_COMMAND_FILES {
+            files.push(FileTarget {
+                host_file,
+                bundle_file,
+                source: "core/skills/blocks/claude-command.md.tmpl",
+            });
+        }
     }
     blocks.sort_by_key(|b| b.host_file);
     Layout {
@@ -351,6 +383,7 @@ fn skill_vars(config: &ProfileConfig, skill: &SkillConfig, layout: &Layout) -> V
         .text("notes", notes)
         .text("agents_skill_path", format!("{agents_dir}/SKILL.md"))
         .text("claude_skill_path", format!("{agents_dir}/SKILL.md"))
+        .text("skills_dir", skills_root(agents_dir))
         .text("core_source", layout.primary_source)
         .fragment("snapshot_arg", snapshot_arg);
     v
@@ -403,18 +436,29 @@ pub fn render_bundle(
     let workflow = String::from_utf8(workflow)
         .map_err(|_| KbError::internal("workflow template is not UTF-8"))?;
     let mut files = BTreeMap::new();
-    for f in render_dir(kb_root, SKILL_SOURCE_DIR, &vars)? {
-        files.insert(format!("{SKILL_PREFIX}{}", f.path), f.bytes);
-    }
-    if !files.contains_key(SKILL_FILE) {
-        return Err(KbError::new(
-            ErrorCode::NotFound,
-            format!("`{SKILL_SOURCE_DIR}` has no SKILL.md template"),
-        ));
+    for (name, dir) in SKILLS {
+        for f in render_dir(kb_root, dir, &vars)? {
+            files.insert(format!("{SKILL_PREFIX}{name}/{}", f.path), f.bytes);
+        }
+        let skill_file = format!("{SKILL_PREFIX}{name}/SKILL.md");
+        match files.get(&skill_file) {
+            None => {
+                return Err(KbError::new(
+                    ErrorCode::NotFound,
+                    format!("`{dir}` has no SKILL.md template"),
+                ));
+            }
+            Some(bytes) if bytes.len() > 16 * 1024 => {
+                return Err(KbError::invalid_input(format!(
+                    "generated `{skill_file}` exceeds the 16 KiB cap; shorten project notes or use lazy references"
+                )));
+            }
+            Some(_) => {}
+        }
     }
     for b in &layout.blocks {
         let mut block_vars = vars.clone();
-        block_vars.fragment("managed_instructions", if b.host_file == layout.primary_source { workflow.clone() } else { format!("## Engineering knowledge base (kb)\n\nRead `{}` for the kb workflow and any always-on core before working. It is the single instruction source shared by the configured harnesses.\n", layout.primary_source) });
+        block_vars.fragment("managed_instructions", if b.host_file == layout.primary_source { workflow.clone() } else { format!("## Code, knowledge and tools (kb)\n\nRead `{}` for the kb workflow and any always-on core before working. It is the single instruction source shared by the configured harnesses.\n", layout.primary_source) });
         let r = render_one(kb_root, b.source, &block_vars)?;
         check_size(b.host_file, &r.bytes)?;
         files.insert(
@@ -424,15 +468,10 @@ pub fn render_bundle(
     }
     for f in &layout.files {
         let mut rule_vars = vars.clone();
-        rule_vars.fragment("managed_instructions", if f.host_file == layout.primary_source { workflow.clone() } else if f.bundle_file == CLAUDE_COMMAND_FILE { format!("Read `{}` and follow `{}/SKILL.md` for this task.\n", layout.primary_source, layout.skill_dirs[0]) } else { format!("Read `{}` for the kb workflow and always-on core. Consult it once; do not load another copy of the kb skill.\n", layout.primary_source) });
+        rule_vars.fragment("managed_instructions", if f.host_file == layout.primary_source { workflow.clone() } else if let Some((_, _, skill)) = CLAUDE_COMMAND_FILES.iter().find(|(b, _, _)| *b == f.bundle_file) { format!("Read `{}` and follow `{}/{skill}/SKILL.md` for this task.\n", layout.primary_source, skills_root(layout.skill_dirs[0])) } else { format!("Read `{}` for the kb workflow and always-on core. Consult it once; do not load another copy of the kb skill.\n", layout.primary_source) });
         let rendered = render_one(kb_root, f.source, &rule_vars)?;
         check_size(f.host_file, &rendered.bytes)?;
         files.insert(f.bundle_file.into(), rendered.bytes);
-    }
-    if files[SKILL_FILE].len() > 16 * 1024 {
-        return Err(KbError::invalid_input(
-            "generated skill exceeds the 16 KiB cap; shorten project notes or use lazy references",
-        ));
     }
     let manifest = BundleManifest {
         schema: BUNDLE_SCHEMA,
@@ -477,8 +516,8 @@ fn allowed_bundle_path(path: &str) -> bool {
                     | "blocks/JUNIE.md.block"
                     | "blocks/COPILOT.md.block"
                     | CURSOR_RULE_FILE
-                    | CLAUDE_COMMAND_FILE
-            ))
+            )
+            || CLAUDE_COMMAND_FILES.iter().any(|(b, _, _)| *b == path))
 }
 
 /// Load the committed bundle of a profile and verify every file against its manifest.
@@ -638,6 +677,13 @@ pub fn apply_generate(kb_root: &Path, plan: &GeneratePlan) -> Result<()> {
 pub fn harness_array(harnesses: &[Harness]) -> String {
     let names: Vec<&str> = harnesses.iter().map(|h| h.as_str()).collect();
     toml_string_array(&names)
+}
+
+/// Host directory that holds the skill set (the parent of a `.../skills/kb` directory).
+pub fn skills_root(skill_dir: &str) -> &str {
+    skill_dir
+        .rsplit_once('/')
+        .map_or(skill_dir, |(root, _)| root)
 }
 
 #[cfg(test)]

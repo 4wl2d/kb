@@ -3,7 +3,8 @@
 kb has exactly one authoring format for project knowledge: a Markdown file that starts with
 strict TOML front matter between `+++` lines. This guide covers the fields, the eight record
 kinds, scope and selectors, links, policies and overrides, registries, and every diagnostic
-that `kb validate` can report.
+that `kb validate` can report. The tool registry `tools.toml` is configuration, not a
+record; its format is in [agent-cli.md](agent-cli.md#tool-registry).
 
 The normative contract is [architecture.md §3–§4](architecture.md#3-record-format-document-schemas-1-and-2);
 the design decision is [ADR 0002](adr/0002-record-format.md). How records are selected for a
@@ -22,6 +23,7 @@ All examples use the registry of the synthetic example
 | `registry/{owners,repos,modules,features,concepts}.toml` | registries; a missing file means an empty registry |
 | `<knowledge root>/**/*.md` | records; the default root is `knowledge`, grouping below it is free-form |
 | `routing-tests/*.toml` | routing fixtures (run by `kb validate`) |
+| `tools.toml` | tool registry: connected code tools, routes and checks; trusted configuration read from the KB working tree, never knowledge ([agent-cli.md](agent-cli.md#tool-registry)) |
 
 Rules for files under a knowledge root:
 
@@ -176,6 +178,47 @@ and never dropped by budgeting. An **item** is `{ id, text }`.
 "Can be mandatory" means that an accepted record of that kind whose scope applies to a task is
 always delivered, independent of ranking. Other kinds reach the context through `requires`,
 `rationale`, `related` or ranking. Procedures are data: kb shows them and never executes them.
+
+### Feature records: one compact document per feature
+
+The documentation of a feature is one registry feature (`registry/features.toml`, whose
+`paths` map files to it) and one compact `feature` record. No second document format
+exists next to it. The record's fields have fixed roles:
+
+| Field | Role | `kb doc` line |
+|---|---|---|
+| `summary` | the purpose, in one or two sentences | `purpose` |
+| `anchors` of kind `source` with `repo`, `path` and `symbol` (and an optional `note`) | the entry points: where the feature starts in code | `entry` |
+| `boundaries` | known limits, non-goals and nuances | `limit` |
+| `behaviors`, `states`, `transitions`, `scenarios` | descriptive behavior | none; supplementary context |
+
+Rules do not go into the feature record. Each independent rule is a separate `invariant`
+record scoped to the feature (`scope.features`), because context assembly delivers
+invariants as mandatory obligations even when no feature document is retrieved, and one
+invariant often spans several features. Open questions are `gap` records. A feature record
+file has at most 60 lines, front matter and body included; a longer one gets the warning
+`FEATURE_TOO_LONG` (an error with `kb validate --strict`). Move rules into invariant records
+and details into `reference` records.
+
+`kb doc <path|symbol>` composes the feature, its purpose, the invariant statements and
+contracts that the scope rules of `context --intent implement` select for the path, the
+entry points, the limits and the gaps into one bounded answer, and notes a registry
+feature that has no feature record ([agent-cli.md](agent-cli.md#feature-documentation)).
+`kb anchors check` reports drift of the entry-point anchors. Entry points and a limit from
+the synthetic example's `example.feature.login`:
+
+```toml
+[[boundaries]]
+id = "no-password-storage"
+text = "The app never stores the user's password; only tokens are kept."
+
+[[anchors]]
+kind = "source"
+repo = "mobile"
+path = "app/auth/TokenRefresher.kt"
+symbol = "TokenRefresher.refresh"
+note = "silent refresh before the access token expires"
+```
 
 ### Minimal valid record of each kind
 
@@ -606,6 +649,7 @@ drift-checked (`kb schema --check`, exit 42 `DRIFT_DETECTED` on drift; `kb schem
 regenerates). `record.v1.schema.json` and `record.v2.schema.json` describe the respective
 front-matter vocabularies; the others describe
 `project.toml`, the registries, routing fixtures, `skill.toml`, `.kbw.toml`, `upstream.toml`,
+`tools.toml` (`tools.v1.schema.json`),
 `core/release.toml`, the `kb.cli.v1` envelope and `kb.code.v1` provider requests/responses.
 Routing fixtures, host bindings and skill configuration retain their independent schema 1.
 
@@ -620,7 +664,7 @@ links, cycles, lifecycle, overrides) and the `--base` checks. The complete list 
 ## Validating
 
 ```sh
-./kbw validate                  # working tree: records, registries, links, policies, routing fixtures
+./kbw validate                  # working tree: records, registries, links, policies, tools.toml, routing fixtures
 ./kbw validate --strict         # warnings count as errors
 ./kbw validate --base <rev>     # also check that ids at <rev> still exist with the same kind
 ./kbw validate --no-routing     # skip routing fixtures
@@ -792,6 +836,13 @@ The five freshness warnings concern accepted records only, and only those with
 `verified_at` or `review_by` unless `--stale` is given. The reference date is `--on`, else
 the commit date of the host `HEAD` (outside a host, of the validated KB revision).
 `kb context` reports the same warnings for the records it delivers.
+
+### Feature compactness and the tool registry (`validate.rs`, `model/tools.rs`)
+
+| Code | Meaning |
+|---|---|
+| `FEATURE_TOO_LONG` (warning) | a feature record file has more than 60 lines (see [Feature records](#feature-records-one-compact-document-per-feature)) |
+| `TOOLS_INVALID` | `tools.toml` of the profile does not parse, is not UTF-8 or breaks a registry rule (unknown field or adapter, duplicate id, a route naming an undeclared tool or one whose adapter cannot answer it, an invalid glob or timeout); the message lists every problem. Agent commands stop on the same file with `CONFIG_INVALID` (exit 11) |
 
 ### Routing fixtures, templates and informational notes (`context/routing.rs`, `validate.rs`, `cli/cmd_validate.rs`)
 

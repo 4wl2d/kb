@@ -7,11 +7,13 @@ reviewed. Completing the deterministic engine and its fixtures does not satisfy 
 | Extension | Required evidence before implementation/default change | Current decision |
 |---|---|---|
 | MCP facade | A target harness cannot use the shell; ADR changing the README non-goal | No qualifying shellless integration established; keep the CLI boundary |
-| Pre-edit/stop hooks | Measured consultation below 95%, plus a targeted A/B showing benefit without material quality/cost regression | Keep skill protocol 2 and actual consultation probes; do not add coercive hooks speculatively |
+| Pre-edit/stop hooks | Measured consultation below 95%, plus a targeted A/B showing benefit without material quality/cost regression | Keep skill protocol 3 and actual consultation probes; do not add coercive hooks speculatively |
 | Local embedding rerank | Tier A held-out lexical recall misses; rerank supplementary units only; quality/cost A/B | Keep deterministic lexical ranking; new metric support is not evidence of a miss |
 | Git-derived path facts | Held-out debug/review improvement from a small opt-in brief, at most 300 estimated tokens | Churn is available for the authoring backlog; no additional context delivery without a measured gain |
 | Vendor skill registry | A demonstrated project gap covered by scoped, version-pinned vendor material | No registry or implicit network fetch in the engine |
 | Markdown/OKF/agents-index export | A concrete fallback consumer and delivery A/B motivating another maintained format | Existing inspectable context/show output remains available; do not invent another trust channel |
+| Tool plugin system | A tool that neither an `exec` entry, a built-in adapter nor a `kb.code.v1` provider can connect; ADR changing the README non-goal | `tools.toml` is configuration for engine-owned adapters ([ADR 0016](adr/0016-agent-cli.md)): kb loads no code, discovers nothing and installs nothing. Any command-line tool connects as an `exec` entry; only tools that need engine logic get a dedicated adapter |
+| Dedicated live ast-index adapter | A measured case where engine logic beyond an `exec` entry (index status, freshness handling) changes ast-index answers | Not shipped: the live CLI connects as an `exec` entry (see [agent-cli.md](agent-cli.md#connecting-any-tool-exec)); the commit-bound route stays through `code-provider` (ADR 0016) |
 
 `context --with-code` is implemented but opt-in. Its default is also gated by the downstream
 composition A/B. The three acceptance tracks are feature A/Bs, generation v1/v2/current-KB

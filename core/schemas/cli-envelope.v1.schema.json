@@ -242,6 +242,16 @@
         {
           "properties": {
             "code": {
+              "const": "CHECKS_FAILED"
+            },
+            "exit_code": {
+              "const": 46
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
               "const": "RUNTIME_INCOMPATIBLE"
             },
             "exit_code": {
@@ -328,6 +338,16 @@
               "const": 64
             }
           }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "TOOL_UNAVAILABLE"
+            },
+            "exit_code": {
+              "const": 65
+            }
+          }
         }
       ],
       "properties": {
@@ -353,6 +373,7 @@
             "ENGINE_DIVERGED",
             "IMPACT_UNACKNOWLEDGED",
             "CONFLICT",
+            "CHECKS_FAILED",
             "RUNTIME_INCOMPATIBLE",
             "UPDATE_CONFLICT",
             "MIGRATION_FAILED",
@@ -361,7 +382,8 @@
             "INDEX_ERROR",
             "IO_ERROR",
             "UNSAFE_PATH",
-            "INVALID_INPUT"
+            "INVALID_INPUT",
+            "TOOL_UNAVAILABLE"
           ],
           "type": "string"
         },
@@ -418,12 +440,16 @@
         {
           "enum": [
             "anchors",
+            "callers",
             "capture",
+            "check",
             "context",
             "coverage",
+            "doc",
             "doctor",
             "drift",
             "eval",
+            "find",
             "impact",
             "index",
             "init",
@@ -432,10 +458,13 @@
             "migrate",
             "outline",
             "propose",
+            "run",
             "schema",
             "search",
             "show",
+            "sym",
             "sync",
+            "tools",
             "update",
             "usage",
             "validate",

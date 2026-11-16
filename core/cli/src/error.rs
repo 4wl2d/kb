@@ -30,6 +30,7 @@ pub enum ErrorCode {
     EngineDiverged,
     ImpactUnacknowledged,
     Conflict,
+    ChecksFailed,
     RuntimeIncompatible,
     UpdateConflict,
     MigrationFailed,
@@ -39,10 +40,11 @@ pub enum ErrorCode {
     IoError,
     UnsafePath,
     InvalidInput,
+    ToolUnavailable,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 29] = [
+    pub const ALL: [ErrorCode; 31] = [
         ErrorCode::Internal,
         ErrorCode::Usage,
         ErrorCode::ProjectNotInitialized,
@@ -63,6 +65,7 @@ impl ErrorCode {
         ErrorCode::EngineDiverged,
         ErrorCode::ImpactUnacknowledged,
         ErrorCode::Conflict,
+        ErrorCode::ChecksFailed,
         ErrorCode::RuntimeIncompatible,
         ErrorCode::UpdateConflict,
         ErrorCode::MigrationFailed,
@@ -72,6 +75,7 @@ impl ErrorCode {
         ErrorCode::IoError,
         ErrorCode::UnsafePath,
         ErrorCode::InvalidInput,
+        ErrorCode::ToolUnavailable,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -96,6 +100,7 @@ impl ErrorCode {
             ErrorCode::EngineDiverged => "ENGINE_DIVERGED",
             ErrorCode::ImpactUnacknowledged => "IMPACT_UNACKNOWLEDGED",
             ErrorCode::Conflict => "CONFLICT",
+            ErrorCode::ChecksFailed => "CHECKS_FAILED",
             ErrorCode::RuntimeIncompatible => "RUNTIME_INCOMPATIBLE",
             ErrorCode::UpdateConflict => "UPDATE_CONFLICT",
             ErrorCode::MigrationFailed => "MIGRATION_FAILED",
@@ -105,6 +110,7 @@ impl ErrorCode {
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::UnsafePath => "UNSAFE_PATH",
             ErrorCode::InvalidInput => "INVALID_INPUT",
+            ErrorCode::ToolUnavailable => "TOOL_UNAVAILABLE",
         }
     }
 
@@ -135,6 +141,7 @@ impl ErrorCode {
             ErrorCode::EngineDiverged => 43,
             ErrorCode::ImpactUnacknowledged => 44,
             ErrorCode::Conflict => 45,
+            ErrorCode::ChecksFailed => 46,
             ErrorCode::RuntimeIncompatible => 50,
             ErrorCode::UpdateConflict => 51,
             ErrorCode::MigrationFailed => 52,
@@ -144,6 +151,7 @@ impl ErrorCode {
             ErrorCode::IoError => 62,
             ErrorCode::UnsafePath => 63,
             ErrorCode::InvalidInput => 64,
+            ErrorCode::ToolUnavailable => 65,
         }
     }
 }

@@ -248,6 +248,7 @@ pub fn run(env: &Env, loc: &ProfileLocation, opts: &DoctorOptions<'_>) -> Doctor
         compat.as_ref(),
     ));
     checks.push(check_index(env, loc.profile));
+    checks.extend(check_tools(env, loc, host_ctx));
     let (skill, bundle) = check_integration(env, loc, host_ctx);
     checks.push(skill);
     checks.push(bundle);
@@ -1151,6 +1152,154 @@ pub fn render(report: &DoctorReport, format: Format) -> String {
         }
     }
     out
+}
+
+/// `tools`: the tool registry parses and every routed request has an available tool here;
+/// `code-index`: the live index of a routed codegraph tool covers the code root.
+fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> Vec<Check> {
+    use crate::model::tools::{AdapterKind, Capability};
+    use crate::tools::{self, Roots};
+    let registry = match tools::load(&env.kb_root, loc) {
+        Ok(r) => r,
+        Err(e) => {
+            return vec![
+                Check::from_error("tools", CheckStatus::Fail, &e),
+                Check::skip("code-index", "not checked: the tool registry is invalid"),
+            ];
+        }
+    };
+    let kb = env
+        .kb_root
+        .canonicalize()
+        .unwrap_or_else(|_| env.kb_root.clone());
+    let roots = Roots {
+        code: host.map(|h| h.root.clone()).unwrap_or_else(|| kb.clone()),
+        kb,
+        repo: None,
+        kb_mount: host.and_then(|h| h.kb_submodule_path.clone()),
+    };
+    let mut answering = Vec::new();
+    let mut missing = Vec::new();
+    let mut lexical = Vec::new();
+    let mut codegraph = None;
+    for cap in Capability::ROUTED {
+        let route = registry.config.route(cap);
+        match route
+            .iter()
+            .find(|t| tools::probe(t, &roots, false).available)
+        {
+            None => missing.push(cap.as_str()),
+            Some(t) => {
+                if t.adapter == AdapterKind::GitGrep && cap != Capability::Find {
+                    lexical.push(cap.as_str());
+                }
+                if t.adapter == AdapterKind::Codegraph && codegraph.is_none() {
+                    codegraph = Some(*t);
+                }
+                answering.push(format!("{}→{}", cap.as_str(), t.id));
+            }
+        }
+    }
+    let commands: Vec<&str> = registry
+        .config
+        .tools
+        .iter()
+        .filter(|t| t.adapter == AdapterKind::Command && !tools::probe(t, &roots, false).available)
+        .map(|t| t.id.as_str())
+        .collect();
+    // Project capabilities (`kb run`) whose route has no available tool.
+    let custom: Vec<&str> = registry.config.custom_capabilities().into_iter().collect();
+    let custom_missing: Vec<&str> = custom
+        .iter()
+        .copied()
+        .filter(|c| {
+            !registry
+                .config
+                .route_named(c)
+                .iter()
+                .any(|t| tools::probe(t, &roots, false).available)
+        })
+        .collect();
+    let commands: Vec<&str> = commands
+        .into_iter()
+        .chain(custom_missing.iter().copied())
+        .collect();
+    if !custom.is_empty() {
+        answering.push(format!("run: {}", custom.join(",")));
+    }
+    let msg = format!(
+        "{}: {}{}",
+        registry.origin(),
+        answering.join(", "),
+        if commands.is_empty() {
+            String::new()
+        } else {
+            format!("; not available here: {}", commands.join(", "))
+        }
+    );
+    let tools_check = if !missing.is_empty() {
+        Check::fail(
+            "tools",
+            format!("{msg}; nothing available answers {}", missing.join(", ")),
+        )
+        .hint("install a tool of the route or change `routes` in tools.toml (see `kbw tools`)")
+    } else if !lexical.is_empty() || !commands.is_empty() {
+        let c = Check::warn("tools", msg);
+        if lexical.is_empty() {
+            c.hint("install the missing programs (check commands, `kb run` capabilities) or remove their entries from tools.toml")
+        } else {
+            c.hint(format!(
+                "{} answer lexically only; install CodeGraph and create its index for structural answers",
+                lexical.join(", ")
+            ))
+        }
+    } else {
+        Check::ok("tools", msg)
+    };
+    let index_check = match codegraph {
+        None => Check::skip("code-index", "no routed codegraph tool is available"),
+        Some(t) => {
+            let program = tools::probe(t, &roots, false)
+                .program
+                .map(std::path::PathBuf::from)
+                .unwrap_or_default();
+            match tools::codegraph::status(&program, &roots, t.timeout()) {
+                Err(e) => Check::from_error("code-index", CheckStatus::Warn, &e),
+                Ok(state) if !state.initialized => Check::warn(
+                    "code-index",
+                    format!(
+                        "no CodeGraph index in {}; lookups fall back to the next tool",
+                        roots.code.display()
+                    ),
+                )
+                .hint(format!(
+                    "create it once with `codegraph init --yes {}`",
+                    roots.code.display()
+                )),
+                Ok(state) if !state.complete || state.pending_refs > 0 => Check::warn(
+                    "code-index",
+                    format!(
+                        "CodeGraph index of {}: {}",
+                        roots.code.display(),
+                        state.describe(false)
+                    ),
+                )
+                .hint(format!(
+                    "rebuild with `codegraph index {}`",
+                    roots.code.display()
+                )),
+                Ok(state) => Check::ok(
+                    "code-index",
+                    format!(
+                        "CodeGraph index of {}: {}",
+                        roots.code.display(),
+                        state.describe(false)
+                    ),
+                ),
+            }
+        }
+    };
+    vec![tools_check, index_check]
 }
 
 #[cfg(test)]

@@ -1,0 +1,51 @@
+---
+name: kb-document
+description: Procedure for creating or updating the feature documentation of this project in its kb knowledge base. One compact feature record per feature with its purpose, entry points, behaviors and limits, separate invariant records for the rules, gap records for open questions, validated and reviewed with the code change. Use when kb doc finds no documentation, when behavior changed, or when asked to document a feature.
+---
+
+# Document a feature with kb
+
+Knowledge of {{project_name}} lives in the KB checkout at `{{kb_path}}`, under
+`project/knowledge/` (namespace `{{namespace}}`), versioned in Git and reviewed like code.
+Record templates: `{{kb_path}}/core/templates/records/`. Format reference:
+`{{kb_path}}/docs/format.md`.
+
+## What a feature's documentation is
+
+| part | where | how kb uses it |
+|---|---|---|
+| the feature and its files | `project/registry/features.toml`: `id`, `title`, `paths` (globs) | `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` finds the feature of a path |
+| purpose | the feature record's `summary` (one or two sentences) | first line of `{{kb_path}}/kbw doc{{snapshot_arg}}` |
+| entry points | `anchors` of kind `source` with `repo`, `path` and `symbol` | `entry` lines; `{{kb_path}}/kbw anchors check` detects drift |
+| behaviors, states, scenarios | `behaviors`, optional `states`, `transitions`, `scenarios` | descriptive, supplementary context |
+| known limits and nuances | `boundaries` | `limit` lines |
+| invariants | separate `invariant` records with `scope.features = ["<id>"]` | binding `MUST ...` lines; always delivered by `context` |
+| contracts with other modules | `contract` records | binding; delivered for both parties |
+| open questions | `gap` records (`affects`, `questions`) | reported, never guessed |
+
+Keep the feature record compact: at most 60 lines (`{{kb_path}}/kbw validate` warns with
+`FEATURE_TOO_LONG`). One fact per item, no restated source code, no generic advice. Put
+every rule in a typed `statements` entry with explicit `conditions` and typed
+`exceptions`, never in Markdown prose.
+
+## Procedure
+
+1. **Find what exists.** `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` and `{{kb_path}}/kbw search "<words>"{{snapshot_arg}}`.
+   Extend existing records instead of duplicating them; ids are stable and never reused.
+2. **Establish the facts from evidence**: the code (`{{kb_path}}/kbw sym`, `{{kb_path}}/kbw callers`, `{{kb_path}}/kbw impact{{snapshot_arg}}`),
+   its tests and reviewed changes. Code alone supports descriptive orientation; a confirmed
+   rule needs a merged fix with a regression test or an explicit reviewed decision.
+3. **Write drafts** from the templates with `status = "draft"`: the registry feature (if
+   missing), the feature record, one invariant record per independent rule, gap records for
+   what remains unknown. `{{kb_path}}/kbw capture decision|gap|quirk|scenario` and
+   `{{kb_path}}/kbw propose begin --from-change BASE..HEAD` prepare drafts from evidence; see
+   `{{skills_dir}}/kb/references/proposals.md`.
+4. **Validate.** `{{kb_path}}/kbw check <changed knowledge files>{{snapshot_arg}}` (or `{{kb_path}}/kbw validate`).
+   Drafts are proposals until review: inspect them with
+   `{{kb_path}}/kbw context --include-proposals --intent implement --path <path>{{snapshot_arg}}`
+   (labelled, never mandatory). `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` shows the feature
+   once the change is accepted into the approved ref.
+5. **Submit with the code change.** The documentation change is reviewed with the code it
+   describes: commit it in the KB checkout, propose it through the KB's review, and record
+   it as `included` or `linked` in the code merge request's `kb-impact` block. Never set
+   `status = "accepted"` yourself; acceptance is review and merge into the approved ref.

@@ -13,7 +13,7 @@ engine_version = "0.1.0"
 document_schema = 2
 protocol = 1
 index_schema = 2
-skill_protocol = 2
+skill_protocol = 3
 
 # Document schema versions the engine can migrate from (see `kb migrate`).
 # Version 0 is a synthetic pre-release format used only to exercise the migration

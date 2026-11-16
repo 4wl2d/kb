@@ -95,6 +95,7 @@ fn generated_schemas_are_valid_draft_2020_12_with_kb_ids() {
         "cli-envelope",
         "code-request",
         "code-response",
+        "tools",
     ]
     .into_iter()
     .collect();

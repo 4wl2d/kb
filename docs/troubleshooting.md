@@ -23,6 +23,8 @@ scope: each of those changes what the answer means, so say so when you do it.
 | `DRIFT_DETECTED` (42), `CONFLICT` (45) | [drift](#drift_detected), [conflict](#conflict) |
 | `ENGINE_DIVERGED` (43) | [engine divergence](#engine_diverged) |
 | `IMPACT_UNACKNOWLEDGED` (44) | [impact](#impact_unacknowledged) |
+| `CHECKS_FAILED` (46) | [checks](#checks_failed) |
+| `TOOL_UNAVAILABLE` (65), an invalid `tools.toml` (`CONFIG_INVALID` (11), `TOOLS_INVALID`) | [tools](#tool_unavailable-and-toolstoml) |
 | the host commit-msg hook rejects commits or never runs | [commit-msg hook](#commit-msg-hook) |
 | `UNSUPPORTED_SCHEMA_VERSION` (13), `MIGRATION_FAILED` (52) | [schema versions](#unsupported_schema_version-and-migration_failed) |
 | `RUNTIME_INCOMPATIBLE` (50) | [runtime mismatch](#runtime_incompatible) |
@@ -139,7 +141,7 @@ Two different causes share this code; `details` tells them apart.
 
 ## SKILL_OUTDATED
 
-* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 2` (exit 23), `details = {"caller": 99, "engine": 2}`.
+* **Symptom**: `error[SKILL_OUTDATED]: the caller's skill targets skill protocol 99, this engine serves 3` (exit 23), `details = {"caller": 99, "engine": 3}`.
 * **Cause**: generated skills pass `--skill-protocol <n>`; the KB's engine changed the skill
   protocol since the agent loaded its instructions.
 * **Fix**: re-read the installed `SKILL.md` (or start a new session so the harness reloads
@@ -222,6 +224,8 @@ is `INVALID_INPUT` (64) and fetches nothing.
 | `host-pin` | the pin against the (last known) approved tip and what `--snapshot auto` then does: with `.kbw.toml selection = "pinned"` it reads the pin, with `"latest"` the approved tip, without a selection (or with `"auto"`) it returns `UPDATE_REQUIRED` (pin behind, ahead or diverged) | update the pin through review, pass `--snapshot pinned` (or `latest`, suggested only when this engine can read the approved tip), or set `selection` |
 | `snapshot-engine` | `core/release.toml` of the approved tip and of the host pin, read from the mirror, against this engine | `fail`: the revision `--snapshot auto` selects needs another engine, so every reading command returns `UPDATE_REQUIRED` ([fix](#update_required)); `warn`: only the other revision does; `skip`: no tip or pin is known yet (`./kbw sync`) |
 | `index` | cache statistics and `PRAGMA quick_check` | `warn` after a rebuild or recovery; `fail`: `./kbw index --rebuild` |
+| `tools` | the tool registry (`<profile>/tools.toml` or the built-in defaults) and which tool would answer each routed request here | `fail`: the registry is invalid or nothing available answers a request; `warn`: symbol requests answer only lexically (git grep) or a check program is missing ([tools](#tool_unavailable-and-toolstoml)) |
+| `code-index` | the live CodeGraph index of the code root, when a routed `codegraph` tool is available | `warn`: no index (`codegraph init --yes <root>`) or an incomplete one (`codegraph index <root>`); `skip`: no routed codegraph tool is available |
 | `skill`, `bundle` | installed skill protocol in the host; generated bundle drift | [DRIFT_DETECTED](#drift_detected) |
 | `engine` | engine-owned paths against the recorded upstream base | [ENGINE_DIVERGED](#engine_diverged) |
 
@@ -318,6 +322,50 @@ nothing is written:
   `IMPACT_UNACKNOWLEDGED` with `--check`, `INVALID_INPUT` without. kb checks presence and
   shape only; reviewers judge the reasoning. On GitLab, editing the description does not
   start a pipeline; re-run the merge request pipeline after fixing the block.
+
+## CHECKS_FAILED
+
+* **Symptom**: `kbw check` prints its answer and exits 46:
+  `error[CHECKS_FAILED]: 2 check(s) failed: lint, knowledge`; `details.failed[]` names each
+  failed check (a registry tool id, `knowledge` or `probes`).
+* **Cause**, one or more of:
+  * a `command` tool whose `paths` match a changed file exited non-zero (`failed (exit N)`),
+    exceeded its deadline or output limit (`error: ...`), or its program is not an
+    executable file on this machine (`not run: ...`);
+  * knowledge files of this profile changed and validating them found errors;
+  * with `--base` in a host repository, a probe declared by a record failed (the same
+    evaluation as `kbw verify --diff <base>`).
+* **Fix**: read the `output` lines under the failed check (the last lines of its output),
+  fix the code or the knowledge and run `kbw check` again. `--plan` lists what would run
+  without running anything. For knowledge errors run `./kbw validate`; for probes,
+  `./kbw verify --diff <base>`. A missing program is installed by the user or removed from
+  the registry through review. Never weaken a check or edit `tools.toml` to make it pass.
+
+## TOOL_UNAVAILABLE and tools.toml
+
+* **Symptom**: `sym`, `callers`, `impact <symbol>`, `doc <symbol>` or `find` exits 65:
+  ``error[TOOL_UNAVAILABLE]: no connected tool could answer `sym`: <tool> skipped: <reason>; <tool> failed: <message>``;
+  `details = {"capability": ..., "attempts": [...]}` lists why each tool of the route was
+  skipped or failed; an empty route says `(the route is empty)`.
+* **Cause**: no tool of the route is installed and working for this code root: the program
+  is not on `PATH` (or not at its `{kb}/`/`{host}/` path), `--version` failed, the CodeGraph
+  index is missing, or every tool failed. A route listed in `tools.toml` that names only
+  unavailable tools gives the same error; `--tool <id>` limits the route to one tool.
+* **Not this error**: a tool that runs but does not find the symbol hands over to the next
+  one, and when none finds it the command prints its best answer and exits 16 (`NOT_FOUND`).
+* **Fix**: run `kbw tools` (each tool, its program, version and why it is unavailable) and
+  `kbw doctor` (checks `tools` and `code-index`). Installing a tool or creating its index is
+  the user's decision; kb never creates a tool index. For CodeGraph, create the index once
+  per checkout with `codegraph init --yes <host root>` and keep `.codegraph/` out of Git
+  (for example in `.git/info/exclude`). Meanwhile read the source directly.
+
+An invalid `<profile>/tools.toml` (unknown field, unknown adapter, duplicate id, a route
+naming an undeclared tool or one whose adapter cannot answer it, a `timeout_seconds`
+outside 1..3600, or a file that is not UTF-8) stops every agent command with
+`CONFIG_INVALID` (exit 11); `details.problems[]` lists each problem. `kbw validate` reports
+the same file as the error diagnostic `TOOLS_INVALID`, and `kbw doctor` fails its `tools`
+check. Fix the file through review; the format is in
+[agent-cli.md](agent-cli.md#tool-registry).
 
 ## commit-msg hook
 

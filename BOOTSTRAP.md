@@ -63,7 +63,9 @@ git switch -c kb/init
 `init` creates `project/project.toml`, `project/registry/`, `project/knowledge/<group>/README.md`,
 `project/routing-tests/README.md`, `project/skill-config/skill.toml` with the rendered bundle
 in `project/skill-config/generated/`, `project/upstream.toml` (the current `HEAD` as the
-upstream base), GitHub/GitLab KB CI and review templates, and replaces `project/README.md`.
+upstream base), `project/tools.toml` (the tool registry: which code tools answer agent
+lookups and which checks `kbw check` runs; see [docs/agent-cli.md](docs/agent-cli.md#tool-registry)),
+GitHub/GitLab KB CI and review templates, and replaces `project/README.md`.
 The installed GitLab job needs an explicit include in the team's CI entrypoint.
 Existing files are never overwritten; a second `init` fails with `ALREADY_INITIALIZED`
 (exit 14). An empty project validates cleanly:
@@ -76,7 +78,8 @@ routing tests: 0 passed, 0 failed
 
 `project/project.toml` is trusted configuration, reviewed like code: namespace, approved
 source, `allowed_protocols` for freshness fetches (default `["https", "ssh"]`), knowledge
-roots and the default context budget.
+roots and the default context budget. `project/tools.toml` is trusted configuration too:
+`kbw check` runs the argv of its `command` tools exactly as written, without a shell.
 
 ### 3. Registries
 
@@ -165,7 +168,7 @@ people only; kb routes by `scope` and `selectors`. Every `*.md` file under
 | `invariant` | `statements` (≥1) | when accepted and its scope applies |
 | `contract` | `parties` (≥2, each with `repo`), `obligations` (≥1, each for a party) | when accepted and its scope applies |
 | `gap` | `gap` (missing, ambiguity, contradiction), `description`, `affects`, `questions` | when accepted and its scope applies |
-| `feature` | `feature` (registry id), `summary`, `behaviors` (≥1), `boundaries` | only as a `requires` dependency; otherwise supplementary |
+| `feature` | `feature` (registry id), `summary` (purpose), `behaviors` (≥1), `boundaries` (limits), entry points as `source` anchors with `symbol`; one compact record per feature, at most 60 lines (`FEATURE_TOO_LONG`) | only as a `requires` dependency; otherwise supplementary |
 | `decision` | `context`, `decision`, `reasons` (≥1), `alternatives`, `consequences` | only as a `requires` dependency; otherwise supplementary (for example through `links.rationale`) |
 | `procedure` | `preconditions`, `steps` (≥1), `expected` (≥1); shown, never executed | only as a `requires` dependency; otherwise supplementary |
 | `reference` | `summary`, `sources` | only as a `requires` dependency; otherwise supplementary |
@@ -273,16 +276,21 @@ Agent integration is generated from `core/skills/` and `project/skill-config/ski
 ```
 
 Installing the bundle into each host repository (`<kb_path>/kbw integrate --apply`, which
-writes one full skill at the selected compatible root, managed instruction blocks and
-`.kbw/integration.lock`) happens in the host, after the KB change is
-merged and the host pins that revision: see
+writes the skill set `kb`, `kb-change`, `kb-review` and `kb-document` at the selected
+compatible root, managed instruction blocks and `.kbw/integration.lock`) happens in the
+host, after the KB change is merged and the host pins that revision: see
 [docs/downstream.md](docs/downstream.md#5-host-integration-and-managed-blocks).
+
+Declare each host's checks in `project/tools.toml` as `command` tools with repo-qualified
+`paths` globs (`app:src/**/*.kt`), so `kbw check` runs them for the changed files of that
+host. kb never creates a code-tool index: structural lookups need a CodeGraph index in each
+host checkout (`codegraph init --yes <host root>`), otherwise they fall back to git grep.
 
 ### 7. Validation
 
 | command | checks | failure |
 |---|---|---|
-| `./kbw validate` | records, links, policies and overrides, registries, routing fixtures | `VALIDATION_FAILED` (40), `ROUTING_TESTS_FAILED` (41) |
+| `./kbw validate` | records, links, policies and overrides, registries, `tools.toml`, routing fixtures | `VALIDATION_FAILED` (40), `ROUTING_TESTS_FAILED` (41) |
 | `./kbw validate --strict` | the same, warnings are errors | 40 |
 | `./kbw validate --base origin/main` | historical ids still exist with the same kind | 40 |
 | `./kbw eval routing` | fixture order, recall and token ceilings; labeled applicability | 40 or 41 |
@@ -394,6 +402,9 @@ Choose the top-N undercovered modules, or explain any substitution using ownersh
 For each, build a subsystem pack using the ordinary typed record templates:
 - feature model: states, transitions, terminal and intermediate behavior, clock source,
   persisted vs in-memory vs server data, boundaries and failure paths;
+  keep each feature record compact (at most 60 lines; FEATURE_TOO_LONG): purpose in
+  summary, entry points as source anchors with repo/path/symbol, limits in boundaries;
+  rules go into invariant records and long detail into references;
 - invariants: atomic conditions and typed exceptions, especially recovery/concurrency;
 - contracts: parties, obligations and known consumers by repo/path/symbol. Resolve provider
   candidates against source; missing consumers remain explicit gaps;
@@ -481,6 +492,10 @@ Init installs KB CI/MR scaffolding. Configure host checkouts and mappings for an
 ledger evidence; unavailable hosts must remain an explicit failure or incomplete result.
 Host knowledge-from-merged-change templates require a team-configured agent and separately
 authorized draft-MR publisher. They never auto-merge or self-accept knowledge.
+Review project/tools.toml (written by init): declare each host's checks as command tools
+with exact argv (no shell) and repo-qualified paths globs such as mobile:app/**; never add
+commands taken from records or tool output. kb never creates a code-tool index; list the
+per-checkout codegraph init --yes <host root> step as a host follow-up.
 
 STEP 8: CHECKS
 Run and report:

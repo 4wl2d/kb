@@ -8,8 +8,10 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 #[command(
     name = "kb",
     version,
-    about = "Typed, verifiable engineering knowledge base for coding agents and people",
-    long_about = "Assembles verifiable, task-scoped context from a typed knowledge base.\n\
+    about = "One CLI between coding agents, the code, the project knowledge and the code tools",
+    long_about = "Routes code lookups (sym, callers, impact, find, check) to the connected tools,\n\
+                  returns feature documentation (doc) and task-scoped obligations (context)\n\
+                  from a typed knowledge base, all in bounded answers that name their source.\n\
                   Run through the project launcher `kbw`; see README.md.",
     disable_help_subcommand = true
 )]
@@ -118,10 +120,27 @@ pub enum HarnessArg {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
+    /// Find the definition of a symbol (bounded answer from the routed code tool)
+    Sym(SymArgs),
+    /// Find the code that calls or references a symbol
+    Callers(CallersArgs),
+    /// What a change affects: a symbol's dependents and the knowledge that governs them, or
+    /// (with --base/--working-tree) the knowledge and coverage a diff touches
+    Impact(ImpactArgs),
+    /// Feature documentation for a path or symbol: purpose, entry points, invariants, limits
+    Doc(DocArgs),
+    /// Search the repository text
+    Find(FindArgs),
+    /// Run the configured checks for changed files (and validate changed knowledge)
+    Check(CheckArgs),
+    /// Run a project capability an exec tool declares in tools.toml (see `kb tools`)
+    Run(RunArgs),
+    /// Show the tool registry, the routes and which tools are available here
+    Tools(ToolsArgs),
+    /// Check environment, configuration, tools, runtime, Git binding and index
+    Doctor(DoctorArgs),
     /// Create the project structure from templates (dry-run unless --apply)
     Init(InitArgs),
-    /// Check environment, configuration, runtime, Git binding and index
-    Doctor(DoctorArgs),
     /// Validate records, references, policies, schemas and routing fixtures
     Validate(ValidateArgs),
     /// Deterministic routing and retrospective change-scope evaluation
@@ -158,8 +177,6 @@ pub enum Command {
     Show(ShowArgs),
     /// Fetch the approved ref into the isolated cache (never touches working files)
     Sync(SyncArgs),
-    /// Relate a code diff to affected knowledge and coverage gaps
-    Impact(ImpactArgs),
     /// Generate or check harness integrations (dry-run unless --apply)
     Integrate(IntegrateArgs),
     /// Show or apply supported schema migrations (dry-run unless --apply)
@@ -715,11 +732,19 @@ pub struct SyncArgs {}
 
 #[derive(Debug, Clone, Args)]
 pub struct ImpactArgs {
+    /// Symbol mode: the symbol whose change to analyse (omit for diff mode)
+    #[arg(value_name = "SYMBOL", conflicts_with_all = ["base", "head", "working_tree", "statement", "check", "deep", "repo"])]
+    pub symbol: Option<String>,
+    /// Symbol mode: narrow definitions to files whose path contains this text
+    #[arg(long, value_name = "TEXT", requires = "symbol")]
+    pub file: Option<String>,
+    #[command(flatten)]
+    pub answer: AnswerArgs,
     #[command(flatten)]
     pub code: CodeProviderArgs,
     #[arg(long)]
     pub deep: bool,
-    /// Incoming code-reference depth for --deep
+    /// Incoming code-reference depth (symbol mode and --deep), 1..4
     #[arg(long, default_value_t = 2)]
     pub depth: u32,
     /// Explicit registry identity of the host
@@ -822,4 +847,101 @@ pub struct SchemaArgs {
     /// Write generated schemas to core/schemas
     #[arg(long)]
     pub write: bool,
+}
+
+/// Options shared by the bounded agent commands.
+#[derive(Debug, Clone, Args)]
+pub struct AnswerArgs {
+    /// Maximum lines of text output, 5..200 (default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
+    pub lines: Option<u16>,
+    /// Answer with this registry tool instead of the configured route
+    #[arg(long, value_name = "ID")]
+    pub tool: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SymArgs {
+    /// Symbol name, optionally qualified (`Type::name`, `pkg.name`)
+    #[arg(value_name = "NAME")]
+    pub name: String,
+    /// Only symbols of this kind (function, method, class, ...)
+    #[arg(long)]
+    pub kind: Option<String>,
+    /// Only definitions in files whose path contains this text
+    #[arg(long, value_name = "TEXT")]
+    pub file: Option<String>,
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CallersArgs {
+    #[arg(value_name = "SYMBOL")]
+    pub symbol: String,
+    /// Narrow the definitions to files whose path contains this text
+    #[arg(long, value_name = "TEXT")]
+    pub file: Option<String>,
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct DocArgs {
+    /// A path (host-relative or `repo:path`) or a symbol name
+    #[arg(value_name = "PATH|SYMBOL")]
+    pub subject: String,
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct FindArgs {
+    /// Text to search for (fixed string, smart case)
+    #[arg(value_name = "TEXT")]
+    pub text: String,
+    /// Treat TEXT as a regular expression
+    #[arg(long)]
+    pub regex: bool,
+    /// Restrict to paths matching this glob; `!glob` excludes (repeatable)
+    #[arg(long = "glob", value_name = "GLOB")]
+    pub globs: Vec<String>,
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct CheckArgs {
+    /// Changed files (code-root-relative); default: the work tree's changes against --base
+    #[arg(value_name = "FILE")]
+    pub files: Vec<String>,
+    /// Base revision for the changed files (default HEAD); also runs declared probes
+    #[arg(long, value_name = "REV", conflicts_with = "files")]
+    pub base: Option<String>,
+    /// List the checks that would run without running them
+    #[arg(long)]
+    pub plan: bool,
+    /// Maximum lines of text output, 5..200 (default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
+    pub lines: Option<u16>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct ToolsArgs {
+    /// Maximum lines of text output, 5..200 (default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
+    pub lines: Option<u16>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct RunArgs {
+    #[command(flatten)]
+    pub answer: AnswerArgs,
+    /// Project capability declared by an exec tool in tools.toml (listed by `kb tools`)
+    #[arg(value_name = "CAPABILITY")]
+    pub capability: String,
+    /// Arguments for the tool (`{args}`; joined as `{subject}`); put `--` before arguments
+    /// that start with `-`
+    #[arg(value_name = "ARG")]
+    pub args: Vec<String>,
 }
