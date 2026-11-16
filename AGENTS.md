@@ -2,7 +2,7 @@
 
 These instructions are for coding agents and people changing **the kb engine** (this
 repository). Agents working in a *host* repository that uses a downstream KB get their
-instructions from the generated `kb` skill instead.
+instructions from the generated kb skill set instead.
 
 ## Orientation
 
@@ -11,6 +11,10 @@ instructions from the generated `kb` skill instead.
 * Launcher: `kbw` (POSIX sh). Manifest: `core/release.toml`.
 * Opt-in knowledge about kb itself: `core/maintainer-knowledge/` — query it with
   `./kbw context --profile maintainer --snapshot working-tree --offline --intent implement --repo kb --path <file>`.
+* Agent surface (`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check`, `tools`): tool
+  adapters in `core/cli/src/tools/`, bounded answers in `core/cli/src/answer.rs`, guide
+  `docs/agent-cli.md`. `./kbw --profile maintainer check --base main` runs the checks below that
+  `core/maintainer-knowledge/tools.toml` configures for the changed files.
 
 ## Rules
 

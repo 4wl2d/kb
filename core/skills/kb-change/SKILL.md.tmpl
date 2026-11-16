@@ -1,0 +1,43 @@
+---
+name: kb-change
+description: Universal procedure for changing code in this project through kb. Find the feature documentation and invariants, analyse what the change affects, get the complete obligations before the first edit, change the code, run the checks and update the documentation in the same change. Use for every implementation, fix or refactoring task.
+---
+
+# Change code with kb
+
+A short universal procedure. The project's architecture, rules and limits live in the
+knowledge base and reach you through kb, not through this skill. Command details are in
+`{{skills_dir}}/kb/SKILL.md`.
+
+1. **Locate the code.** `{{kb_path}}/kbw sym <name>` for a named symbol, `{{kb_path}}/kbw find "<text>"` for text
+   from the task, an error message or a log line.
+2. **Read the feature documentation.** `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` returns the feature's
+   purpose, entry points, invariants, contracts, known limits and gaps. Invariants and
+   contracts are binding. A gap is an open question: report it, do not guess an answer.
+3. **Analyse dependencies.** `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and `{{kb_path}}/kbw callers <symbol>` show the
+   code that depends on what you change, the likely regression points and the features
+   and records that govern the affected files.
+4. **Get the complete obligations before the first edit.**
+
+   ```sh
+   {{kb_path}}/kbw context --intent {{default_intent}} --task "<task>" --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
+   ```
+
+   Repeat `--path` for every file you will touch (`repo:path` for another repository).
+   Apply every mandatory statement with its conditions and typed exceptions. Exit 30:
+   resolve or report the listed reasons before editing.
+5. **Change the implementation** with that context, respecting the invariants. Read the
+   source for the details kb does not supply; confirm decisive facts there.
+6. **Verify.** `{{kb_path}}/kbw check --base <target>{{snapshot_arg}}` runs the checks the configuration provides for
+   the changed files, validates changed knowledge and evaluates the probes records
+   declare. Fix every failure (exit 46); never weaken a check or a rule to pass it.
+7. **Update the documentation in the same change** when behaviour, entry points,
+   invariants or limits changed: follow `{{skills_dir}}/kb-document/SKILL.md`. Then
+   `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}` lists the knowledge the diff
+   touches; address it or acknowledge it in the merge request's `kb-impact` block.
+8. **Report** the context receipt and completeness, the checks run with their results and
+   any unresolved gaps.
+
+Repeat steps 2 to 4 when the work reaches new paths, contracts or repositories. After
+compaction, a hand-off or a new session, request context again instead of relying on a
+remembered receipt.

@@ -7,6 +7,7 @@ pub mod profile;
 pub mod record;
 pub mod registry;
 pub mod routing;
+pub mod tools;
 
 pub use code::*;
 pub use evolution::*;

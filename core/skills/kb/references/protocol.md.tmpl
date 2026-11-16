@@ -12,6 +12,27 @@ stderr. Exit code 0 means success; any other code comes with `error.code` (see
 `recovery.md`). Groups: 1 internal, 2 usage, 10-19 project/config, 20-29 freshness and
 snapshots, 30-39 context, 40-49 checks, 50-59 runtime/update, 60-69 environment.
 
+## Agent answers
+
+`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check` and `tools` print one bounded
+answer in every text format (at most `--lines` lines, default 30, at most 200 characters
+each) and, in JSON, `result` = `kb.answer.v1`:
+
+```json
+{"answer": "kb.answer.v1", "command": "callers", "subject": "refresh",
+ "sources": [{"id": "codegraph", "adapter": "codegraph", "version": "codegraph 1.6.2", "state": "index synced, complete"}],
+ "items": [{"kind": "caller", "name": "signIn", "path": "app/auth/Login.kt", "line": 3, "detail": "method calls", "source": "codegraph"}],
+ "shown": 1, "total": 1, "truncated": false, "notes": [], "next": ["kb impact refresh"]}
+```
+
+`state` says what the source read: `index synced, complete` (live index, synced before the
+query), `index as is, N file change(s) not indexed`, `commit <sha12>` (commit-bound; no
+uncommitted edits), `working tree, lexical` (text match), or the knowledge revision with
+freshness and completeness. `confidence` is `resolved`, `possible` or `lexical`. `truncated`
+means more items exist than fit: narrow the request or raise `--lines`. Exit 16 `NOT_FOUND`
+still prints the answer; 46 `CHECKS_FAILED` lists the failed checks with their last output
+lines; 65 `TOOL_UNAVAILABLE` lists the attempts in `details`.
+
 ## Envelope
 
 ```json
@@ -91,6 +112,7 @@ is exact. Mandatory units are never truncated: if they do not fit, the call fail
 - `show <id>` (`--sections` for all deferred bodies, `--section <section>`, `--raw` for file bytes);
 - `outline --intent ...`: inventory only, at most 2000 estimated tokens; not a delivery receipt;
 - `search <words>`: finds records, but is not a substitute for `context`;
+- `impact <symbol>`, `sym`, `callers`, `doc`, `find`, `check`, `tools`: the agent commands above;
 - `impact --base <rev> [--working-tree]`: knowledge affected by a diff, and unknown coverage;
 - `impact --deep --depth 2 --provider ...`: static consumers at base/head, with uncertainty;
 - `coverage`, `propose begin|submit`, `capture`: evidence-backed domain drafts;

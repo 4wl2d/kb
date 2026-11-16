@@ -22,6 +22,7 @@ use crate::model::registry::{
     ChangeTypesFile, ConceptsFile, FeaturesFile, ModulesFile, OwnersFile, ReposFile,
 };
 use crate::model::routing::RoutingTestFile;
+use crate::model::tools::ToolsConfig;
 use crate::model::{
     CodeRequest, CodeResponse, HostBinding, ProfileConfig, Record, SkillConfig, UpstreamConfig,
 };
@@ -49,7 +50,7 @@ fn model_schema<T: JsonSchema>() -> Value {
 
 /// All generated schemas: file name → pretty JSON text with a trailing newline.
 pub fn generate() -> BTreeMap<String, String> {
-    let specs: [(&str, &str, &str, Value); 16] = [
+    let specs: [(&str, &str, &str, Value); 17] = [
         (
             "record",
             "Knowledge record front matter (document schema 1)",
@@ -115,6 +116,12 @@ pub fn generate() -> BTreeMap<String, String> {
             "Upstream base (project/upstream.toml)",
             "Upstream revision the engine paths were last taken from.",
             model_schema::<UpstreamConfig>(),
+        ),
+        (
+            "tools",
+            "Tool registry (<profile>/tools.toml)",
+            "Connected code tools, their adapters and the route of each request; command tools are the checks `kb check` runs.",
+            model_schema::<ToolsConfig>(),
         ),
         (
             "registry-change-types",

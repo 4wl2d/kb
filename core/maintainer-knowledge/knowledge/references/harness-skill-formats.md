@@ -5,7 +5,7 @@ kind = "reference"
 title = "Harness skill discovery formats"
 status = "accepted"
 owner = "maintainers"
-summary = "The generator installs one full skill, preferring .agents/skills for Codex/Cursor, then .claude/skills for Claude, .grok/skills for Grok, then .kbw/skills. Native targets are AGENTS.md for Codex/Grok/Junie, CLAUDE.md, Cursor .mdc and Copilot instructions. Secondary targets point to the shared workflow; existing masking overrides are preserved and receive pointers. Installation checks do not prove runtime loading."
+summary = "The generator installs one copy of the skill set (kb, kb-change, kb-review, kb-document) side by side, preferring .agents/skills for Codex/Cursor, then .claude/skills for Claude, .grok/skills for Grok, then .kbw/skills. Native targets are AGENTS.md for Codex/Grok/Junie, CLAUDE.md, Cursor .mdc and Copilot instructions. Secondary targets point to the shared workflow; existing masking overrides are preserved and receive pointers. Installation checks do not prove runtime loading."
 
 [scope]
 modules = ["kb.integrate"]

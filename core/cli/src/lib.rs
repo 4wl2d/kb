@@ -1,9 +1,10 @@
 //! `kb`: typed, verifiable engineering knowledge base engine.
 //!
-//! Layering: pure logic (`model`, `parse`, `validate`, `normalize`, `glob`, `context`) is
-//! separate from adapters (`git`, `host`, `snapshot`, `overlay`, `source`, `index`,
-//! `integrate`, `update`) and from the CLI (`cli`, `output`).
+//! Layering: pure logic (`model`, `parse`, `validate`, `normalize`, `glob`, `context`,
+//! `answer`) is separate from adapters (`git`, `host`, `snapshot`, `overlay`, `source`,
+//! `index`, `integrate`, `update`, `tools`) and from the CLI (`cli`, `output`).
 
+pub mod answer;
 pub mod cli;
 pub mod code;
 pub mod context;
@@ -37,6 +38,7 @@ pub mod schema_export;
 pub mod scope;
 pub mod snapshot;
 pub mod source;
+pub mod tools;
 pub mod trust;
 pub mod update;
 pub mod usage;

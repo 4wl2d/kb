@@ -28,4 +28,19 @@ text = "A rejected refresh token signs the user out and shows the sign-in screen
 [[boundaries]]
 id = "no-password-storage"
 text = "The app never stores the user's password; only tokens are kept."
+
+# Entry points: source anchors with the symbol where the feature starts.
+[[anchors]]
+kind = "source"
+repo = "mobile"
+path = "app/auth/TokenRefresher.kt"
+symbol = "TokenRefresher.refresh"
+note = "silent refresh before the access token expires"
+
+[[anchors]]
+kind = "source"
+repo = "backend"
+path = "api/auth/refresh.go"
+symbol = "RefreshHandler"
+note = "token rotation endpoint"
 +++

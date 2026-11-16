@@ -182,7 +182,7 @@ report types and integration tests. Members listed as "+ `snapshot`" carry prove
 | command | `result` members | result-carrying failures; notes |
 |---|---|---|
 | `init` | `mode` (`dry-run`/`apply`), `plan` (`name`, `namespace`, `remote`, `approved_ref`, `kb_path`, `harnesses`, `example`, `upstream_url`, `upstream_revision`, `changes[]` of `{action, path, reason?}`), `summary` (count per action), `written` | hard: `ALREADY_INITIALIZED`; `USAGE` with `--profile maintainer` or `--config` |
-| `doctor` | `profile`, `online`, `summary` (`ok`, `warn`, `fail`, `skip`), `checks[]` of `{id, status, message, hint?, details?}` | `VALIDATION_FAILED` when a check has `status = fail`; `--online` with `--offline` is a hard `INVALID_INPUT` (nothing is fetched). Check ids in order: `git`, `kb-root`, `runtime`, `profile`, `knowledge`, `source`, `freshness`, `host`, `host-repo`, `host-pin`, `snapshot-engine`, `index`, `skill`, `bundle`, `engine`. `snapshot-engine` details: `engine_version`, `auto` (the revision `--snapshot auto` selects, or `null`), `revisions[]` of `{role` (`latest`/`pinned`), `revision`, `status` (`ok`/`incompatible`/`unknown`), `message?`, `mismatches?}` |
+| `doctor` | `profile`, `online`, `summary` (`ok`, `warn`, `fail`, `skip`), `checks[]` of `{id, status, message, hint?, details?}` | `VALIDATION_FAILED` when a check has `status = fail`; `--online` with `--offline` is a hard `INVALID_INPUT` (nothing is fetched). Check ids in order: `git`, `kb-root`, `runtime`, `profile`, `knowledge`, `source`, `freshness`, `host`, `host-repo`, `host-pin`, `snapshot-engine`, `index`, `tools`, `code-index`, `skill`, `bundle`, `engine`. `snapshot-engine` details: `engine_version`, `auto` (the revision `--snapshot auto` selects, or `null`), `revisions[]` of `{role` (`latest`/`pinned`), `revision`, `status` (`ok`/`incompatible`/`unknown`), `message?`, `mismatches?}` |
 | `validate` | `source`, `strict`, `templates`, `base`, `validation` (`profile`, `files`, `records`, `errors`, `warnings`, `diagnostics[]`), `routing` (`passed`, `failed`, `cases[]`, or `null` with `--no-routing`) | `VALIDATION_FAILED` takes precedence over `ROUTING_TESTS_FAILED`; with `--templates` the template diagnostics are included in the totals, and the text output adds a line saying templates were checked |
 | `index` | `build` (as `meta.index`), `index` (`docs`, `index_schema`, `parser_version`, `snapshots[]` of `{key, created` (build counter, larger = newer)`, files, proposals, errors, warnings}`), `gc` (`{keep, removed}` with `--gc`, else `null`), `freshness_verified` (always `false`), `note` + `snapshot` | never contacts the remote; the absolute cache path and its size in bytes are in `meta.cache` (`path`, `bytes`), not in `result`; `build.recovery.moved_to` (after a corrupt-cache recovery) is still an absolute path |
 | `context` | `protocol`, `engine_version`, `skill_protocol`, `intent`, `request`, `snapshot`, `freshness`, `host`, `scope`, `completeness`, `status_reasons[]`, `undetermined[]`, `effective_settings[]`, `ambiguities[]`, `issues[]`, `diagnostics` (`errors`, `warnings`, `items[]`), `notes[]`, `budget`, `units[]`, `receipt`; `explain` with `--explain` | `CONTEXT_INCOMPLETE` unless `completeness = complete`; hard: `CONTEXT_BUDGET_EXCEEDED`, `UNKNOWN_SCOPE`. Field semantics: [context.md](context.md) |
@@ -213,6 +213,10 @@ Additive command contracts (CLI envelope/error meanings remain `kb.cli.v1`):
 | `ledger` | statement support/freshness and seeded draft audit in `ledger` + `snapshot` | `--check` fails stale/unverifiable accepted evidence; drafts are never accepted |
 | `verify` | `verification`: input digest, mode/diff/branch, declared probes, concrete evidence, counts, explicit applicability and optional provider provenance + `snapshot` | blocking failure: `VALIDATION_FAILED`; blocking unknown evidence: `CONTEXT_INCOMPLETE` |
 | `usage report` | `usage`, final `diff`, selected/missing receipts and selection description + `snapshot` | missing receipts or invalid preserved log lines: `CONTEXT_INCOMPLETE` |
+| `sym`, `callers`, `find`, `tools` | `kb.answer.v1`: `answer`, `command`, `subject`, `sources[]` of `{id, adapter, version?, state}`, `items[]` of `{kind, name?, path?, line?, end_line?, detail?, confidence?, source}`, `shown`, `total`, `truncated`, `notes[]`, `next[]` ([agent-cli.md](agent-cli.md#answers)); probes of `tools` in `meta.probes` | unknown symbol or no match: `NOT_FOUND` with the answer printed; no connected tool could answer: `TOOL_UNAVAILABLE` (`details.capability`, `details.attempts`); invalid `tools.toml`: `CONFIG_INVALID` |
+| `impact <symbol>` | `kb.answer.v1` with the routed source and the `knowledge` source (revision, freshness, completeness) | `NOT_FOUND`, `TOOL_UNAVAILABLE`; a knowledge failure is a note, not an error; symbol and diff options do not combine (`USAGE`); `--lines`/`--tool` in diff mode: `INVALID_INPUT` |
+| `doc` | `kb.answer.v1` with the `knowledge` source (plus the routed source for a symbol) | an unresolvable subject: `NOT_FOUND`; knowledge errors as for `context` |
+| `check` | `kb.answer.v1`: one `check` item per command tool, `knowledge` and `probes`, `output` items with the last lines of a failure | any failed or unavailable check, knowledge errors or failed probes: `CHECKS_FAILED` (`details.failed`); `--plan` runs nothing |
 | `eval routing` | normal profile uses validation/routing report; `--example` returns example, validation and routing | validation/routing errors retain 40/41; absent labels are unknown |
 | `eval history` | `history` + `snapshot`: per-change delivery/labels/drift and temporal limitations | `--check` fails incomplete context or unavailable labels/temporal evidence |
 
@@ -244,7 +248,7 @@ as `validate` diagnostics and as the context reason `SNAPSHOT_INVALID`, not as a
 | `UNSUPPORTED_SCHEMA_VERSION` | 13 | project/config | a file, migration target or upstream uses a document schema this engine cannot read or migrate | `kbw migrate`, or update through an intermediate upstream release |
 | `ALREADY_INITIALIZED` | 14 | project/config | `init` on an initialized KB | edit `project/` directly |
 | `UNKNOWN_SCOPE` | 15 | project/config | an explicit repo, module, feature or concept id is not in the registry | check `project/registry/*.toml` (ids are case-sensitive) |
-| `NOT_FOUND` | 16 | project/config | record, section, host repository or update worktree not found | check the id (`kbw search`); run from the host or pass `--host` |
+| `NOT_FOUND` | 16 | project/config | record, section, host repository or update worktree not found; for agent commands an unknown symbol, an unresolvable `doc` subject or no `find` match (answer printed) | check the id or name (`kbw search`, `kbw find`); run from the host or pass `--host` |
 | `FRESHNESS_UNVERIFIED` | 20 | freshness/snapshot | the approved ref could not be fetched in this call | [restore access or go offline explicitly](troubleshooting.md#freshness_unverified) |
 | `UPDATE_REQUIRED` | 21 | freshness/snapshot | the host pin differs from the approved tip, or the selected snapshot needs another engine | [choose a snapshot or update the pin](troubleshooting.md#update_required) |
 | `SNAPSHOT_NOT_FOUND` | 22 | freshness/snapshot | the requested revision, pin or approved tip is not known | fetch it, run once online, or select another snapshot |
@@ -257,6 +261,7 @@ as `validate` diagnostics and as the context reason `SNAPSHOT_INVALID`, not as a
 | `ENGINE_DIVERGED` | 43 | checks | engine-owned paths differ from the recorded upstream base | move changes upstream or declare `engine_patches` |
 | `IMPACT_UNACKNOWLEDGED` | 44 | checks | affected knowledge or unknown coverage has no valid `kb-impact` acknowledgement | add or fix the block in the MR description |
 | `CONFLICT` | 45 | checks | generated files or managed blocks were edited outside kb (`integrate --apply`), or an update worktree has uncommitted, untracked or conflicted files (`update abandon --apply`); nothing was written or removed | move the edits into the KB, or keep what matters and re-run with `--apply --force` after review |
+| `CHECKS_FAILED` | 46 | checks | a configured check command failed or could not start, changed knowledge has validation errors, or a declared probe failed (`check`; the answer is printed) | read the `output` lines of the failed check and fix the cause; never edit `tools.toml` to silence a check |
 | `RUNTIME_INCOMPATIBLE` | 50 | runtime/update | the running binary does not match the checkout's `core/release.toml` | run through `kbw`; re-bootstrap |
 | `UPDATE_CONFLICT` | 51 | runtime/update | merging the upstream ref conflicts (predicted by `check`, left in the worktree by `prepare`) | resolve in the update worktree, or discard it with `kbw update abandon <branch> --apply --force` (the conflicted files count as uncommitted) |
 | `MIGRATION_FAILED` | 52 | runtime/update | a migration transform or verification failed; nothing was written | report the listed files |
@@ -266,6 +271,7 @@ as `validate` diagnostics and as the context reason `SNAPSHOT_INVALID`, not as a
 | `IO_ERROR` | 62 | environment | a file could not be read or written, or changed while being read (retryable) | check the path; re-run |
 | `UNSAFE_PATH` | 63 | environment | a path is absolute, escapes its root, contains `..` or is a symlink | use a relative path inside the repository |
 | `INVALID_INPUT` | 64 | environment | malformed argument or file (revision, `--path .`, kind, statement block, branch name), or options that do not combine (`doctor --online` with `--offline`) | fix the input named in the message |
+| `TOOL_UNAVAILABLE` | 65 | environment | no connected tool could answer an agent request: not installed, no index for the code root, or every routed tool failed (`details.attempts`) | `kbw tools` and `kbw doctor` show what is missing; install the tool or create its index, or change `routes` in `tools.toml` |
 
 ### Context status reasons
 
@@ -362,11 +368,11 @@ honors `KB_CACHE_DIR` (default `<kb root>/.cache`).
 |---|---|---|
 | CLI protocol | `protocol = 1` in `core/release.toml`; `PROTOCOL`/`PROTOCOL_ID` in `core/cli/src/versions.rs`; the envelope's `"kb.cli.v1"` | this envelope, the error codes and exit codes |
 | envelope schema | `core/schemas/cli-envelope.v1.schema.json` (`$id` `kb:schema/cli-envelope/v1`, JSON Schema draft 2020-12) | the envelope and the `error` object; `result` is command-specific and not constrained by it |
-| skill protocol | `skill_protocol = 2`; checked with `--skill-protocol <n>` | scoped diagnosis, verified reuse and evidence/draft workflow |
+| skill protocol | `skill_protocol = 3`; checked with `--skill-protocol <n>` | the skill set (`kb`, `kb-change`, `kb-review`, `kb-document`) and the agent commands, on top of scoped diagnosis, verified reuse and the evidence/draft workflow of protocol 2 |
 | engine | `engine_version` (semver) | the release |
 
 * `kb version` reports all of them plus the build fingerprint (`kb 0.1.0 (document schema 2,
-  protocol 1, index schema 2, skill protocol 2) build <fingerprint>`); `kbw --json version`
+  protocol 1, index schema 2, skill protocol 3) build <fingerprint>`); `kbw --json version`
   adds `parser_version` and `build_fingerprint` (`unknown` for a build made outside `kbw`).
 * The maintainer contract `kb.contract.cli-protocol` (in `core/maintainer-knowledge/`)
   requires increasing `protocol` when an envelope field is removed or changes meaning, and

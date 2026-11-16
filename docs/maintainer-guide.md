@@ -69,6 +69,7 @@ modules) and the integration suites in `core/cli/tests/`:
 | `delivery_efficiency.rs` | verified core/delta (units a receipt held only as `core` references are never reused through `--since-receipt`; they are delivered in full unless current core proof covers them), one full skill, terse/outline and local usage |
 | `trust_workflow.rs`, `verify_workflow.rs` | stamps/drift/ledger/freshness and probes over real staged/committed inputs |
 | `evaluation.rs` | labeled routing metrics, chronological history, missingness and determinism |
+| `agent_cli.rs` | the agent commands (`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check`, `tools`): routing through the tool registry, fallbacks with notes, `NOT_FOUND` with the answer printed, forced and invalid routes, bounded and sorted answers, checks run without a shell (`--plan` runs nothing, `CHECKS_FAILED`), changed-knowledge validation and the knowledge part of `doc` and `impact`; a labeled shell stand-in replaces CodeGraph |
 
 The optional provider crate has synthetic native-output tests and an end-to-end deadline
 test (`core/providers/tests/deadline.rs`): it drives the real `kb-code-provider` binary with
@@ -123,6 +124,14 @@ shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
 model. `./kbw validate --profile maintainer --templates` validates the maintainer knowledge
 with its routing fixtures and every shipped template and example; on a clean upstream (no
 `project/project.toml`) it reports the missing project as info and exits 0.
+
+The same checks are configured as `command` tools in `core/maintainer-knowledge/tools.toml`,
+each triggered by the files it covers. `./kbw --profile maintainer check` runs those whose
+globs match the work tree's changes against `HEAD`, and
+`./kbw --profile maintainer check --base main` those matching the changes against `main`;
+changed maintainer knowledge is validated too, while declared probes need a host repository
+and are skipped here. `--plan` lists what would run without running it. The selection
+follows the changed files, so the full list above still applies before finishing.
 
 ## Engine and project ownership
 
@@ -201,10 +210,40 @@ The files in `core/schemas/` are generated from the Rust model (`core/cli/src/mo
 Without a runtime, the debug build does the same: `target/debug/kb --root . schema --write`.
 `schema_conformance.rs` also fails on drift. Review the schema diff like code.
 
+## Adding a tool adapter
+
+The agent commands reach code tools through the tool registry and engine-owned adapters
+([ADR 0016](adr/0016-agent-cli.md), [agent-cli.md](agent-cli.md#connecting-a-new-tool)).
+Another tool of a supported kind is a registry entry, and a new kind of code-intelligence
+tool can be wrapped as a `kb.code.v1` provider and connected with `adapter = "code-provider"`;
+neither changes the engine. A new adapter kind (another live index protocol) is an engine
+change:
+
+1. Add one module in `core/cli/src/tools/` next to `codegraph.rs`, `provider.rs`,
+   `grep.rs` and `command.rs`. It turns a `CodeQuery` into an `Outcome`: items with path,
+   line, confidence and a `Source` that names the tool, its version and the state of what
+   it read. Start the program through `run_tool`, which applies the deadline, the output
+   limits and the shared environment (telemetry, update checks and daemons off). The
+   adapter never creates a tool index or installs anything; a missing index makes the tool
+   unavailable so routing falls back.
+2. Add an `AdapterKind` variant in `core/cli/src/model/tools.rs` with its name,
+   capabilities, whether it needs a `program`, and its default rank; dispatch it in
+   `answer_code` (`core/cli/src/tools/mod.rs`). Keep validation of the new fields in the
+   pure model.
+3. Regenerate the schemas (`./kbw schema --write`; `tools.v1.schema.json` changes) and
+   document the adapter in [agent-cli.md](agent-cli.md#tool-registry).
+4. Test it with a synthetic, labeled stand-in executable as `core/cli/tests/agent_cli.rs`
+   does for CodeGraph: routing, fallback notes, not-found answers and bounded output,
+   without an installed tool or network access.
+
+Skills name kb commands only, so an additive adapter changes no skill and needs no skill
+protocol bump.
+
 ## Maintainer knowledge profile
 
 `core/maintainer-knowledge/` is typed knowledge about kb itself (namespace `kb`): profile
-config `profile.toml`, registries, records (policies, invariants, contracts, decisions,
+config `profile.toml`, the tool registry `tools.toml` (code tools and the checks above),
+registries, records (policies, invariants, contracts, decisions,
 procedures such as `kb.procedure.add-migration` and `kb.procedure.cut-release`, a reference
 and a gap) and routing fixtures. It is opt-in and never part of a project's context.
 

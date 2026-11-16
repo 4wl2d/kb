@@ -1,7 +1,8 @@
 //! Host-level installation of the committed skill bundle (`kb integrate [--check|--apply]`).
 //!
-//! Targets per harness (see [`super::generate::layout`]): `.claude/skills/kb/` and a
-//! `kb-instructions` block in `CLAUDE.md` for Claude Code; `.agents/skills/kb/` and a block in
+//! Targets per harness (see [`super::generate::layout`]): the skill set (`kb`, `kb-change`,
+//! `kb-review`, `kb-document`) under `.claude/skills/` and a
+//! `kb-instructions` block in `CLAUDE.md` for Claude Code; the set under `.agents/skills/` and a block in
 //! `AGENTS.md` for Codex (and for Cursor when Claude Code is not enabled; Cursor also reads
 //! `.claude/skills` and `AGENTS.md`).
 //!
@@ -200,7 +201,10 @@ const MANAGED_BLOCK_FILES: [&str; 5] = [
 /// Is `path` inside one of the skill directories kb installs?
 fn managed_file_path(path: &str) -> bool {
     crate::util::check_rel_path(path).is_ok()
-        && (matches!(path, ".cursor/rules/kb.mdc" | ".claude/commands/kb.md")
+        && (path == ".cursor/rules/kb.mdc"
+            || super::generate::CLAUDE_COMMAND_FILES
+                .iter()
+                .any(|(_, host, _)| *host == path)
             || [
                 AGENTS_SKILL_DIR,
                 CLAUDE_SKILL_DIR,
@@ -208,8 +212,14 @@ fn managed_file_path(path: &str) -> bool {
                 PORTABLE_SKILL_DIR,
             ]
             .iter()
+            .flat_map(|d| {
+                let root = super::generate::skills_root(d);
+                super::generate::SKILLS
+                    .iter()
+                    .map(move |(name, _)| format!("{root}/{name}"))
+            })
             .any(|d| {
-                path.strip_prefix(d)
+                path.strip_prefix(d.as_str())
                     .is_some_and(|r| r.len() > 1 && r.starts_with('/'))
             }))
 }
@@ -317,12 +327,14 @@ pub fn plan_install(
     let layout = bundle.layout();
     let warnings = install_warnings(kb_root, loc, host_root, &bundle);
 
-    // Desired skill files, one copy per skill directory.
+    // Desired skill files: `skills/<name>/<file>` goes to `<skills root>/<name>/<file>`, next to
+    // the `kb` skill directory of the layout.
     let mut desired: BTreeMap<String, &[u8]> = BTreeMap::new();
     for dir in &layout.skill_dirs {
+        let root = super::generate::skills_root(dir);
         for (rel, bytes) in &bundle.files {
             if let Some(sub) = rel.strip_prefix(SKILL_PREFIX) {
-                desired.insert(format!("{dir}/{sub}"), bytes);
+                desired.insert(format!("{root}/{sub}"), bytes);
             }
         }
     }

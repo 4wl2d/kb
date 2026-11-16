@@ -1049,6 +1049,8 @@ fn doctor_reports_healthy_and_uninitialized_setups() {
             "host-pin",
             "snapshot-engine",
             "index",
+            "tools",
+            "code-index",
             "skill",
             "bundle",
             "engine"

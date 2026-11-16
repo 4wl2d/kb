@@ -5,7 +5,7 @@ guides in `docs/` explain the same behavior for authors and operators; when they
 disagree, this document and the code win and the guide is a bug.
 
 Versions described here: engine `0.1.0`, document schema `2` (reads `1` and `2`), CLI protocol `1`,
-index schema `2`, skill protocol `2`, bootstrap manifest `1`; parser version `6` (code only,
+index schema `2`, skill protocol `3`, tool registry schema `1`, bootstrap manifest `1`; parser version `6` (code only,
 `PARSER_VERSION` in `core/cli/src/versions.rs`).
 
 ## 1. Distribution model and ownership
@@ -55,6 +55,7 @@ After `kb init --apply`:
 project/project.toml            profile config (trusted config: namespace, source, trust)
 project/registry/{owners,repos,modules,features,concepts,change-types}.toml
 project/knowledge/<group>/*.md  typed records (groups are free-form directories)
+project/tools.toml              tool registry: connected code tools, routes, check commands (§13)
 project/skill-config/skill.toml project settings for generated skills
 project/skill-config/generated/ rendered skill bundle (generated, drift-checked, committed)
 project/routing-tests/*.toml    routing fixtures
@@ -118,7 +119,10 @@ rendered together with the statement and are never dropped by budgeting.
   (required iff override = stricter; must fit the type), override_owners = [..], description }`.
   `Override = { target = "<policy-id>#<setting-name>", value, reason }`.
 * **feature**: `feature` (registry feature id), `summary`, `behaviors: [Item]` (≥1),
-  `boundaries: [Item]`. `Item = { id, text }`.
+  `boundaries: [Item]`. `Item = { id, text }`. A feature record is the compact document of
+  one feature: `summary` is its purpose, `source` anchors with a `symbol` are its entry
+  points, `boundaries` its known limits; invariants stay separate records. Validation
+  warns `FEATURE_TOO_LONG` above 60 lines (§13).
 * **invariant**: `statements: [Statement]` (≥1).
 * **contract**: `parties: [{ id, repo, modules = [..], role }]` (≥2), `interface` (optional
   string), `obligations: [Statement + party]` (≥1; `party` must be a declared party id).
@@ -505,8 +509,9 @@ Global options: `--root`, `--config`, `--profile project|maintainer`, `--format
 compact|terse|human|json` (`--json`), `--offline`, `--snapshot`, `--host`, `--quiet`,
 `--skill-protocol <n>` (mismatch → `SKILL_OUTDATED`). Unknown arguments are rejected.
 
-Commands: `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`, `show`, `sync`,
-`impact`, `coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`, `drift`,
+Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools` (§13),
+and `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`, `show`, `sync`,
+`coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`, `drift`,
 `ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
 `update {check,prepare,divergence,abandon}`, `schema`,
 `version`. Mutating commands are dry-run by default and write only with `--apply`
@@ -539,13 +544,17 @@ invalid records are `validate` diagnostics and the context reason `SNAPSHOT_INVA
 (`FRESHNESS_UNVERIFIED`=20, `UPDATE_REQUIRED`=21, `SNAPSHOT_NOT_FOUND`=22,
 `SKILL_OUTDATED`=23); 30–39 context (`CONTEXT_INCOMPLETE`=30, `CONTEXT_BUDGET_EXCEEDED`=31);
 40–49 checks (`VALIDATION_FAILED`=40, `ROUTING_TESTS_FAILED`=41, `DRIFT_DETECTED`=42,
-`ENGINE_DIVERGED`=43, `IMPACT_UNACKNOWLEDGED`=44, `CONFLICT`=45); 50–59 runtime/update
+`ENGINE_DIVERGED`=43, `IMPACT_UNACKNOWLEDGED`=44, `CONFLICT`=45, `CHECKS_FAILED`=46); 50–59 runtime/update
 (`RUNTIME_INCOMPATIBLE`=50, `UPDATE_CONFLICT`=51, `MIGRATION_FAILED`=52, `UPDATE_FAILED`=53);
 60–69 environment (`GIT_ERROR`=60, `INDEX_ERROR`=61, `IO_ERROR`=62, `UNSAFE_PATH`=63,
-`INVALID_INPUT`=64).
+`INVALID_INPUT`=64, `TOOL_UNAVAILABLE`=65).
 
 `context` exits 0 only when completeness is `complete`; otherwise it prints the full result
 and exits 30 (`CONTEXT_INCOMPLETE`).
+
+The agent commands print one bounded answer in every text format and `kb.answer.v1` as
+`result` in JSON (§13); `sym`, `callers`, `impact <symbol>`, `doc` and `find` report an unknown
+symbol or no match as `NOT_FOUND` with the answer still printed.
 
 ## 9. Launcher and runtime
 
@@ -593,14 +602,16 @@ engine divergence) by setting the repository variable `KB_ENGINE_CI` (skips the 
 
 ## 10. Integrations
 
-`kb integrate --generate` renders `core/skills/kb/*` with `project/skill-config/skill.toml`
-into `project/skill-config/generated/` (skill bundle + managed instruction blocks).
-`kb integrate [--check|--apply]` (host level) installs the bundle into the host repository:
-exactly one full skill: `.agents/skills/kb/` with Codex/Cursor, otherwise
-`.claude/skills/kb/` with Claude, otherwise `.grok/skills/kb/` with Grok, otherwise the
-portable `.kbw/skills/kb/`. Native instruction targets are `AGENTS.md` (Codex/Grok/Junie),
-`CLAUDE.md`, `.cursor/rules/kb.mdc` and `.github/copilot-instructions.md`. Secondary targets
-point at the primary workflow; mixed Claude uses a short `.claude/commands/kb.md` alias.
+`kb integrate --generate` renders the skill set (`core/skills/kb`, `kb-change`, `kb-review`,
+`kb-document`) with `project/skill-config/skill.toml` into `project/skill-config/generated/`
+(`skills/<name>/...` + managed instruction blocks). `kb` is required; each `SKILL.md` is at
+most 16 KiB. `kb integrate [--check|--apply]` (host level) installs the bundle into the host
+repository: exactly one copy of the set, side by side in `.agents/skills/` with
+Codex/Cursor, otherwise `.claude/skills/` with Claude, otherwise `.grok/skills/` with Grok,
+otherwise the portable `.kbw/skills/`. Native instruction targets are `AGENTS.md`
+(Codex/Grok/Junie), `CLAUDE.md`, `.cursor/rules/kb.mdc` and `.github/copilot-instructions.md`.
+Secondary targets point at the primary workflow; mixed Claude uses one short
+`.claude/commands/<skill>.md` alias per skill.
 Existing `AGENTS.override.md` and `.junie/AGENTS.md` receive pointer blocks without creating
 new masking overrides. Managed blocks are delimited by
 `<!-- kb:begin <name> -->` / `<!-- kb:end <name> -->`. Installed hashes are tracked in
@@ -654,3 +665,70 @@ See [evaluation.md](evaluation.md) and [optional-extensions.md](optional-extensi
 Tests, installation probes and static graphs cannot substitute for held-out feature,
 generation and field acceptance. Pending gates do not authorize default-on extensions or
 release tags.
+
+## 13. Agent surface: tool registry, routing, adapters, answers
+
+Decision: [ADR 0016](adr/0016-agent-cli.md); guide: [agent-cli.md](agent-cli.md).
+
+Layers: skills call the CLI; **routing** maps each request to a backend; the **tool
+registry** holds the connected tools; **adapters** (engine code in `core/cli/src/tools/`)
+speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every result.
+
+* **Registry**: `<profile>/tools.toml` (schema 1, `core/schemas/tools.v1.schema.json`),
+  read from the KB working tree, never from a fetched snapshot. `[[tool]]` entries: `id`
+  (kebab-case, unique), `adapter` (`codegraph`, `code-provider`, `ripgrep`, `git-grep`,
+  `command`), `program` (bare name → PATH; `{kb}/…` → KB root; `{host}/…` and other relative
+  paths → code root; no `..`; `git-grep` takes none), `args` (`code-provider` only), `sync`
+  (`codegraph` only: `auto` default, `never`), `run`/`paths`/`description` (`command` only;
+  `paths` are optionally repo-qualified globs), `timeout_seconds` 1..3600. `routes.{sym,
+  callers,impact,find}` order tools whose adapter supports the capability. Unknown fields,
+  unknown tools in routes, unsupported capabilities and duplicate ids are errors
+  (`CONFIG_INVALID` at run time, `TOOLS_INVALID` in `validate`). Absent file: defaults
+  `codegraph` → `rg` → `git-grep`.
+* **Code root**: the detected host repository, else the KB checkout. Answer paths are
+  relative to it; its registry repo id (from `.kbw.toml` or remotes) qualifies globs.
+* **Routing** (`sym`, `callers`, `impact <symbol>`, and `doc` for symbols): `--tool`, else the
+  route; a tool is skipped when its program does not resolve or `--version` fails; a tool
+  that fails or does not find the symbol hands over to the next; each hand-over is a note.
+  The first outcome that found the symbol wins, else the first non-empty outcome, else the
+  first outcome; with no outcome at all `TOOL_UNAVAILABLE` (65) with `details.attempts`.
+  `find` uses the first available tool. Routing never depends on model output.
+* **Adapters**: `codegraph` runs `status` (absent index → unavailable; kb never creates an
+  index), `sync` when `sync = "auto"`, then `query`/`callers`/`impact` with `--json` in the
+  code root; non-exact symbol matches are dropped once an exact one exists and are labelled
+  `similar` otherwise. `code-provider` sends a `kb.code.v1` request for the code root's
+  `HEAD` and validates the response against Git objects (§ ADR 0011); answers are labelled
+  with the commit. `ripgrep` and `git-grep` search with fixed strings by default, smart
+  case, sorted by path, at most 20 matches per file, excluding the KB mount; `git-grep`
+  also answers symbol requests lexically (definition keywords; references by whole word),
+  labelled `lexical`. Every tool starts without a shell, in the code root, with telemetry,
+  update checks and daemons disabled, under its deadline, 16 MiB stdout and 1 MiB stderr.
+* **Answer** (`kb.answer.v1`, the `result` of the agent commands inside `kb.cli.v1`):
+  `command`, `subject`, `sources[]` (`id`, `adapter`, `version?`, `state`), `items[]` (`kind`,
+  `name?`, `path?`, `line?`, `end_line?`, `detail?`, `confidence?`, `source`), `shown`,
+  `total`, `truncated`, `notes[]` (≤3), `next[]` (≤3). Items keep their priority order and
+  are cut to fit; text output is at most `--lines` (5..200, default 30) lines of at most 200
+  characters: header, items, notes, `next:`, footer. Deterministic for identical tool
+  output; timings and tool probes go to `meta`.
+* **`doc`**: for a path (or the definition paths of a symbol, at most 3) runs the context
+  selection of `--intent implement` (budget large, at most 20 supplementary units) and
+  renders: registry features in scope, the feature record's purpose, invariant statements,
+  contracts, the feature record's `source` anchors as entry points, boundaries as limits,
+  gaps and decisions; policies that also apply and incomplete knowledge become notes. The
+  knowledge source names the revision, freshness and completeness. `doc` exits 0 unless the
+  subject cannot be resolved; it is orientation, `context` remains the obligation contract.
+* **`impact <symbol>`**: the routed dependents (the target itself excluded), then the
+  features and records governing the affected files (one line each); a knowledge failure
+  becomes a note. Diff mode (`--base`/`--head`/`--working-tree`) is unchanged (§11).
+* **`check`**: files from the arguments, else the work-tree diff against `--base` (default
+  `HEAD`, deletions excluded). Runs every `command` tool whose `paths` match (argv with
+  `{files}` → matched files, `{kb}`/`{host}` prefixes expanded), validates the profile's
+  knowledge when knowledge files changed, and with `--base` evaluates declared probes
+  through `verify` (only with a host repository; otherwise a note says they were skipped). `--plan` runs nothing. Failure of any part: `CHECKS_FAILED` (46).
+  Commands come only from the registry; nothing a record supplies is executed (ADR 0015).
+* **`tools`** lists routes (and the tool that would answer), tools with adapter,
+  capabilities, version, availability and the CodeGraph index state; it never syncs.
+  **`doctor`** adds `tools` (fail when a routed capability has no available tool, warn when
+  symbol requests fall back to lexical answers or a check program is missing) and
+  `code-index` (warn when the routed CodeGraph index is absent or incomplete).
+* **Feature documents**: a `feature` record over 60 lines is `FEATURE_TOO_LONG` (warning).

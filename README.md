@@ -1,18 +1,54 @@
 # kb
 
-Typed, verifiable engineering knowledge for coding agents and people.
+One CLI between a coding agent, the code, the project knowledge and the code tools.
 
-kb is a Rust CLI, run through the project launcher `./kbw`, that assembles
-**task-scoped, freshness-checked context** from a knowledge base kept in Git: the policies,
-invariants, contracts and known gaps that apply to the code you are about to change, their
-required dependencies, and a small ranked set of background records. It returns the
-applicable knowledge itself, with provenance and a completeness status, not a list of
-files to read.
+kb is a Rust CLI, run through the project launcher `./kbw`, through which an AI coding
+agent (Claude Code or any other) reaches the codebase, the project documentation and the
+code-analysis tools. The agent does not choose between CodeGraph, `grep`, file search and
+other tools: it asks kb, kb routes the request to the backend its code and configuration
+name, and the answer comes back as at most 30 structured lines that name their source. The
+agent finds what it needs quickly, knows the architectural constraints before it edits,
+and does not spend tokens searching unstructured output.
+
+```text
+coding agent  --skills-->  kb: routing · tool registry · adapters · bounded answers
+                              |- CodeGraph        symbols, callers, impact
+                              |- knowledge        features, invariants, contracts, gaps
+                              `- adapters         search, checks, kb.code.v1 providers
+```
+
+| the agent needs | command |
+|---|---|
+| a symbol's definition | `kbw sym <name>` |
+| the code that calls it | `kbw callers <symbol>` |
+| what changing it affects, in code and knowledge | `kbw impact <symbol>` |
+| the feature documentation of a path or symbol | `kbw doc <path\|symbol>` |
+| text in the repository | `kbw find "<text>"` |
+| the checks for changed files | `kbw check [files] [--base <target>]` |
+| every obligation before an edit, with a receipt | `kbw context --intent implement --path <file>` |
+| the connected tools; the environment | `kbw tools`; `kbw doctor` |
+
+Behind the agent surface sits a typed knowledge engine: it assembles **task-scoped,
+freshness-checked context** from a knowledge base kept in Git — the policies, invariants,
+contracts and known gaps that apply to the code about to change, their required
+dependencies, and a small ranked set of background records — with provenance and a
+completeness status. The agent CLI is described in [docs/agent-cli.md](docs/agent-cli.md)
+and decided in [ADR 0016](docs/adr/0016-agent-cli.md).
 
 ## What kb is and is not
 
 kb is:
 
+* **One interface for agents.** `sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools`
+  and `doctor` return one common answer (`kb.answer.v1`): sources with tool version and
+  index state, items with paths, lines, symbols and kinds, notes and follow-ups, bounded to
+  30 lines (`--lines` up to 200). Skills (`kb`, `kb-change`, `kb-review`, `kb-document`)
+  call these commands; they never name a tool.
+* **Routed by code and configuration.** A tool registry (`project/tools.toml`) connects
+  tools through engine adapters (CodeGraph's live index, any `kb.code.v1` provider,
+  ripgrep, the built-in `git grep`, check commands) and orders them per request. Missing
+  tools, absent indexes and failures fall back to the next tool and are reported. A new
+  tool is a registry entry; skills do not change.
 * **One strict authoring format.** Markdown files with TOML front matter between `+++`
   lines, eight record kinds (policy, feature, invariant, contract, decision, procedure,
   reference, gap), atomic typed obligations with conditions and exceptions, and project
@@ -37,7 +73,11 @@ kb is:
 
 kb is not:
 
-* an MCP server, daemon, web UI, telemetry uploader or plugin system;
+* an MCP server, daemon, web UI, telemetry uploader or plugin system: the tool registry
+  configures engine-owned adapters and loads no code. kb does start the external tools the
+  registry names (CodeGraph, ripgrep, a `kb.code.v1` provider) and runs the check commands
+  written there, argv only, never anything a knowledge record supplies;
+* a code indexer: it never creates or owns a tool index; CodeGraph keeps its own;
 * an AI: no LLM calls at runtime, no embeddings, no vector database. The CLI creates and
   validates structure and serves context; deciding what the knowledge is remains work for
   people or an external coding agent ([BOOTSTRAP.md](BOOTSTRAP.md));
@@ -46,8 +86,8 @@ kb is not:
   prompt injection. Trust comes from review into the approved ref ([SECURITY.md](SECURITY.md));
 * a global tool: there is no `kb` on `PATH` to install or keep in sync.
 
-Optional [code adapters](core/providers/README.md) supply commit-bound static facts outside
-the engine, and the separate [replay kit](core/eval/README.md) runs explicitly authorized
+The [reference code adapters](core/providers/README.md) supply commit-bound static facts
+through the `kb.code.v1` protocol, and the separate [replay kit](core/eval/README.md) runs explicitly authorized
 evaluations. Local delivery observations contain ids/scopes/costs, not task text, and are
 never uploaded by the engine. These tools and passing tests do not prove a quality gain;
 held-out acceptance and release gates are tracked in [the upgrade record](docs/upstream-upgrade.md).
@@ -75,14 +115,14 @@ Details: [docs/downstream.md](docs/downstream.md) and [ADR 0001](docs/adr/0001-d
 |---|---|
 | `kbw` | POSIX sh launcher: runtime selection, explicit source bootstrap, verified artifact install |
 | `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml` | workspace and pinned toolchain |
-| `core/cli/` | crate `kb`: library and `kb` executable |
+| `core/cli/` | crate `kb`: library and `kb` executable (agent surface in `src/cli/`, adapters in `src/tools/`, answers in `src/answer.rs`) |
 | `core/schemas/` | generated JSON Schemas (drift-checked) |
 | `core/migrations/` | migration documentation and synthetic legacy fixtures |
 | `core/templates/` | project skeleton, record templates, CI and MR templates, synthetic example |
-| `core/skills/` | canonical skill instructions and references |
+| `core/skills/` | canonical sources of the skill set `kb`, `kb-change`, `kb-review`, `kb-document` and the managed blocks |
 | `core/maintainer-knowledge/` | opt-in knowledge about kb itself (`--profile maintainer`) |
 | `core/tests/`, `core/benchmarks/` | shared test fixtures; corpus generator and measurements |
-| `core/providers/`, `core/eval/` | optional static code adapters; isolated replay and paired analysis |
+| `core/providers/`, `core/eval/` | `kb.code.v1` reference adapters (CodeGraph, ast-index), connected through the tool registry; isolated replay and paired analysis |
 | `core/release.toml` | bootstrap and compatibility manifest (versions, toolchain, engine-owned paths) |
 | `project/` | project-owned knowledge (created by `kbw init` in a downstream) |
 | `docs/` | user guides, the [architecture](docs/architecture.md) contract, [ADRs](docs/adr/) and [prompts](docs/prompts/); index: [docs/README.md](docs/README.md) |
@@ -158,7 +198,7 @@ kb: checking refs/heads/main on origin (<...>/kb-demo-origin.git)
 kb: snapshot 4aa0f99cd4c2 (latest, freshness=verified) (key 2bad1f6822381b84)
 kb: index: built snapshot 2bad1f6822381b84 (21 record files, 21 parsed, 0 reused, 0 proposals, 0 errors, 0 warnings)
 kb: context: complete (5 mandatory, 3 supplementary units)
-# kb context intent=implement engine=0.1.0 skill_protocol=2 protocol=kb.cli.v1
+# kb context intent=implement engine=0.1.0 skill_protocol=3 protocol=kb.cli.v1
 snapshot: 4aa0f99cd4c2 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; source=<...>/kb-demo-origin.git; latest=4aa0f99cd4c2; key=2bad1f682238
 host: repo=mobile (argument); head=unknown; versions=unknown
 scope: repos=mobile; modules=mobile.auth; features=login; concepts=auth-token (alias `token refresh`)
@@ -229,8 +269,15 @@ that change files are dry-runs unless given `--apply`.
 
 | command | what it does | example |
 |---|---|---|
+| `sym` | Definition of a symbol through route `sym` (`--file`, `--kind`); bounded answer naming the tool and its index state | `.kb/kbw sym TokenRefresher.refresh` |
+| `callers` | Code that calls or references a symbol through route `callers` (`--file`) | `.kb/kbw callers refresh` |
+| `impact <symbol>` | Dependents of a symbol (route `impact`, `--depth 1..4`) and the features, invariants and contracts of the affected files | `.kb/kbw impact refresh` |
+| `doc` | Feature documentation of a path or symbol: feature, purpose, invariant statements, contracts, entry points, limits, gaps | `.kb/kbw doc app/auth/TokenRefresher.kt` |
+| `find` | Repository text search through route `find` (`--regex`, `--glob`), sorted, at most 20 matches per file | `.kb/kbw find "refresh token"` |
+| `check` | Configured check commands for changed files, validation of changed knowledge, and with `--base` the declared probes; `--plan` runs nothing | `.kb/kbw check --base origin/main` |
+| `tools` | Routes, connected tools, versions, availability and the CodeGraph index state | `.kb/kbw tools` |
 | `init` | Create schema-2 project/domain scaffolding, GitHub/GitLab KB CI and review templates, or the synthetic example; preserve existing files | `./kbw init --name "<Product>" --namespace <ns> --apply` |
-| `doctor` | Check environment, configuration, runtime, approved source, host binding and pin, engine compatibility of the approved tip and the pin, index, skill, bundle, engine divergence (`--online` also fetches; not with `--offline`) | `.kb/kbw doctor --online` |
+| `doctor` | Check environment, configuration, runtime, approved source, host binding and pin, engine compatibility of the approved tip and the pin, index, tool registry and routes, CodeGraph index, skill, bundle, engine divergence (`--online` also fetches; not with `--offline`) | `.kb/kbw doctor --online` |
 | `validate` | Records, links, policies, registries and routing fixtures (`--strict`, `--base <rev>`, `--no-routing`, `--templates`) | `./kbw validate --base origin/main` |
 | `index` | Build or update the derived index of the selected snapshot without contacting the remote (`--rebuild`, `--gc`) | `./kbw index --rebuild` |
 | `context` | Task-scoped context: `--intent` (required), `--task`, repeatable `--repo`, `--path`, `--module`, `--feature`, `--concept`, `--host-version`; `--budget`, `--budget-unit tokens-est\|bytes`, `--sections none\|mandatory\|all`, `--max-supplementary`, `--include-proposals`, `--explain` | `.kb/kbw context --intent implement --task "..." --path src/x.kt` |
@@ -244,7 +291,7 @@ that change files are dry-runs unless given `--apply`.
 | `search` | Ranked search; not a substitute for `context` (`--kind`, `--limit`, `--include-proposals`); like `show` and `impact`, its text output starts with a snapshot provenance line (revision, selection, freshness, approval, approved tip, pin) | `./kbw search "идемпотентность"` |
 | `show` | A record, or one section (`--section` or `id#section`); `--raw` prints only the file bytes (the provenance line then goes to stderr when the content is unverified or not approved) | `./kbw show example.contract.payment-intent` |
 | `sync` | Fetch the approved ref into the isolated mirror; report the tip, the local checkout and the host pin; changes nothing else | `.kb/kbw sync` |
-| `impact` | Relate a host diff (`--base`, `--head`, `--working-tree`) to affected knowledge and unknown coverage; `--check --statement <file>` verifies the `kb-impact` block | `.kb/kbw impact --base origin/main --working-tree` |
+| `impact` (diff mode) | Relate a host diff (`--base`, `--head`, `--working-tree`) to affected knowledge and unknown coverage; `--check --statement <file>` verifies the `kb-impact` block | `.kb/kbw impact --base origin/main --working-tree` |
 | `integrate` | `--generate`: render the skill bundle in the KB; without it: install the bundle into the host; `--check`, `--apply`, `--force` | `.kb/kbw integrate --apply` |
 | `migrate` | Show (unified diff) or `--apply` supported document schema migrations (`--to <n>`) | `./kbw migrate` |
 | `update check` | Compatibility and merge prediction for an upstream ref; writes nothing to the repository | `./kbw update check --upstream <url> --ref <tag>` |
@@ -259,7 +306,9 @@ Global options: `--root`, `--config`, `--profile project|maintainer`,
 auto|latest|pinned|working-tree|<revision>`, `--host`, `--quiet`, `--skill-protocol <n>`.
 Unknown arguments are rejected.
 
-Output: compact text for agents (default), `--format human`, or `--json`. In JSON mode
+Output: compact text for agents (default), `--format human`, or `--json`. The agent commands
+(`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check`, `tools`) print one bounded answer
+in every text format (at most 30 lines, `--lines` 5..200) and `kb.answer.v1` in JSON. In JSON mode
 stdout carries only the protocol envelope `{protocol, command, ok, result, error, meta}`;
 progress and diagnostics go to stderr. Errors have stable symbolic codes and grouped exit
 codes:
@@ -271,9 +320,9 @@ codes:
 | 10–19 | project and configuration | `PROJECT_NOT_INITIALIZED` 10, `UNKNOWN_SCOPE` 15 |
 | 20–29 | freshness and snapshots | `FRESHNESS_UNVERIFIED` 20, `UPDATE_REQUIRED` 21, `SKILL_OUTDATED` 23 |
 | 30–39 | context | `CONTEXT_INCOMPLETE` 30 (full result printed), `CONTEXT_BUDGET_EXCEEDED` 31 |
-| 40–49 | checks | `VALIDATION_FAILED` 40, `ROUTING_TESTS_FAILED` 41, `DRIFT_DETECTED` 42, `IMPACT_UNACKNOWLEDGED` 44 |
+| 40–49 | checks | `VALIDATION_FAILED` 40, `ROUTING_TESTS_FAILED` 41, `DRIFT_DETECTED` 42, `IMPACT_UNACKNOWLEDGED` 44, `CHECKS_FAILED` 46 |
 | 50–59 | runtime and update | `RUNTIME_INCOMPATIBLE` 50, `UPDATE_CONFLICT` 51 |
-| 60–69 | environment | `GIT_ERROR` 60, `INDEX_ERROR` 61, `UNSAFE_PATH` 63 |
+| 60–69 | environment | `GIT_ERROR` 60, `INDEX_ERROR` 61, `UNSAFE_PATH` 63, `TOOL_UNAVAILABLE` 65 |
 
 The full list and the JSON envelope are in [docs/protocol.md](docs/protocol.md); what to do
 for each code is in [docs/troubleshooting.md](docs/troubleshooting.md).
@@ -311,6 +360,7 @@ Start at the documentation index, [docs/README.md](docs/README.md). The main ent
 | [docs/knowledge-lifecycle.md](docs/knowledge-lifecycle.md) | domain drafts, provenance, drift, freshness, declarative checks and local usage |
 | [docs/evaluation.md](docs/evaluation.md), [core/eval/README.md](core/eval/README.md) | routing/history evidence and the optional isolated replay kit |
 | [docs/snapshots-and-trust.md](docs/snapshots-and-trust.md) | freshness, snapshot selection, host detection, caches, trust model |
+| [docs/agent-cli.md](docs/agent-cli.md) | the agent commands, answers, the tool registry, routing, checks and skills |
 | [docs/protocol.md](docs/protocol.md), [docs/troubleshooting.md](docs/troubleshooting.md) | JSON protocol and error codes; what to do for each error |
 | [docs/architecture.md](docs/architecture.md), [docs/adr/](docs/adr/) | the normative engineering contract and design decisions |
 | [docs/maintainer-guide.md](docs/maintainer-guide.md), [AGENTS.md](AGENTS.md), [CONTRIBUTING.md](CONTRIBUTING.md) | changing, testing and releasing the engine |

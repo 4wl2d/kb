@@ -1,5 +1,6 @@
 +++
-# Record template: feature. PLACEHOLDER TEXT: replace every value.
+# Record template: feature. PLACEHOLDER TEXT: replace every value. One compact document per
+# feature: at most 60 lines (FEATURE_TOO_LONG); rules go into separate invariant records.
 schema = 2
 id = "example.template.feature"
 kind = "feature"
@@ -27,6 +28,13 @@ text = "Placeholder: an observable behavior of the feature."
 [[boundaries]]                              # what the feature deliberately does not do
 id = "placeholder-boundary"
 text = "Placeholder: an explicit non-goal or limit."
+
+[[anchors]]                                 # entry points: where the feature starts in code
+kind = "source"
+repo = "mobile"
+path = "app/placeholder/Entry.kt"
+symbol = "Placeholder.start"
+note = "Placeholder: what starts here."
 
 [[states]]
 id = "idle"

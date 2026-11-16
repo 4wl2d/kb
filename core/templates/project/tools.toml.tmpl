@@ -1,0 +1,53 @@
+# Tool registry: the code tools kb connects and the route of each request
+# (docs/agent-cli.md#tool-registry). Agents never choose tools themselves: `kbw sym`,
+# `callers`, `impact <symbol>` and `find` go to the first available tool of their route,
+# and `kbw check` runs every command tool whose `paths` match a changed file.
+#
+# This file is trusted configuration, reviewed like code: kb runs the argv of `command`
+# tools exactly as written (no shell), in the host repository. Knowledge records never
+# supply commands. Without this file kb uses the defaults below.
+schema = 1
+
+# Structural code navigation over the host's live CodeGraph index. kb runs the
+# incremental `codegraph sync` before each query (sync = "never" queries as is) and never
+# creates the index: run `codegraph init --yes <host root>` once per checkout.
+[[tool]]
+id = "codegraph"
+adapter = "codegraph"
+program = "codegraph"
+
+[[tool]]
+id = "rg"
+adapter = "ripgrep"
+program = "rg"
+
+# Built in: tracked and untracked files; lexical fallback for symbol requests.
+[[tool]]
+id = "git-grep"
+adapter = "git-grep"
+
+# Any kb.code.v1 provider (core/providers/README.md), e.g. ast-index through the reference
+# adapter. Commit-bound: answers describe the host HEAD commit.
+# [[tool]]
+# id = "ast-index"
+# adapter = "code-provider"
+# program = "{kb}/target/release/kb-code-provider"
+# args = ["--backend", "ast-index"]
+# timeout_seconds = 300
+
+# Checks for changed files. `{files}` expands to the matched files; `repo:` qualifies a glob
+# to one registry repository of a multi-repository KB.
+# [[tool]]
+# id = "lint"
+# adapter = "command"
+# program = "./gradlew"
+# run = ["lint"]
+# paths = ["mobile:app/**/*.kt"]
+# description = "Android lint"
+# timeout_seconds = 900
+
+[routes]
+sym = ["codegraph", "git-grep"]
+callers = ["codegraph", "git-grep"]
+impact = ["codegraph", "git-grep"]
+find = ["rg", "git-grep"]

@@ -5,6 +5,34 @@
 nothing, calls no model, and disables CodeGraph daemon, telemetry and update checks.
 Build with `cargo build --release -p kb-code-provider --locked`.
 
+For the agent commands (`sym`, `callers`, `impact <symbol>`, `doc <symbol>`), connect a
+provider through the tool registry (`<profile>/tools.toml`, see
+[docs/agent-cli.md](../../docs/agent-cli.md#tool-registry)) with
+`adapter = "code-provider"`, then name its id in a route or select it with `--tool <id>`:
+
+```toml
+[[tool]]
+id = "ast-index"
+adapter = "code-provider"
+program = "{kb}/target/release/kb-code-provider"   # {kb}/: relative to the KB root
+args = ["--backend", "ast-index"]                    # placed before the provider protocol
+timeout_seconds = 300
+```
+
+Any other `kb.code.v1` provider is connected the same way, without engine changes. The
+adapter is commit-bound: it asks for the host `HEAD` commit, so answers never include
+uncommitted edits, and the engine validates the facts against Git objects. Its
+`timeout_seconds` bounds the whole invocation (the adapter applies at most 600 seconds).
+
+The versions pinned above (ast-index 3.54.0, CodeGraph 1.6.1) apply to this commit-bound
+adapter. The engine's live `codegraph` adapter ([ADR 0016](../../docs/adr/0016-agent-cli.md))
+is separate: it queries the host's own `.codegraph/` index with whatever CodeGraph version
+is installed and reports that version in each answer's header and in `kbw tools`.
+
+The per-invocation `--provider` options below remain for context composition
+(`context --with-code`), deep impact (`impact --deep`), coverage fan-in and consumer
+suggestions on draft submission:
+
 ```sh
 ./kbw context --host /path/to/host --path src/store.rs --intent implement \
   --with-code --provider /path/to/kb-code-provider --provider-timeout 300 \

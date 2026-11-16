@@ -380,7 +380,11 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
 /// that the engine reports `HOST_REPO_UNKNOWN`), host `HEAD` and the version of the host
 /// repo read from its registry `version_file` (explicit `--host-version` values win inside
 /// the engine).
-fn task_env(host: Option<&HostContext>, registry: &Registry, snapshot: SnapshotInfo) -> TaskEnv {
+pub(super) fn task_env(
+    host: Option<&HostContext>,
+    registry: &Registry,
+    snapshot: SnapshotInfo,
+) -> TaskEnv {
     let mut env = TaskEnv::new(snapshot);
     let Some(h) = host else {
         return env;
@@ -410,7 +414,7 @@ fn task_env(host: Option<&HostContext>, registry: &Registry, snapshot: SnapshotI
 /// unchanged; relative paths are taken relative to the current directory when it lies in
 /// the host work tree (else relative to the host root); paths that leave the host root are
 /// rejected with `UNSAFE_PATH`. Without a host the value is used as given.
-fn host_relative(spec: &str, cwd: &Path, host_root: Option<&Path>) -> Result<String> {
+pub(super) fn host_relative(spec: &str, cwd: &Path, host_root: Option<&Path>) -> Result<String> {
     if split_repo(spec).0.is_some() {
         return Ok(spec.to_string());
     }

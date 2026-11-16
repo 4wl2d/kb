@@ -32,7 +32,7 @@ features = ["freshness"]
 id = "kb.cli"
 repo = "kb"
 title = "CLI, output protocol and errors"
-paths = ["core/cli/src/cli/**", "core/cli/src/output.rs", "core/cli/src/error.rs", "core/cli/src/main.rs"]
+paths = ["core/cli/src/cli/**", "core/cli/src/output.rs", "core/cli/src/answer.rs", "core/cli/src/error.rs", "core/cli/src/main.rs"]
 features = ["cli-protocol"]
 
 [[module]]
@@ -73,8 +73,8 @@ features = ["freshness", "knowledge-production"]
 [[module]]
 id = "kb.code"
 repo = "kb"
-title = "Bounded static code provider adapters"
-paths = ["core/cli/src/code.rs", "core/cli/src/process.rs", "core/providers/**"]
+title = "Code tool adapters: tool registry routing, live and commit-bound code providers"
+paths = ["core/cli/src/code.rs", "core/cli/src/process.rs", "core/cli/src/tools/**", "core/providers/**"]
 features = ["context-assembly"]
 
 [[module]]

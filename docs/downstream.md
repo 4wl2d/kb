@@ -11,7 +11,7 @@ knowledge is covered by [BOOTSTRAP.md](../BOOTSTRAP.md).
 Placeholders: `<your-git-host>/<org>/<kb-repo>.git` is your product KB repository,
 `<upstream-url>` the kb upstream, `.kb` the conventional mount path. Output excerpts were
 captured from the schema-1 baseline in local scratch repositories; historical hashes/counts
-are illustrative. Current authoring uses schema 2 and skill protocol 2. Long absolute paths
+are illustrative. Current authoring uses schema 2 and skill protocol 3. Long absolute paths
 are shortened to `<...>`.
 
 ## 1. Roles and ownership
@@ -19,7 +19,7 @@ are shortened to `<...>`.
 | repository | contains | changed by |
 |---|---|---|
 | upstream kb | engine (`kbw`, `core/`, Cargo files), schemas, migrations, templates, skills, docs, release machinery; no project data | upstream maintainers |
-| downstream KB (one per product) | the upstream history and engine **plus** `project/` (knowledge, registries, routing tests, skill settings) | knowledge through reviewed merge requests; engine only through `kbw update` |
+| downstream KB (one per product) | the upstream history and engine **plus** `project/` (knowledge, registries, routing tests, skill settings, tool registry) | knowledge through reviewed merge requests; engine only through `kbw update` |
 | host repositories (mobile, backend, libraries, ...) | code; the KB mounted at `.kb` (or a separate checkout); generated skill files and instruction blocks | normal code review |
 
 Engine-owned paths are listed in `core/release.toml` (`engine_paths`: `kbw`, Cargo files,
@@ -76,6 +76,15 @@ must include that job from its existing entrypoint. Domain harvest produces conc
 feature state/transition/scenario packs, contracts/consumers, invariants, decisions and
 glossary from evidence, with accepted/proposed/gap counts. A new fact stays draft until
 review; initialization never manufactures accepted domain knowledge.
+
+Init also writes `project/tools.toml`, the tool registry
+([agent-cli.md](agent-cli.md#tool-registry)): which code tools answer `sym`, `callers`,
+`impact <symbol>` and `find`, and which checks `kbw check` runs for changed files. A KB that
+describes several repositories declares the checks per repository with repo-qualified
+globs, for example `paths = ["mobile:app/**/*.kt"]`; such a glob matches only in the host
+that the registry identifies as `mobile` (see the synthetic example's `tools.toml`). The
+file is trusted configuration and is reviewed like code: `kbw check` runs its argv exactly
+as written, without a shell, in the host repository.
 
 ## 4. Mount the KB in host repositories
 
@@ -167,8 +176,13 @@ installs it with the KB's launcher; dry-run is the default:
 ```text
 $ .kb/kbw integrate --apply
 kb integrate (apply): host <...>/mobile
+  create    .agents/skills/kb-change/SKILL.md
+  create    .agents/skills/kb-document/SKILL.md
+  create    .agents/skills/kb-review/SKILL.md
   create    .agents/skills/kb/SKILL.md
   create    .agents/skills/kb/references/harnesses.md
+  ...
+  create    .claude/commands/kb-change.md
   ...
   create    .claude/commands/kb.md
   ...
@@ -178,14 +192,14 @@ kb integrate (apply): host <...>/mobile
 host integration written; review and commit it (including the lock)
 ```
 
-| harness | full skill / pointer | native instruction target |
+| harness | skill set / pointer | native instruction target |
 |---|---|---|
-| Claude Code | `.claude/skills/kb/` when primary; otherwise `.claude/commands/kb.md` points at the shared skill | `CLAUDE.md` |
-| Codex | shared `.agents/skills/kb/` | `AGENTS.md`; an existing `AGENTS.override.md` gets a pointer |
-| Cursor | shared `.agents/skills/kb/` | `.cursor/rules/kb.mdc`, `alwaysApply: true` |
-| Grok Build | `.grok/skills/kb/` when primary; otherwise shared skill | `AGENTS.md` |
-| GitHub Copilot | portable/shared skill pointer | `.github/copilot-instructions.md` |
-| Junie | portable/shared skill pointer | `AGENTS.md`; an existing `.junie/AGENTS.md` gets a pointer |
+| Claude Code | `.claude/skills/<skill>/` when primary; otherwise one `.claude/commands/<skill>.md` per skill points at the shared skill set | `CLAUDE.md` |
+| Codex | shared `.agents/skills/<skill>/` | `AGENTS.md`; an existing `AGENTS.override.md` gets a pointer |
+| Cursor | shared `.agents/skills/<skill>/` | `.cursor/rules/kb.mdc`, `alwaysApply: true` |
+| Grok Build | `.grok/skills/<skill>/` when primary; otherwise the shared skill set | `AGENTS.md` |
+| GitHub Copilot | portable/shared skill set pointer | `.github/copilot-instructions.md` |
+| Junie | portable/shared skill set pointer | `AGENTS.md`; an existing `.junie/AGENTS.md` gets a pointer |
 
 * Instruction files change only between `<!-- kb:begin kb-instructions -->` and
   `<!-- kb:end kb-instructions -->`; every other byte is kept, and missing files are created.
@@ -194,15 +208,29 @@ host integration written; review and commit it (including the lock)
   `--check` fails with `DRIFT_DETECTED` (exit 42). `--apply --force` overwrites explicitly.
   Project-specific additions belong in `notes` of `skill.toml`, not in generated files.
 * A second `--apply` is a no-op ("host integration is up to date; nothing written").
-* Exactly one full skill is installed. Selection order is agents (Codex/Cursor), Claude,
-  Grok, then portable `.kbw/skills/kb/`. Secondary files point at it. Previously managed
-  duplicates are removed only when their locked hashes still match; local edits conflict.
+* Exactly one copy of the skill set is installed, in one skill directory. Selection order
+  is agents (Codex/Cursor), Claude, Grok, then portable `.kbw/skills/`. Secondary files
+  point at it. Previously managed duplicates are removed only when their locked hashes
+  still match; local edits conflict.
 * Accepted unconditional product policies/invariants with `delivery = "always"` form a
   core capped at 600 estimated tokens. Native instruction/skill byte caps are enforced;
   nothing is truncated. Context reuses that core only with a verified installed receipt.
 * `.kb/kbw integrate --probe` checks installation and produces a challenge for a fresh
   harness session. It does not run a model or claim runtime loading. Preserve actual
   version/response/tool-call evidence when executing a load probe.
+
+The skill set has four skills, installed side by side: `kb` (commands, answers, recovery
+and references), `kb-change` (the change procedure), `kb-review` and `kb-document`
+([core/skills/README.md](../core/skills/README.md)). They name kb commands only; which code
+tool answers is decided by `project/tools.toml`, so connecting another tool changes no
+skill.
+
+Structural code answers need the code tool in each host checkout. With the default
+registry, `sym`, `callers` and `impact <symbol>` use the host's live CodeGraph index and fall
+back to a lexical git grep when it is missing, which the answer reports. kb never creates
+the index: create it once per host checkout with `codegraph init --yes <host root>` and keep
+`.codegraph/` out of Git (for example in `.git/info/exclude`). `.kb/kbw tools` and
+`.kb/kbw doctor` (checks `tools` and `code-index`) show what this machine can answer.
 
 Instruction files and skills are text: they make the protocol available to agents but do
 not enforce it, and kb uses no undocumented harness hooks.
@@ -397,9 +425,10 @@ update check: upstream v0.1.1 = 323c06a5ab5e (from <...>/upstream)
 ## 9. Coordinated upgrades
 
 For this upgrade, document schema 1 → 2 changes only the declarations and preserves ids,
-kind, status, comments, body and existing facts. Skill protocol changes to 2, index schema
-to 2 and parser version to 6. `update prepare` runs the adjacent migration and regeneration
-in its review worktree; a manual migration remains previewable with `./kbw migrate` before
+kind, status, comments, body and existing facts. Skill protocol changes to 3 (schema 2
+raised it to 2, the agent CLI of [ADR 0016](adr/0016-agent-cli.md) to 3), index schema to 2
+and parser version to 6. `update prepare` runs the adjacent migration and regeneration in
+its review worktree; a manual migration remains previewable with `./kbw migrate` before
 `--apply`. Host-binding, routing and skill-config schema numbers remain independently 1.
 New engine templates do not overwrite an existing downstream's `project/` or host CI.
 After the mechanical update, copy/adapt CI/MR templates, re-run adaptation v2 in re-run mode
@@ -459,9 +488,10 @@ error[CONTEXT_INCOMPLETE]: context is partial: FRESHNESS_UNVERIFIED
 Fetches run with `GIT_TERMINAL_PROMPT=0`, so credentials must come from a credential helper
 or an SSH agent. `kbw doctor` checks the environment, configuration, runtime, approved
 source, host binding and pin, the engine compatibility of the approved tip and the pin
-(`snapshot-engine`), index, installed skill and engine divergence; `kbw doctor --online` also
-fetches the approved ref (it cannot be combined with `--offline`). Failed bootstraps, installs and updates leave the previous runtime and the
-main checkout intact.
+(`snapshot-engine`), index, tool registry and CodeGraph index (`tools`, `code-index`),
+installed skill and engine divergence; `kbw doctor --online` also fetches the approved ref
+(it cannot be combined with `--offline`). Failed bootstraps, installs and updates leave the
+previous runtime and the main checkout intact.
 
 ## 11. What administrators must configure
 
@@ -475,6 +505,7 @@ The shipped files report problems; they do not grant or enforce anything by them
 | KB repository | read access for every developer and every host CI job (keys or tokens as secrets, job-token allowlists) | every knowledge query and the host impact check fetch the KB |
 | KB repository | decide whether the inherited upstream workflows run in your fork: the repository variable `KB_ENGINE_CI` set to `disabled` skips the `upstream-ci.yml` job `check`; `KB_RELEASE` set to `disabled` skips every `release.yml` job (`verify`, `build`, `publish`), so a `v*` tag publishes nothing. Set them under Settings > Secrets and variables > Actions > Variables, or with `gh variable set KB_ENGINE_CI --body disabled` and `gh variable set KB_RELEASE --body disabled`; an unset variable or any other value keeps the workflows enabled | both files are engine-owned: editing or deleting them counts as engine divergence. The downstream's own `kb-knowledge` workflow is not affected |
 | KB repository | review `project/project.toml` (approved ref, `allowed_protocols`) like code | it is trusted configuration |
+| KB repository | review `project/tools.toml` like code | `kbw check` runs the argv written there wherever checks run |
 | KB repository | publish the security policy at `.github/SECURITY.md`, rendered from `core/templates/security/SECURITY.md.tmpl` with your contact | the root `SECURITY.md` is engine-owned and covers the engine only |
 | host repositories | make `kb-impact` a required check; allow CI to check out the KB submodule | files alone do not block merges or grant access |
 | host repositories | review pointer updates of `.kb` and changes to `.claude/`, `.agents/`, `AGENTS.md`, `CLAUDE.md`, `.kbw/` | these change what agents read |

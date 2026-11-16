@@ -1,12 +1,17 @@
 //! CLI dispatch. Each command handler lives in its own module with the signature
 //! `fn run(ctx: &Ctx, args: &Args) -> Result<CommandOutput>`.
 
+mod agent;
 pub mod args;
 mod cmd_capture;
+mod cmd_check;
+mod cmd_code;
 mod cmd_context;
 mod cmd_coverage;
+mod cmd_doc;
 mod cmd_doctor;
 mod cmd_eval;
+mod cmd_find;
 mod cmd_impact;
 mod cmd_index;
 mod cmd_init;
@@ -17,6 +22,7 @@ mod cmd_schema;
 mod cmd_search;
 mod cmd_show;
 mod cmd_sync;
+mod cmd_tools;
 mod cmd_trust;
 mod cmd_update;
 mod cmd_usage;
@@ -77,6 +83,12 @@ fn format_of(g: &GlobalOpts) -> Format {
 
 fn command_name(c: &Command) -> &'static str {
     match c {
+        Command::Sym(_) => "sym",
+        Command::Callers(_) => "callers",
+        Command::Doc(_) => "doc",
+        Command::Find(_) => "find",
+        Command::Check(_) => "check",
+        Command::Tools(_) => "tools",
         Command::Init(_) => "init",
         Command::Doctor(_) => "doctor",
         Command::Validate(_) => "validate",
@@ -185,6 +197,12 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
         format,
     };
     match &cli.command {
+        Command::Sym(a) => cmd_code::sym(&ctx, a),
+        Command::Callers(a) => cmd_code::callers(&ctx, a),
+        Command::Doc(a) => cmd_doc::run(&ctx, a),
+        Command::Find(a) => cmd_find::run(&ctx, a),
+        Command::Check(a) => cmd_check::run(&ctx, a),
+        Command::Tools(a) => cmd_tools::run(&ctx, a),
         Command::Init(a) => cmd_init::run(&ctx, a),
         Command::Doctor(a) => cmd_doctor::run(&ctx, a),
         Command::Validate(a) => cmd_validate::run(&ctx, a),

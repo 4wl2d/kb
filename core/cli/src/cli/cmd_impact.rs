@@ -19,6 +19,14 @@ use crate::util::read_file_limited;
 const MAX_STATEMENT_BYTES: u64 = 1024 * 1024;
 
 pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
+    if let Some(symbol) = &args.symbol {
+        return super::cmd_code::impact(ctx, args, symbol);
+    }
+    if args.answer.lines.is_some() || args.answer.tool.is_some() {
+        return Err(KbError::invalid_input(
+            "--lines and --tool apply to symbol mode (`kb impact <symbol>`)",
+        ));
+    }
     let provider = super::code_options::provider(ctx, &args.code);
     if args.deep && !provider.configured() {
         return Err(KbError::invalid_input(

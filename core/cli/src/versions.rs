@@ -12,7 +12,7 @@ pub const OLDEST_READABLE_DOCUMENT_SCHEMA: u32 = 1;
 pub const PROTOCOL: u32 = 1;
 pub const PROTOCOL_ID: &str = "kb.cli.v1";
 pub const INDEX_SCHEMA: u32 = 2;
-pub const SKILL_PROTOCOL: u32 = 2;
+pub const SKILL_PROTOCOL: u32 = 3;
 /// Bumped whenever parsing output for identical bytes changes (invalidates parse caches).
 pub const PARSER_VERSION: u32 = 6;
 

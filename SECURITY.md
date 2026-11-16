@@ -38,3 +38,24 @@ so reporters see the downstream policy. On hosts without that convention, link
   activation is atomic.
 * **Search input.** User queries are tokenized and quoted before reaching SQLite FTS5; SQL is
   always parameterized.
+
+## Configured checks and code tools
+
+* **`kb check` executes configured programs.** It runs the argv of the `command` tools in
+  the tool registry `<profile>/tools.toml` (`project/tools.toml`, or
+  `core/maintainer-knowledge/tools.toml` for the maintainer profile): without a shell, in
+  the host repository, under a deadline and output limits. The registry is read only from
+  the working tree of the KB checkout that supplies the engine, never from a fetched
+  snapshot. It is trusted configuration and is reviewed like engine code: a malicious
+  registry is equivalent to a malicious engine checkout, the same trust root as the `kbw`
+  binary the user already runs.
+* **Nothing else is executed.** kb never runs text from knowledge records, procedures,
+  probes, commit messages or tool output ([ADR 0015](docs/adr/0015-declarative-verification.md),
+  [ADR 0016](docs/adr/0016-agent-cli.md)).
+* **Code tools run as installed.** The `codegraph` adapter runs the installed `codegraph`
+  program (`--version`, `status`, `sync`, `query`, `callers`, `impact`) against the host's
+  own index, with telemetry, update checks and the daemon disabled
+  (`CODEGRAPH_TELEMETRY=0`, `CODEGRAPH_NO_UPDATE_CHECK=1`, `CODEGRAPH_NO_DAEMON=1`,
+  `DO_NOT_TRACK=1`), as kb does for every tool it starts. kb installs no tool, creates no
+  tool index and loads no code: the registry configures engine-owned adapters and is not a
+  plugin system.

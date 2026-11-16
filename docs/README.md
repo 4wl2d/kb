@@ -1,12 +1,15 @@
 # kb documentation
 
-All documentation of the kb engine. When a guide and the code disagree,
-[architecture.md](architecture.md) and the code win and the guide is a bug.
+All documentation of kb, the single CLI between a coding agent, the code, the project
+knowledge and the code tools, and of the typed knowledge engine behind it. When a guide and
+the code disagree, [architecture.md](architecture.md) and the code win and the guide is a
+bug.
 
 ## By task
 
 | I want to… | read |
 |---|---|
+| let a coding agent reach code, knowledge and tools through kb; connect tools and checks | [agent-cli.md](agent-cli.md) |
 | turn a fresh downstream fork into a product knowledge base | [BOOTSTRAP.md](../BOOTSTRAP.md), [prompts/adaptation.md](prompts/adaptation.md) |
 | run a downstream KB: mount it in hosts, CI, merge requests, upgrades | [downstream.md](downstream.md) |
 | write or review knowledge records | [format.md](format.md) |
@@ -17,7 +20,7 @@ All documentation of the kb engine. When a guide and the code disagree,
 | keep knowledge current during everyday coding work | [prompts/maintenance.md](prompts/maintenance.md) |
 | produce domain drafts and check provenance, freshness or declared rules | [knowledge-lifecycle.md](knowledge-lifecycle.md) |
 | measure retrieval or compare agent outcomes | [evaluation.md](evaluation.md), [replay kit](../core/eval/README.md) |
-| attach optional static code facts | [reference providers](../core/providers/README.md) |
+| attach optional static code facts, or connect a `kb.code.v1` provider as a tool | [reference providers](../core/providers/README.md) |
 | change the engine, test, release | [maintainer-guide.md](maintainer-guide.md), [AGENTS.md](../AGENTS.md), [CONTRIBUTING.md](../CONTRIBUTING.md) |
 
 ## Reference
@@ -26,6 +29,7 @@ All documentation of the kb engine. When a guide and the code disagree,
 |---|---|
 | [architecture.md](architecture.md) | normative engineering contract: layout, record format, registries, context assembly, freshness and snapshots, index, CLI, launcher, integrations |
 | [adr/](adr/) | architecture decision records (below) |
+| [agent-cli.md](agent-cli.md) | the agent commands (`sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools`), bounded answers, the tool registry `tools.toml`, routing and fallbacks, checks, the skill set |
 | [format.md](format.md) | record schemas 1/2, the eight kinds, domain fields, scope, selectors, links, policies and overrides, registries, diagnostic catalogue |
 | [context.md](context.md) | context assembly: scope resolution, mandatory selection, `requires` closure, ranking, ambiguity, proposals, budgets, completeness, receipts, explain, output formats, `search` and `show` |
 | [snapshots-and-trust.md](snapshots-and-trust.md) | per-call freshness, `--snapshot` selection, host detection, engine compatibility, mirror and cache layout, proposal overlay, index behavior, offline work, trust model |
@@ -62,6 +66,7 @@ All documentation of the kb engine. When a guide and the code disagree,
 | [0013](adr/0013-delivery-reuse.md) | verified always-on core, receipt deltas and one full skill (proposed) |
 | [0014](adr/0014-knowledge-production.md) | deterministic work orders, draft production and evidence ladder (proposed) |
 | [0015](adr/0015-declarative-verification.md) | bounded probes, source evidence and freshness limits (proposed) |
+| [0016](adr/0016-agent-cli.md) | kb as the single CLI between a coding agent, the code, the docs and the code tools: agent commands, tool registry and adapters, checks, skill set |
 
 ## Next to the code
 
@@ -73,6 +78,6 @@ All documentation of the kb engine. When a guide and the code disagree,
 | [../core/migrations/README.md](../core/migrations/README.md) | `kb migrate`, the synthetic legacy schema 0 and how to add a migration |
 | [../core/templates/README.md](../core/templates/README.md) | project, record, CI, merge request, ownership and security templates |
 | [../core/templates/examples/synthetic-multirepo/README.md](../core/templates/examples/synthetic-multirepo/README.md) | the synthetic multi-repository example and its [expected queries](../core/templates/examples/synthetic-multirepo/expected-queries.md) |
-| [../core/skills/README.md](../core/skills/README.md) | canonical skill sources rendered by `kb integrate --generate` |
+| [../core/skills/README.md](../core/skills/README.md) | canonical sources of the skill set (`kb`, `kb-change`, `kb-review`, `kb-document`) rendered by `kb integrate --generate` |
 | [../core/maintainer-knowledge/README.md](../core/maintainer-knowledge/README.md) | opt-in knowledge about kb itself (`--profile maintainer`) |
 | [../core/tests/fixtures/context/README.md](../core/tests/fixtures/context/README.md) | synthetic fixture of the context golden tests |

@@ -105,6 +105,7 @@ pub(super) fn run_with_context_format(
     let (report, routing_report) = match &corpus {
         Some(corpus) => {
             let mut report = validate_corpus(corpus);
+            report.extend(crate::validate::validate_tools_file(source.as_ref(), &loc)?);
             for (entry, parsed) in corpus.records() {
                 report.extend(
                     crate::freshness::warnings(&parsed.record, reference_date.as_ref(), args.stale)
