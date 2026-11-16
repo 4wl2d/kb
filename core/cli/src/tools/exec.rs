@@ -77,10 +77,18 @@ fn expand_template(
             out.extend(req.globs.iter().cloned());
             continue;
         }
-        let names = placeholders(a).map_err(KbError::invalid_input)?;
-        let mut value = a.clone();
+        // One pass over the template: substituted values are never scanned again, so input
+        // that contains `{root}` or `{kind}` text reaches the tool verbatim.
+        placeholders(a).map_err(KbError::invalid_input)?;
+        let mut value = String::new();
+        let mut rest = a.as_str();
         let mut keep = true;
-        for n in names {
+        while let Some(start) = rest.find('{') {
+            value.push_str(&rest[..start]);
+            let after = &rest[start + 1..];
+            let end = after.find('}').unwrap_or(after.len());
+            let n = &after[..end];
+            rest = after.get(end + 1..).unwrap_or("");
             let v = match n {
                 "subject" => {
                     uses_input = true;
@@ -100,10 +108,11 @@ fn expand_template(
                 }
             };
             match v {
-                Some(v) => value = value.replace(&format!("{{{n}}}"), &v),
+                Some(v) => value.push_str(&v),
                 None => keep = false,
             }
         }
+        value.push_str(rest);
         if keep {
             out.push(value);
         }
@@ -442,6 +451,15 @@ mod tests {
                 "*.kt",
                 "-n30"
             ]
+        );
+        let literal = ExecRequest {
+            subject: "{root} and {kind}".into(),
+            ..ExecRequest::default()
+        };
+        assert_eq!(
+            expand(&tool(&["--q={subject}!"]), &roots(), &literal).unwrap(),
+            ["--q={root} and {kind}!"],
+            "substituted input is never expanded again"
         );
         let silent = tool(&["status"]);
         assert!(
