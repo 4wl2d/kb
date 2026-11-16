@@ -40,7 +40,9 @@ code tools ([ADR 0016](docs/adr/0016-agent-cli.md), guide `docs/agent-cli.md`).
   `kb doctor` list project capabilities.
 - The process runner retries a spawn briefly while the executable is busy (`ETXTBSY`),
   which also removes a race in the provider deadline test on Linux.
-- CI and release builds use the `macos-15` runner; GitHub no longer runs `macos-14`.
+- CI and release builds use the `macos-15` runner; GitHub no longer runs `macos-14`. Upstream
+  CI runs once per pull request commit (pushes only on `main`, plus `workflow_dispatch`), and
+  one `ci` job aggregates the platform checks as the single required check.
 - The generated bundle is a skill set installed side by side: `kb`, `kb-change`,
   `kb-review` and `kb-document`, with one `.claude/commands/<skill>.md` alias per skill for
   mixed Claude installs, the template placeholder `{{skills_dir}}` and the always-on block

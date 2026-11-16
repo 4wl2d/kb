@@ -331,9 +331,10 @@ then skipped and a `v*` tag publishes nothing (see
 
 ## Continuous integration
 
-`.github/workflows/upstream-ci.yml` runs on every push and pull request with
-`contents: read` and no secrets, on `ubuntu-latest` (x86_64 Linux) and `macos-15` (arm64
-macOS). After a checkout without persisted credentials it runs:
+`.github/workflows/upstream-ci.yml` runs on pull requests (once, on the merge commit), on
+pushes to `main` and on demand (`workflow_dispatch`), with `contents: read` and no secrets,
+on `ubuntu-latest` (x86_64 Linux) and `macos-15` (arm64 macOS). A newer push to a pull
+request cancels its running checks; runs on `main` always finish. After a checkout without persisted credentials it runs:
 
 1. install the pinned toolchain (`rustup toolchain install`);
 2. `cargo fmt --all --check`;
@@ -358,6 +359,12 @@ macOS). After a checkout without persisted credentials it runs:
 
 The replay steps run last, so a runner that cannot sandbox does not skip the checks before
 them.
+
+The `ci` job passes only when every platform job passed; it is the one check to require for
+merging (the `main-protection` ruleset of the upstream requires it), so a runner image can be
+replaced without changing the required checks. A platform job that GitHub could not start
+(for example "The job was not acquired by Runner of type hosted", which macOS arm64 capacity
+limits can cause) fails `ci` as well; re-run the failed jobs once capacity returns.
 
 Making these checks required for merging is a repository setting. Downstream forks inherit
 this workflow; setting the repository variable `KB_ENGINE_CI` to `disabled` skips its job
