@@ -22,8 +22,11 @@ Procedures: `{{skills_dir}}/kb-change/SKILL.md` (change code),
 | where a symbol is defined | `{{kb_path}}/kbw sym <name> [--file <text>] [--kind <kind>]` |
 | the code that calls it | `{{kb_path}}/kbw callers <symbol> [--file <text>]` |
 | what a change to it affects, in code and knowledge | `{{kb_path}}/kbw impact <symbol> [--depth 1..4]{{snapshot_arg}}` |
-| the feature documentation of a path or symbol | `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` |
+| the records that document a path or symbol, by id and title | `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` |
 | text in the repository | `{{kb_path}}/kbw find "<text>" [--regex] [--glob <glob>]` |
+| numbered source lines to cite | `{{kb_path}}/kbw read <path> [<first> [<last>]]` (40 lines from `<first>`, at most 80; it says where to resume and where the file ends); further ranges only after `<first> <last>`: `read <path> <first> <last> [[<path>] <first> <last>]...` (without a path: the file named last; at most 12 ranges and 240 lines per call, `-- not read` names the ranges past 240 lines) |
+| the records and the code files that match a task's words | `{{kb_path}}/kbw search "<words>"{{snapshot_arg}}` |
+| which records apply to files, by id, before reading any | `{{kb_path}}/kbw outline --intent explain --path <file> [--path <file>]... --format terse{{snapshot_arg}}` |
 | the checks for changed files | `{{kb_path}}/kbw check [<file>...] [--base <target>]{{snapshot_arg}}` (`--plan` runs nothing) |
 | every obligation before an edit, with a receipt | `{{kb_path}}/kbw context --intent implement --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}` |
 | what a diff touches in the knowledge | `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}` |
@@ -37,11 +40,13 @@ Paths are relative to the host repository root;
 ## Reading an answer
 
 `sym`, `callers`, `impact`, `doc`, `find`, `check` and `tools` print at most 30 lines
-(`--lines N`, up to 200) of at most 200 characters:
+(`--lines N`: from 5, capped at 200 with a note) of at most 200 characters, more only to
+keep 120 characters of code text after a long path:
 
 ```text
 kb <command> <subject> · <tool version> (<state of what it read>)[; <second source>]
-<kind>  <name>  <path>:<line>[-<end>]  <detail>  [confidence]  <source when several>
+<kind>  <path>:<line>[-<end>]  <name>  <detail>  [confidence]  <source when several>
+<line>:<source line of what was located>
 note: <limitation, fallback or follow-up>
 next: <suggested kb command>
 -- <shown> of <total>[ (truncated; --lines widens the bound)]
@@ -54,15 +59,76 @@ next: <suggested kb command>
 - When an answer is truncated, narrow it (`--file`, a more specific name or glob) or widen
   `--lines`; do not re-ask the same question with another tool.
 - `--json` returns the same answer as `kb.answer.v1` inside the `kb.cli.v1` envelope.
+- `NOT_FOUND` says what was covered, so do not repeat the same question. A name that
+  `does not occur` in the N files of the checkout was looked for as a whole word, as
+  written: check the spelling (`find` matches parts of words and ignores case for
+  lower-case text). ``no line writes `Type.member` `` and ``no declaration is written as `Type.member` ``
+  are not final: follow their `next:`.
+- For a name that is used while no line reads as its declaration, `sym` and a
+  declaration-shaped `find` (`class Name`, `fun name(`; `class action` is prose) answer
+  `NOT_FOUND` with up to five `reference` items, one per file; `callers` and `impact`
+  with a text tool in their route (the default) answer exit 0 with the uses and a note
+  that no line reads as a declaration. Cite the uses and report what the scan saw, not
+  where the declaration is (a dependency, generated code or a form the scan does not
+  recognise). When no tool resolves a name, `sym` may answer (exit 0) with `[possible]`
+  definitions: lines that could declare it without a keyword.
+- Before it misses, `find` tries the likely slip and says so in a note: globs that select
+  no file without regard to case, then as directory names; for two or three words of
+  three letters or more (`refreshDelay`, `rotation window`) the lines that hold them all
+  (exit 0); inside the one file the globs select, the headings of a Markdown file or
+  the keyword-led declarations of any other.
+- `find`, the scan behind a `sym` or `callers` miss and the name matching of `read` cover
+  the tracked and untracked files that are not ignored, hidden ones included (never
+  `.git`). Only `find` through ripgrep enters submodules: a final miss of the scan notes
+  `submodules of this checkout were not scanned` when there is one besides the knowledge
+  base. `read` opens any existing file given by its exact path, ignored or not.
+- `find` writes each path once and continues with `match  :<line>  <text>`.
+- Up to 80 source lines (300 characters each) follow the items, outside the `--lines`
+  bound and numbered as `read` prints them: the definition `sym` found (three lines
+  above it and its span, `next:` names the `read` for the rest; of two to four
+  definitions the head of each) and the lines around one to four `find` matches or
+  `callers` call sites; import lines (`import`, `package`, `use`, `using`, `#include`,
+  `from x import y`) are listed, not shown. Excerpts are headed by their path, a single
+  one unless every item shown is in its file. Cite them as printed; read only the rest.
 - Exit 0 is success; 16 `NOT_FOUND` (the answer is still printed); 46 `CHECKS_FAILED`;
   65 `TOOL_UNAVAILABLE` (see `{{kb_path}}/kbw tools`, then read the source directly); 30 incomplete
   context. All codes: `references/recovery.md`.
 
+## Investigating without editing
+
+To explain or trace code, collect cited lines and records in as few requests as you can,
+then answer. Every call re-sends the conversation: put every lookup you can already name
+into one shell call, each on its own line with `{{kb_path}}/kbw` written out.
+
+1. `search "<the task's words>"`: the records that match and up to eight code files named
+   like the words, with the declaration line of a file that declares the name it carries.
+2. `show <id>` for the records that matter. Their statements, conditions and exceptions
+   are facts to report as written. Anchors carry `path:line` of the anchored symbol, the
+   places where an anchored document speaks of the record, or `(not in this checkout)`.
+   Accepted records are this project's own knowledge of the checkout; what a connected
+   tool prints through `run` is that tool's output. Where general guidance disagrees with
+   a record, say so: the record is what applies here.
+3. `sym`, `callers` and `find` locate code and print its lines; `read` is for the lines
+   they did not show and takes several ranges (`read Login.kt 10 60 90 120 TokenStore.kt
+   1 40`). Start a range at a line a lookup gave you, not at the top of a file, and
+   resume where `read` says instead of re-reading lines you have.
+4. Go through the question part by part: each part needs a cited line or record, and each
+   claim keeps in full what its evidence shows (every condition, exception, case, argument
+   and name), not a summary. Use the length the question allows rather than leaving any of
+   that out. Then answer. Do not search for confirmation of what you already hold, and do
+   not chase a declaration that a final miss did not find.
+
+`outline` lists every record that applies to a set of files, by id. It is an inventory,
+not delivery: before editing, `context` is still required. An investigation does not need
+`context`: it delivers the full obligations of a change, tens of kilobytes per call.
+
 ## Knowledge
 
-- `doc` answers with the feature, its purpose, invariant statements (`MUST ...`),
-  contracts, entry points, limits and known gaps, selected by the same scope rules as
-  `context`. Invariants and contracts are binding. A gap is an open question: report it.
+- `doc` prints the source location or a `read` command, the ids and titles of the records
+  that apply to or cite the path, document anchors and repository-wide `guidance` ids.
+  Read statements with `show <id>` or `context`; `--format human` and `--json` keep the
+  feature's purpose, invariant statements, contracts, entry points, limits and gaps.
+  Invariants and contracts are binding. A gap is an open question: report it.
 - `context` is the complete mandatory set (policies, invariants, contracts, required
   dependencies, effective settings) with a completeness status and a receipt. Apply every
   mandatory statement with its conditions and typed exceptions. Exit 30 lists what is

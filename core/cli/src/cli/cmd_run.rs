@@ -67,5 +67,5 @@ pub fn run(ctx: &Ctx, args: &RunArgs) -> Result<CommandOutput> {
         answer.note("the tool returned nothing");
     }
     answer.items = outcome.items;
-    Ok(agent::output(answer, lines, None))
+    Ok(agent::output(answer, args.answer.lines, None))
 }

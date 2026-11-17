@@ -19,7 +19,9 @@ code tools ([ADR 0016](docs/adr/0016-agent-cli.md), guide `docs/agent-cli.md`).
   a symbol mode next to the unchanged diff mode.
 - Every agent command returns one bounded answer, `kb.answer.v1` inside the unchanged
   `kb.cli.v1` envelope: sources with tool, version and state, prioritized items, notes and
-  follow-ups; text output is at most 30 lines (`--lines 5..200`) of at most 200 characters.
+  follow-ups; text output is at most 30 lines (`--lines N`: minimum 5, values above 200
+  are capped with a note) of at most 200 characters. With `--json` the envelope of an
+  answer is written on one line; every other envelope stays pretty-printed.
 - Tool registry `<profile>/tools.toml` (schema 1, `core/schemas/tools.v1.schema.json`) with
   engine-owned adapters `codegraph` (live index, incremental sync before each query; kb
   never creates the index), `code-provider` (any `kb.code.v1` provider, commit-bound),
@@ -38,6 +40,66 @@ code tools ([ADR 0016](docs/adr/0016-agent-cli.md), guide `docs/agent-cli.md`).
   `exec` tools join built-in routes or declare project capabilities called with
   `kb run <capability> [args]`; `routes` accepts any request name. `kb tools` and
   `kb doctor` list project capabilities.
+- `kb read <path> [FIRST [LAST]]` prints numbered source lines (40 by default, at most
+  80); it marks the end of the file and clamps a continuation to it.
+- Misses are final: `kb sym` answers a name that is used while no line of the checkout
+  reads as its declaration with up to five of the files that use it (`reference` items),
+  lists the lines that could declare it without a keyword as `possible` definitions, or
+  says that it does not occur (as a whole word, as written; `kb find` also matches parts
+  of words and, for a text in lower case, any letter case); `kb find` and `kb read` name
+  the number of files they covered. A definition's follow-up reads its span as far as
+  one excerpt reaches.
+- `kb doc` prints by default the source location or a `kb read` command, the ids and
+  titles of the records that apply to or cite the path, document anchors and
+  repository-wide `guidance` ids; statements are read with `kb show <id>` or `kb context`,
+  and `--format human` and `--json` keep the feature detail. The records that cite a path
+  as a source, test or document are listed even when their scope does not cover it.
+- `kb show` adds the declaring line of an anchored symbol and marks anchored files that
+  are not in the checkout (`anchor_targets` in JSON).
+- `kb outline --format terse` writes each inclusion reason and kind once with its ids.
+- One call instead of two: `kb sym` attaches the lines of the single definition it found
+  (up to one 80-line `read` window) or the head of each of up to four definitions,
+  `kb find` the lines around up to four matches and `kb callers` the lines around up to
+  four call sites (`excerpts[]` in JSON, at most 80 lines and 32 KiB per answer, outside
+  the `--lines` bound; an import line is listed and not shown); `kb read` takes several
+  `FILE FIRST LAST` ranges in one call (up to 12 ranges of at most 80 lines, 240 lines
+  per call); an item's code text keeps 120 characters after a long path, and the text of
+  a line that a text search matched is at most 500 characters, in JSON too.
+- `kb find` answers likely slips instead of missing: globs that select no file are
+  retried without regard to case and as directory names; a name or phrase of two or three
+  words, each of at least three letters, that no line reads gets up to ten lines that
+  hold its words; a miss inside one file lists that file's outline (`declaration` items):
+  the headings of a Markdown file, the keyword-led declarations of any other. Its text
+  output writes each path once, also for ranked identifier searches.
+- `kb read` accepts `FIRST LAST` alone for a further range of the file named last.
+- The `kb` skill's procedure for investigating without editing starts with `search`,
+  cites the lines that `sym`, `callers` and `find` print, puts every nameable lookup into
+  one shell call, reports record statements as written, says that accepted records apply
+  where general guidance from a connected tool disagrees, and asks for claims that keep
+  every condition, exception and case within the length the question allows.
+- `kb search` lists, after the records, up to eight code files of the host checkout whose
+  names read like the query (`files[]`, `files_total`), each with the line on which it
+  declares the name it carries when it declares one, so a search in the words of a task
+  names the code to open and where to start reading. Forms of one word match
+  (`entry`/`entries`, `config`/`configuration`); words that merely begin alike do not
+  (`list`/`listener`). The default `search` text lists `id [kind, status] title`; scores
+  and match reasons are in `--format human` and `--json`.
+- `kb show` gives an anchored document its length and the lines where it has the sections
+  its anchor note names and mentions the code names of the record
+  (`{state, lines, mentions[]}` in `anchor_targets`).
+- More final misses: a declaration-shaped `kb find` text that misses is answered for the
+  name (its declaration, a line that may declare it, its uses, or that it does not
+  occur); `kb callers` and `kb impact` say when a symbol occurs nowhere. A name that is
+  used without a recognisable declaration they answer from text with a note that says so
+  (exit 0) when the route holds a text tool, as the default routes do, and with
+  `reference` items (`NOT_FOUND`) only when none answers from text. `callers` and `sym`
+  no longer answer `Type.member` with the same-named member of another type when no line
+  of the checkout reads as a declaration of `Type`: `callers` keeps the lines that write
+  the dotted name, a member declared with the dotted name (`fun Type.member`) is its
+  definition, and a dotted name that no line writes while `member` occurs is
+  answered `NOT_FOUND` with the lookups of `member` as follow-ups.
+- `kb find` through ripgrep searches hidden files too (never `.git`); `kb read` opens any
+  existing file given by its exact path, ignored or not.
 - The process runner retries a spawn briefly while the executable is busy (`ETXTBSY`),
   which also removes a race in the provider deadline test on Linux.
 - CI and release builds use the `macos-15` runner; GitHub no longer runs `macos-14`. Upstream

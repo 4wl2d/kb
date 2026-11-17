@@ -14,7 +14,6 @@ use crate::tools::{self, codegraph};
 
 pub fn run(ctx: &Ctx, args: &ToolsArgs) -> Result<CommandOutput> {
     let ws = agent::workspace(ctx)?;
-    let lines = agent::lines(args.lines);
     let mut answer = Answer::new("tools", "");
     answer.source(Source {
         id: "registry".into(),
@@ -144,7 +143,7 @@ pub fn run(ctx: &Ctx, args: &ToolsArgs) -> Result<CommandOutput> {
         );
     }
     answer.note(format!("code root: {}", ws.roots.code.display()));
-    let mut out = agent::output(answer, lines, None);
+    let mut out = agent::output(answer, args.lines, None);
     out.meta
         .insert("probes".into(), serde_json::to_value(&probes)?);
     Ok(out)

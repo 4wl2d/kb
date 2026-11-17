@@ -151,15 +151,39 @@ pub fn query(tool: &ToolSpec, probe: &Probe, roots: &Roots, q: &CodeQuery) -> Re
     }
     let out = run_tool(&program, &args, roots, timeout)?;
     let Some(v) = json_of(&out, args[0].as_str())? else {
+        if let Some(suggestion) = missing_symbol_suggestion(&out.stdout) {
+            outcome.notes.push(suggestion);
+        }
         return Ok(outcome);
     };
     match q.capability {
         Capability::Sym => definitions(&mut outcome, &v, roots, q),
-        Capability::Callers => callers(&mut outcome, &v, roots),
+        Capability::Callers => {
+            callers(&mut outcome, &v, roots);
+            if state.pending_changes > 0 {
+                outcome.call_site = None;
+            }
+        }
         Capability::Impact => impact(&mut outcome, &v, roots),
         _ => {}
     }
     Ok(outcome)
+}
+
+/// CodeGraph emits a plain-text miss even when `--json` is present.
+fn missing_symbol_suggestion(stdout: &[u8]) -> Option<String> {
+    let text = String::from_utf8_lossy(stdout);
+    let names = text
+        .lines()
+        .find_map(|line| line.split_once(" — did you mean: "))?
+        .1
+        .trim();
+    (!names.is_empty()).then(|| {
+        format!(
+            "CodeGraph suggests {}",
+            crate::answer::clip(&crate::git::redact(names), 160)
+        )
+    })
 }
 
 fn s<'a>(v: &'a Value, key: &str) -> Option<&'a str> {
@@ -191,6 +215,10 @@ fn definitions(outcome: &mut Outcome, v: &Value, roots: &Roots, q: &CodeQuery) {
         let Some(path) = s(node, "filePath") else {
             continue;
         };
+        let kind = s(node, "kind").unwrap_or("symbol");
+        if kind == "import" && q.kind.as_deref() != Some("import") {
+            continue;
+        }
         let path = rel_to_code(roots, path);
         if q.file.as_deref().is_some_and(|f| !path.contains(f)) {
             continue;
@@ -200,11 +228,7 @@ fn definitions(outcome: &mut Outcome, v: &Value, roots: &Roots, q: &CodeQuery) {
             .name(qualified.unwrap_or(name))
             .at(path, line(node, "startLine"))
             .span(line(node, "endLine"))
-            .detail(format!(
-                "{} {}",
-                s(node, "kind").unwrap_or("symbol"),
-                s(node, "signature").unwrap_or("")
-            ));
+            .detail(format!("{kind} {}", s(node, "signature").unwrap_or("")));
         if exact(name, qualified, &q.name) {
             exact_items.push(item);
         } else {
@@ -242,17 +266,25 @@ fn callers(outcome: &mut Outcome, v: &Value, roots: &Roots) {
     ambiguity(outcome, v);
     let mut seen = std::collections::BTreeSet::new();
     for def in v["definitions"].as_array().into_iter().flatten() {
-        let edges = def["edges"].as_array().cloned().unwrap_or_default();
+        let edges = def["edges"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default();
         for c in def["callers"].as_array().into_iter().flatten() {
             let Some(path) = s(c, "filePath") else {
                 continue;
             };
             let path = rel_to_code(roots, path);
             let id = s(c, "id");
-            let call_line = edges
+            let mut matching_edges = edges
                 .iter()
-                .find(|e| id.is_some() && s(e, "source") == id)
-                .and_then(|e| line(e, "line"))
+                .filter(|e| id.is_some() && s(e, "source") == id);
+            let call_site = matching_edges
+                .clone()
+                .filter(|e| s(e, "kind") == Some("calls"))
+                .find_map(|e| line(e, "line").filter(|&n| n > 0));
+            let call_line = call_site
+                .or_else(|| matching_edges.next().and_then(|e| line(e, "line")))
                 .or_else(|| line(c, "startLine"));
             let rel = c["relationships"]
                 .as_array()
@@ -266,6 +298,11 @@ fn callers(outcome: &mut Outcome, v: &Value, roots: &Roots) {
             let name = s(c, "name").unwrap_or("?").to_string();
             if !seen.insert((path.clone(), call_line, name.clone())) {
                 continue;
+            }
+            if let Some(line) = call_site
+                && outcome.call_site.is_none()
+            {
+                outcome.call_site = Some((path.clone(), line));
             }
             outcome.items.push(
                 Item::new("caller", &outcome.source.id)
@@ -376,6 +413,7 @@ mod tests {
         };
         let v = json!([
             {"node": {"name": "refreshAll", "kind": "function", "filePath": "/code/a.kt", "startLine": 3, "endLine": 9}},
+            {"node": {"name": "pkg.refresh", "qualifiedName": "Source::pkg.refresh", "kind": "import", "filePath": "/code/a.kt", "startLine": 1}},
             {"node": {"name": "refresh", "qualifiedName": "TokenRefresher::refresh", "kind": "method", "filePath": "/code/b.kt", "startLine": 40, "endLine": 80, "signature": "(): Token"}}
         ]);
         let mut o = outcome();
@@ -386,10 +424,23 @@ mod tests {
         assert_eq!(
             o.items.len(),
             1,
-            "similar symbols are dropped once an exact one exists"
+            "imports are not definitions and similar symbols are dropped on exact hits"
         );
         assert!(exact("x", Some("pkg.Type.x"), "x"));
         assert!(!exact("xy", Some("pkg.xy"), "y"));
+    }
+
+    #[test]
+    fn codegraph_miss_keeps_its_spelling_suggestion() {
+        let response = "ℹ Symbol \"refResh\" not found — did you mean: refresh, refreshAll?\n";
+        assert_eq!(
+            missing_symbol_suggestion(response.as_bytes()).as_deref(),
+            Some("CodeGraph suggests refresh, refreshAll?")
+        );
+        assert_eq!(
+            missing_symbol_suggestion("ℹ Symbol \"missing\" not found\n".as_bytes()),
+            None
+        );
     }
 
     #[test]
@@ -399,7 +450,10 @@ mod tests {
             "ambiguous": false,
             "definitions": [{
                 "callers": [{"id": "f:1", "name": "run", "kind": "function", "filePath": "core/cli/src/cli/cmd_coverage.rs", "startLine": 11, "relationships": ["calls"]}],
-                "edges": [{"source": "f:1", "target": "f:0", "kind": "calls", "line": 53}],
+                "edges": [
+                    {"source": "f:1", "target": "f:0", "kind": "references", "line": 12},
+                    {"source": "f:1", "target": "f:0", "kind": "calls", "line": 53}
+                ],
                 "truncated": false
             }]
         });
@@ -409,6 +463,12 @@ mod tests {
         assert_eq!(o.items.len(), 1);
         assert_eq!(o.items[0].line, Some(53));
         assert_eq!(o.items[0].detail.as_deref(), Some("function calls"));
+        assert_eq!(
+            o.call_site
+                .as_ref()
+                .map(|(path, line)| (path.as_str(), *line)),
+            Some(("core/cli/src/cli/cmd_coverage.rs", 53))
+        );
     }
 
     #[test]

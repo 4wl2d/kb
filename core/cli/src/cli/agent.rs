@@ -6,12 +6,12 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::Ctx;
 use super::session::{Options, Session};
-use crate::answer::{Answer, DEFAULT_LINES, Item, Source};
+use crate::answer::{Answer, DEFAULT_LINES, Item, MAX_LINES, Source};
 use crate::context::{self, ContextRequest, Tier, UnitBody};
 use crate::error::{ErrorCode, KbError, Result};
 use crate::host::{self, HostContext};
-use crate::knowledge::{Freshness, KnowledgeView};
-use crate::model::{Intent, Level, Record, Registry};
+use crate::knowledge::{Freshness, KnowledgeView, Origin, RecordEntry};
+use crate::model::{Intent, Kind, Level, Record, Registry, Status};
 use crate::output::{CommandOutput, Format};
 use crate::source::WorkingTreeSource;
 use crate::tools::{self, Roots};
@@ -63,12 +63,22 @@ pub fn workspace(ctx: &Ctx) -> Result<Workspace> {
     })
 }
 
-pub fn lines(opt: Option<u16>) -> usize {
-    opt.map_or(DEFAULT_LINES, usize::from)
+pub fn lines(requested: Option<u64>) -> usize {
+    requested.map_or(DEFAULT_LINES, |n| n.min(MAX_LINES as u64) as usize)
 }
 
 /// Bound and render an answer; `failure` keeps the printed result (like `CONTEXT_INCOMPLETE`).
-pub fn output(answer: Answer, lines: usize, failure: Option<KbError>) -> CommandOutput {
+pub fn output(
+    mut answer: Answer,
+    requested: Option<u64>,
+    failure: Option<KbError>,
+) -> CommandOutput {
+    let lines = lines(requested);
+    if let Some(n) = requested.filter(|&n| n > lines as u64) {
+        answer
+            .notes
+            .insert(0, format!("--lines {n} capped at {lines}"));
+    }
     let answer = answer.bound(lines);
     let mut out = CommandOutput::new(answer.to_json(), answer.render());
     if let Some(f) = failure {
@@ -87,6 +97,8 @@ pub enum Detail {
     /// Feature documentation: purpose, invariant statements, contracts, entry points,
     /// limits and gaps.
     Doc,
+    /// Source locations, record IDs and documentation anchors.
+    CompactDoc,
     /// One line per affected feature and governing record.
     Impact,
 }
@@ -105,7 +117,8 @@ pub fn knowledge(
     let host = session.host.clone();
     let repo_hint = ws.roots.repo.clone();
     let paths = paths.to_vec();
-    let (result, registry) = session.with_view(|view| {
+    let code_is_kb = ws.roots.code == ws.roots.kb;
+    let (result, anchored, registry) = session.with_view(|view| {
         let mut env = super::cmd_context::task_env(host.as_ref(), view.registry(), info.clone());
         if env.host_repo.is_none() {
             let only = match view.registry().data.repos.as_slice() {
@@ -128,7 +141,12 @@ pub fn knowledge(
         req.budget = Some(10_000_000);
         req.budget_unit = Some(crate::model::BudgetUnit::Bytes);
         let r = context::assemble(&req, &env, view, Format::Compact)?;
-        Ok((r, view.registry().clone()))
+        let anchored = if detail == Detail::Impact {
+            Vec::new()
+        } else {
+            anchored_records(view, &r, code_is_kb)?
+        };
+        Ok((r, anchored, view.registry().clone()))
     })?;
     answer.source(Source {
         id: "knowledge".into(),
@@ -147,8 +165,52 @@ pub fn knowledge(
             result.status().as_str()
         ),
     });
-    render_knowledge(&result, &registry, detail, answer);
+    if result.status() != context::Completeness::Complete {
+        let codes: Vec<&str> = result
+            .header
+            .reasons
+            .iter()
+            .map(|r| r.code.as_str())
+            .collect();
+        answer.notes.insert(
+            0,
+            format!(
+                "knowledge is {}: {}",
+                result.status().as_str(),
+                codes.join(", ")
+            ),
+        );
+    }
+    match detail {
+        Detail::CompactDoc => {
+            super::cmd_doc::render_compact_knowledge(&result, &anchored, &ws.roots, answer)
+        }
+        _ => render_knowledge(&result, &anchored, &registry, detail, answer),
+    }
     Ok(())
+}
+
+/// Accepted records that name one of the requested paths as their source, test or
+/// document although their scope does not select them for it: the records a document
+/// about code elsewhere was written from. Sorted by id.
+fn anchored_records(
+    view: &dyn KnowledgeView,
+    result: &context::ContextResult,
+    code_is_kb: bool,
+) -> Result<Vec<RecordEntry>> {
+    let paths = &result.header.scope.paths;
+    let selected: BTreeSet<&str> = result.units.iter().map(|u| u.record_id.as_str()).collect();
+    let mut ids: Vec<String> = view
+        .metas_by_kind(&Kind::ALL, Origin::Accepted)?
+        .into_iter()
+        .filter(|e| e.meta.status == Status::Accepted && !selected.contains(e.meta.id.as_str()))
+        .filter(|e| super::cmd_doc::anchored(&e.meta.anchors, paths, code_is_kb))
+        .map(|e| e.meta.id.clone())
+        .collect();
+    ids.sort();
+    let mut records = view.records(&ids, Origin::Accepted)?;
+    records.sort_by(|a, b| a.parsed.record.common().id.cmp(b.parsed.record.common().id));
+    Ok(records)
 }
 
 fn short(rev: &str) -> &str {
@@ -169,6 +231,7 @@ fn statement_line(level: Level, text: &str, conditions: &[String], exceptions: u
 /// Pure rendering of a context result into feature-centric items.
 pub fn render_knowledge(
     result: &context::ContextResult,
+    anchored: &[RecordEntry],
     registry: &Registry,
     detail: Detail,
     answer: &mut Answer,
@@ -251,22 +314,6 @@ pub fn render_knowledge(
             );
         }
     }
-    if result.status() != context::Completeness::Complete {
-        let codes: Vec<&str> = result
-            .header
-            .reasons
-            .iter()
-            .map(|r| r.code.as_str())
-            .collect();
-        answer.notes.insert(
-            0,
-            format!(
-                "knowledge is {}: {}",
-                result.status().as_str(),
-                codes.join(", ")
-            ),
-        );
-    }
     let mut policies = Vec::new();
     for (unit, parsed) in &required {
         match &parsed.record {
@@ -304,6 +351,16 @@ pub fn render_knowledge(
                     .name(unit.id.clone())
                     .detail(unit.title.clone()),
             ),
+        }
+    }
+    if detail == Detail::Doc {
+        for entry in anchored {
+            let record = entry.parsed.record.common();
+            rules.push(
+                Item::new(record.kind.as_str(), SRC)
+                    .name(record.id)
+                    .detail(format!("{} (cites this path)", record.title)),
+            );
         }
     }
     for (unit, parsed) in &supplementary {

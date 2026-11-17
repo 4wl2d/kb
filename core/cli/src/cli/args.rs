@@ -10,6 +10,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
     version,
     about = "One CLI between coding agents, the code, the project knowledge and the code tools",
     long_about = "Routes code lookups (sym, callers, impact, find, check) to the connected tools,\n\
+                  reads numbered source lines (read),\n\
                   returns feature documentation (doc) and task-scoped obligations (context)\n\
                   from a typed knowledge base, all in bounded answers that name their source.\n\
                   Run through the project launcher `kbw`; see README.md.",
@@ -131,6 +132,8 @@ pub enum Command {
     Doc(DocArgs),
     /// Search the repository text
     Find(FindArgs),
+    /// Read a bounded, numbered source excerpt from the working tree
+    Read(ReadArgs),
     /// Run the configured checks for changed files (and validate changed knowledge)
     Check(CheckArgs),
     /// Run a project capability an exec tool declares in tools.toml (see `kb tools`)
@@ -852,9 +855,9 @@ pub struct SchemaArgs {
 /// Options shared by the bounded agent commands.
 #[derive(Debug, Clone, Args)]
 pub struct AnswerArgs {
-    /// Maximum lines of text output, 5..200 (default 30)
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
-    pub lines: Option<u16>,
+    /// Maximum lines of text output (minimum 5, capped at 200, default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(5..))]
+    pub lines: Option<u64>,
     /// Answer with this registry tool instead of the configured route
     #[arg(long, value_name = "ID")]
     pub tool: Option<String>,
@@ -911,6 +914,22 @@ pub struct FindArgs {
 }
 
 #[derive(Debug, Clone, Args)]
+pub struct ReadArgs {
+    /// Code-root-relative path, unique path suffix, or unique file stem
+    #[arg(value_name = "FILE")]
+    pub file: String,
+    /// First line (1-based, default 1)
+    #[arg(value_name = "FIRST", default_value_t = 1, value_parser = clap::value_parser!(u32).range(1..))]
+    pub first: u32,
+    /// Last line, inclusive (default FIRST + 39)
+    #[arg(value_name = "LAST", value_parser = clap::value_parser!(u32).range(1..))]
+    pub last: Option<u32>,
+    /// Further ranges read in the same call: FILE FIRST LAST, or FIRST LAST for the same file
+    #[arg(value_name = "[FILE] FIRST LAST")]
+    pub more: Vec<String>,
+}
+
+#[derive(Debug, Clone, Args)]
 pub struct CheckArgs {
     /// Changed files (code-root-relative); default: the work tree's changes against --base
     #[arg(value_name = "FILE")]
@@ -921,16 +940,16 @@ pub struct CheckArgs {
     /// List the checks that would run without running them
     #[arg(long)]
     pub plan: bool,
-    /// Maximum lines of text output, 5..200 (default 30)
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
-    pub lines: Option<u16>,
+    /// Maximum lines of text output (minimum 5, capped at 200, default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(5..))]
+    pub lines: Option<u64>,
 }
 
 #[derive(Debug, Clone, Args)]
 pub struct ToolsArgs {
-    /// Maximum lines of text output, 5..200 (default 30)
-    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u16).range(5..=200))]
-    pub lines: Option<u16>,
+    /// Maximum lines of text output (minimum 5, capped at 200, default 30)
+    #[arg(long, value_name = "N", value_parser = clap::value_parser!(u64).range(5..))]
+    pub lines: Option<u64>,
 }
 
 #[derive(Debug, Clone, Args)]

@@ -24,7 +24,6 @@ const TAIL: usize = 6;
 
 pub fn run(ctx: &Ctx, args: &CheckArgs) -> Result<CommandOutput> {
     let ws = agent::workspace(ctx)?;
-    let lines = agent::lines(args.lines);
     let loc = ctx.location()?;
     let cwd = ctx
         .env
@@ -226,7 +225,7 @@ pub fn run(ctx: &Ctx, args: &CheckArgs) -> Result<CommandOutput> {
         )
         .with_details(serde_json::json!({ "failed": failed }))
     });
-    Ok(agent::output(answer, lines, failure))
+    Ok(agent::output(answer, args.lines, failure))
 }
 
 /// Declared static probes over `base`..work tree, through `kb verify`.

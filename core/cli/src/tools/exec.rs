@@ -134,28 +134,16 @@ pub fn query(tool: &ToolSpec, probe: &Probe, roots: &Roots, req: &ExecRequest) -
         let out = run_with_env(program, &prepare, roots, tool.timeout(), &tool.env)?;
         if out.exit_code != 0 {
             return Err(KbError::invalid_input(format!(
-                "prepare step `{}` exited {}",
-                prepare.join(" "),
-                out.exit_code
+                "prepare step {}",
+                exit_reason(out.exit_code, &out.stderr)
             )));
         }
     }
     let out = run_with_env(program, &argv, roots, tool.timeout(), &tool.env)?;
     if !tool.ok_exit().contains(&out.exit_code) {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        let last = stderr
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .unwrap_or("");
-        return Err(KbError::invalid_input(format!(
-            "exited {}{}",
+        return Err(KbError::invalid_input(exit_reason(
             out.exit_code,
-            if last.is_empty() {
-                String::new()
-            } else {
-                format!(": {}", crate::git::redact(last.trim()))
-            }
+            &out.stderr,
         )));
     }
     let mut outcome = Outcome::new(Source {
@@ -248,6 +236,31 @@ pub fn query(tool: &ToolSpec, probe: &Probe, roots: &Roots, req: &ExecRequest) -
     outcome.files = files.into_iter().collect();
     outcome.items = items;
     Ok(outcome)
+}
+
+/// A stack trace may end with a runtime version; keep the diagnostic that explains it.
+fn exit_reason(code: i32, stderr: &[u8]) -> String {
+    let stderr = String::from_utf8_lossy(stderr);
+    let mut lines = stderr.lines().map(str::trim).filter(|l| !l.is_empty());
+    let diagnostic = lines.clone().find(|line| {
+        let lower = line.to_ascii_lowercase();
+        lower.starts_with("error:")
+            || lower.starts_with("error[")
+            || lower.starts_with("fatal:")
+            || lower.starts_with("panic:")
+            || lower.contains(": error:")
+            || line.split_once(':').is_some_and(|(kind, _)| {
+                kind.ends_with("Error") && kind.chars().all(|c| c.is_ascii_alphanumeric())
+            })
+    });
+    let mut result = format!("exited {code}");
+    if let Some(line) = diagnostic.or_else(|| lines.next_back()) {
+        let redacted = crate::git::redact(line);
+        let printable: String = redacted.chars().filter(|c| !c.is_control()).collect();
+        result.push_str(": ");
+        result.push_str(&crate::answer::clip(&printable, 240));
+    }
+    result
 }
 
 /// `path:line:text`, `path:line:column:text`, or the NUL-delimited forms of grep/ripgrep.
@@ -413,6 +426,30 @@ mod tests {
             capabilities: vec!["deps".into()],
             ..ToolSpec::default()
         }
+    }
+
+    #[test]
+    fn reports_actionable_child_error_over_a_stack_trace_footer() {
+        let stderr = b"file:///scripts/tool.mjs:18\n\nError: choose a path from two matches\n    at run (file:///scripts/tool.mjs:18)\n\nNode.js v22.23.1\n";
+        assert_eq!(
+            exit_reason(1, stderr),
+            "exited 1: Error: choose a path from two matches"
+        );
+        assert_eq!(
+            exit_reason(2, b"tool initialized\nmissing input\n"),
+            "exited 2: missing input"
+        );
+        assert_eq!(exit_reason(3, b" \n"), "exited 3");
+
+        let stderr = format!(
+            "ConnectionError: https://name:credential@example.invalid/a {}\n",
+            "wide".repeat(120)
+        );
+        let reason = exit_reason(4, stderr.as_bytes());
+        assert!(reason.contains("https://***@example.invalid/a"));
+        assert!(!reason.contains("credential"));
+        assert!(reason.ends_with('…'));
+        assert!(reason.chars().count() <= 250);
     }
 
     #[test]

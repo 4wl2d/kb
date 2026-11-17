@@ -1775,8 +1775,23 @@ fn search_ranks_records_and_is_not_a_context_assembly() {
     let r = context::search::search(&v, "token storage", &[], 10, false).unwrap();
     assert_eq!(r.hits[0].id, "acme.mobile.token-storage");
     assert!(r.hits.iter().any(|h| h.id == "acme.contract.token-refresh"));
-    let text = context::search::render(&r, Format::Compact);
-    assert!(text.contains("not a context assembly"));
+    for format in [Format::Compact, Format::Terse] {
+        let text = context::search::render(&r, format);
+        assert!(text.contains("not a context assembly"));
+        assert!(text.contains("kb show <record-id>"));
+        let ids: Vec<_> = text
+            .lines()
+            .filter_map(|line| line.split_once(" ["))
+            .map(|(id, _)| id)
+            .collect();
+        assert_eq!(
+            ids,
+            r.hits.iter().map(|hit| hit.id.as_str()).collect::<Vec<_>>(),
+            "every displayed hit starts with the ID accepted by kb show"
+        );
+    }
+    let human = context::search::render(&r, Format::Human);
+    assert!(human.contains("  matched: "));
     assert_eq!(context::search::to_json(&r)["context_assembly"], false);
 
     let procedures = context::search::search(&v, "token", &[Kind::Procedure], 10, false).unwrap();
