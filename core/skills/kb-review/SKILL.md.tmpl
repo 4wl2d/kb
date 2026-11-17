@@ -18,7 +18,9 @@ into.
    Every mandatory statement is a review criterion; exit 30 lists what could not be
    determined.
 2. **Feature documentation of the changed paths.** `{{kb_path}}/kbw doc <changed file>{{snapshot_arg}}` for each
-   changed area: check the diff against each invariant, contract and known limit.
+   changed area lists the ids and titles of the records that apply to or cite it. Read their
+   statements with `{{kb_path}}/kbw show <id>{{snapshot_arg}}`, or the feature's invariant statements, contracts
+   and known limits with `doc --format human`, and check the diff against each of them.
 3. **Affected code.** For each changed public symbol, `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and
    `{{kb_path}}/kbw callers <symbol>`: callers that the change breaks or that need the same change are
    findings.

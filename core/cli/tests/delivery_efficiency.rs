@@ -529,6 +529,53 @@ fn outline_is_bounded_and_never_saved_as_a_delivery_receipt() {
 }
 
 #[test]
+fn terse_outline_writes_each_reason_once_and_keeps_every_id() {
+    let w = World::new();
+    let args = ["outline", "--path", "app/auth/Client.rs"];
+    let units = w.run(&args, 30)["result"]["units"].clone();
+    let units = units.as_array().unwrap();
+    let mandatory = units.iter().filter(|u| u["mandatory"] == true).count();
+    assert!(mandatory > 0, "the fixture has obligations for this path");
+
+    let terse =
+        common::stdout(&w.output(&[args.as_slice(), &["--format", "terse"]].concat(), false));
+    // Mandatory rows are `reason | kind | ids`, optional rows `id | kind | tokens | reason`.
+    let mut listed: Vec<&str> = terse
+        .lines()
+        .filter(|line| !line.ends_with("ids") && !line.ends_with("reason"))
+        .flat_map(|line| {
+            let fields: Vec<&str> = line.split(" | ").collect();
+            match fields.as_slice() {
+                [_, _, ids] => ids.split(", ").collect(),
+                [id, _, _, _] => vec![*id],
+                _ => Vec::new(),
+            }
+        })
+        .collect();
+    listed.sort_unstable();
+    let mut expected: Vec<&str> = units.iter().map(|u| u["id"].as_str().unwrap()).collect();
+    expected.sort_unstable();
+    assert_eq!(listed, expected, "{terse}");
+    assert!(
+        terse.contains(&format!("mandatory: {mandatory} unit(s), ")),
+        "{terse}"
+    );
+    assert!(!terse.contains(" | mandatory | "), "{terse}");
+    assert!(terse.starts_with("kb outline: "), "{terse}");
+    assert!(
+        terse.contains("Inventory only; run context before editing."),
+        "{terse}"
+    );
+    // The default text keeps one row per unit.
+    let table = common::stdout(&w.output(&args, false));
+    assert_eq!(
+        table.matches(" | mandatory | ").count(),
+        mandatory,
+        "{table}"
+    );
+}
+
+#[test]
 fn terse_reduces_repeated_fields_without_losing_obligations_or_lifecycle_labels() {
     let w = World::new();
     let mut text = String::from(

@@ -14,8 +14,8 @@ Record templates: `{{kb_path}}/core/templates/records/`. Format reference:
 
 | part | where | how kb uses it |
 |---|---|---|
-| the feature and its files | `project/registry/features.toml`: `id`, `title`, `paths` (globs) | `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` finds the feature of a path |
-| purpose | the feature record's `summary` (one or two sentences) | first line of `{{kb_path}}/kbw doc{{snapshot_arg}}` |
+| the feature and its files | `project/registry/features.toml`: `id`, `title`, `paths` (globs) | `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` lists the records that apply to a path, its feature record among them, by id and title; `--format human` prints the lines named below |
+| purpose | the feature record's `summary` (one or two sentences) | `purpose` line of `{{kb_path}}/kbw doc <path> --format human{{snapshot_arg}}` |
 | entry points | `anchors` of kind `source` with `repo`, `path` and `symbol` | `entry` lines; `{{kb_path}}/kbw anchors check` detects drift |
 | behaviors, states, scenarios | `behaviors`, optional `states`, `transitions`, `scenarios` | descriptive, supplementary context |
 | known limits and nuances | `boundaries` | `limit` lines |
@@ -43,8 +43,8 @@ every rule in a typed `statements` entry with explicit `conditions` and typed
 4. **Validate.** `{{kb_path}}/kbw check <changed knowledge files>{{snapshot_arg}}` (or `{{kb_path}}/kbw validate`).
    Drafts are proposals until review: inspect them with
    `{{kb_path}}/kbw context --include-proposals --intent implement --path <path>{{snapshot_arg}}`
-   (labelled, never mandatory). `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` shows the feature
-   once the change is accepted into the approved ref.
+   (labelled, never mandatory). `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` lists the new
+   records once the change is accepted into the approved ref.
 5. **Submit with the code change.** The documentation change is reviewed with the code it
    describes: commit it in the KB checkout, propose it through the KB's review, and record
    it as `included` or `linked` in the code merge request's `kb-impact` block. Never set

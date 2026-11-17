@@ -6,9 +6,10 @@ kb is a Rust CLI, run through the project launcher `./kbw`, through which an AI 
 agent (Claude Code or any other) reaches the codebase, the project documentation and the
 code-analysis tools. The agent does not choose between CodeGraph, `grep`, file search and
 other tools: it asks kb, kb routes the request to the backend its code and configuration
-name, and the answer comes back as at most 30 structured lines that name their source. The
-agent finds what it needs quickly, knows the architectural constraints before it edits,
-and does not spend tokens searching unstructured output.
+name, and the answer comes back as structured lines that name their source, at most 30 by
+default, with the source lines of a few located places attached. The agent finds what it
+needs quickly, knows the architectural constraints before it edits, and does not spend
+tokens searching unstructured output.
 
 ```text
 coding agent  --skills-->  kb: routing · tool registry · adapters · bounded answers
@@ -22,7 +23,8 @@ coding agent  --skills-->  kb: routing · tool registry · adapters · bounded a
 | a symbol's definition | `kbw sym <name>` |
 | the code that calls it | `kbw callers <symbol>` |
 | what changing it affects, in code and knowledge | `kbw impact <symbol>` |
-| the feature documentation of a path or symbol | `kbw doc <path\|symbol>` |
+| where a path or symbol is and which records document it | `kbw doc <path\|symbol>` |
+| numbered lines of a source file | `kbw read <path> [FIRST [LAST]]` |
 | text in the repository | `kbw find "<text>"` |
 | the checks for changed files | `kbw check [files] [--base <target>]` |
 | every obligation before an edit, with a receipt | `kbw context --intent implement --path <file>` |
@@ -40,10 +42,11 @@ and decided in [ADR 0016](docs/adr/0016-agent-cli.md).
 
 kb is:
 
-* **One interface for agents.** `sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools`
-  and `doctor` return one common answer (`kb.answer.v1`): sources with tool version and
+* **One interface for agents.** `sym`, `callers`, `impact`, `doc`, `find`, `check`, `run`
+  and `tools` return one common answer (`kb.answer.v1`): sources with tool version and
   index state, items with paths, lines, symbols and kinds, notes and follow-ups, bounded to
-  30 lines (`--lines` up to 200). Skills (`kb`, `kb-change`, `kb-review`, `kb-document`)
+  30 lines by default (`--lines`), and the source lines of a few located places; `read`
+  prints numbered lines of a file. Skills (`kb`, `kb-change`, `kb-review`, `kb-document`)
   call these commands; they never name a tool.
 * **An umbrella for any tool, routed by code and configuration.** A tool registry
   (`project/tools.toml`) connects tools through engine adapters (CodeGraph's live index, any
@@ -276,8 +279,9 @@ that change files are dry-runs unless given `--apply`.
 | `sym` | Definition of a symbol through route `sym` (`--file`, `--kind`); bounded answer naming the tool and its index state | `.kb/kbw sym TokenRefresher.refresh` |
 | `callers` | Code that calls or references a symbol through route `callers` (`--file`) | `.kb/kbw callers refresh` |
 | `impact <symbol>` | Dependents of a symbol (route `impact`, `--depth 1..4`) and the features, invariants and contracts of the affected files | `.kb/kbw impact refresh` |
-| `doc` | Feature documentation of a path or symbol: feature, purpose, invariant statements, contracts, entry points, limits, gaps | `.kb/kbw doc app/auth/TokenRefresher.kt` |
-| `find` | Repository text search through route `find` (`--regex`, `--glob`), sorted, at most 20 matches per file | `.kb/kbw find "refresh token"` |
+| `doc` | Where a path or symbol is and what documents it: the source location or a `read` command, the ids and titles of the records that apply to or cite the path, document anchors and repository-wide `guidance` ids; statements are read with `show <id>` or `context`, and `--format human` and `--json` keep the feature detail (purpose, invariant statements, contracts, entry points, limits, gaps) | `.kb/kbw doc app/auth/TokenRefresher.kt` |
+| `read` | Numbered lines of a file under its path: 40 lines from `FIRST` by default, at most 80; further `[<path>] FIRST LAST` ranges follow `FIRST LAST` of the first one, at most 12 ranges and 240 lines per call | `.kb/kbw read app/auth/Login.kt 1 40` |
+| `find` | Repository text search through route `find` (`--regex`, `--glob`), at most 20 matches per file; hidden files are searched, ignored files and `.git` are not | `.kb/kbw find "refresh token"` |
 | `check` | Configured check commands for changed files, validation of changed knowledge, and with `--base` the declared probes; `--plan` runs nothing | `.kb/kbw check --base origin/main` |
 | `run` | A project capability: any command-line tool connected as an `exec` entry of `tools.toml`, routed and answered like the built-in requests | `.kb/kbw run affected-tests src/a.kt` |
 | `tools` | Routes, connected tools, versions, availability and the CodeGraph index state | `.kb/kbw tools` |
@@ -312,11 +316,13 @@ auto|latest|pinned|working-tree|<revision>`, `--host`, `--quiet`, `--skill-proto
 Unknown arguments are rejected.
 
 Output: compact text for agents (default), `--format human`, or `--json`. The agent commands
-(`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check`, `tools`) print one bounded answer
-in every text format (at most 30 lines, `--lines` 5..200) and `kb.answer.v1` in JSON. In JSON mode
-stdout carries only the protocol envelope `{protocol, command, ok, result, error, meta}`;
-progress and diagnostics go to stderr. Errors have stable symbolic codes and grouped exit
-codes:
+(`sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check`, `run`, `tools`) print one bounded
+answer in every text format and `kb.answer.v1` in JSON: at most 30 lines by default (`--lines`,
+minimum 5, values above 200 are capped with a note), plus up to 80 numbered source lines when
+`sym`, `find` or `callers` locates one to four places (`excerpts[]` in JSON). `read` prints
+numbered source lines. In JSON mode stdout carries only the protocol envelope
+`{protocol, command, ok, result, error, meta}`; progress and diagnostics go to stderr. Errors
+have stable symbolic codes and grouped exit codes:
 
 | exit | group | examples |
 |---|---|---|

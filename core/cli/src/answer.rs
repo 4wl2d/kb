@@ -6,6 +6,10 @@
 //! a header naming the sources, the items that fit, up to [`MAX_NOTES`] notes, an optional
 //! `next:` line and a footer with the shown/total counts. JSON (`kb.answer.v1` inside the
 //! `kb.cli.v1` envelope) carries the same shown items, the total and the sources.
+//!
+//! Two things may exceed those bounds, because cutting them costs the agent another call: an
+//! item's code text keeps [`DETAIL_ROOM`] characters however long its path is, and an
+//! answer's [`Excerpt`]s add up to [`EXCERPT_LINES`] numbered source lines after the items.
 
 use serde::Serialize;
 use serde_json::{Value, json};
@@ -15,6 +19,13 @@ pub const DEFAULT_LINES: usize = 30;
 pub const MIN_LINES: usize = 5;
 pub const MAX_LINES: usize = 200;
 pub const MAX_COLUMNS: usize = 200;
+/// Characters of an item's code text that a long path never squeezes out.
+pub const DETAIL_ROOM: usize = 120;
+/// Characters of an item's name shown next to its code text.
+pub const NAME_ROOM: usize = 80;
+/// Source lines an answer may carry in its excerpts: one `kb read` window.
+pub const EXCERPT_LINES: usize = 80;
+const EXCERPT_COLUMNS: usize = 300;
 pub const MAX_NOTES: usize = 3;
 pub const MAX_NEXT: usize = 3;
 
@@ -30,6 +41,19 @@ pub struct Source {
     /// Freshness and completeness of what the source read, e.g. `index synced, complete`,
     /// `lexical`, or the knowledge snapshot.
     pub state: String,
+}
+
+/// Numbered source lines an answer carries so that the call that located them need not be
+/// followed by a read: the definition `sym` found, the surroundings of a few `find`
+/// matches, or the call sites `callers` found. Lines are as `kb read` prints them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct Excerpt {
+    pub path: String,
+    pub first_line: u32,
+    pub lines: Vec<String>,
+    /// The line after the excerpt when the definition or file goes on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_line: Option<u32>,
 }
 
 /// One fact of an answer.
@@ -97,9 +121,14 @@ pub struct Answer {
     pub items: Vec<Item>,
     pub notes: Vec<String>,
     pub next: Vec<String>,
+    /// Source lines of the located code, when the command attaches them.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub excerpts: Vec<Excerpt>,
     /// Items found before bounding.
     pub total: usize,
     pub truncated: bool,
+    #[serde(skip)]
+    pub(crate) prioritize_code_matches: bool,
 }
 
 impl Answer {
@@ -111,8 +140,10 @@ impl Answer {
             items: Vec::new(),
             notes: Vec::new(),
             next: Vec::new(),
+            excerpts: Vec::new(),
             total: 0,
             truncated: false,
+            prioritize_code_matches: false,
         }
     }
 
@@ -151,7 +182,7 @@ impl Answer {
     }
 
     pub fn to_json(&self) -> Value {
-        json!({
+        let mut value = json!({
             "answer": ANSWER_ID,
             "command": self.command,
             "subject": self.subject,
@@ -162,7 +193,11 @@ impl Answer {
             "truncated": self.truncated,
             "notes": self.notes,
             "next": self.next,
-        })
+        });
+        if !self.excerpts.is_empty() {
+            value["excerpts"] = json!(self.excerpts);
+        }
+        value
     }
 
     pub fn render(&self) -> String {
@@ -180,63 +215,149 @@ impl Answer {
         } else {
             format!(" {}", self.subject)
         };
-        out.push(format!(
-            "kb {}{subject} · {}",
-            self.command,
-            if sources.is_empty() {
-                "no source".to_string()
-            } else {
-                sources.join("; ")
-            }
+        out.push(clip(
+            &format!(
+                "kb {}{subject} · {}",
+                self.command,
+                if sources.is_empty() {
+                    "no source".to_string()
+                } else {
+                    sources.join("; ")
+                }
+            ),
+            MAX_COLUMNS,
         ));
         let tag_sources = self.sources.len() > 1;
-        for item in &self.items {
-            out.push(render_item(item, tag_sources));
+        let mut items: Vec<_> = self.items.iter().collect();
+        if self.command == "find" {
+            // Group the hits that survived the selection budget by file, so that a path is
+            // written once, without changing which hits are selected or their priority in
+            // the structured answer. Ranked hits keep their files in rank order.
+            if self.prioritize_code_matches {
+                let mut order: Vec<Option<&str>> = Vec::new();
+                for item in &items {
+                    if !order.contains(&item.path.as_deref()) {
+                        order.push(item.path.as_deref());
+                    }
+                }
+                items.sort_by_key(|item| {
+                    (
+                        order.iter().position(|path| *path == item.path.as_deref()),
+                        item.line,
+                    )
+                });
+            } else {
+                items.sort_by_key(|item| (item.path.as_deref(), item.line));
+            }
+        }
+        let mut previous = None;
+        for item in items {
+            let location = item
+                .path
+                .as_deref()
+                .map(|path| (path, item.source.as_str()));
+            let repeat_path = self.command == "find" && location.is_some() && location == previous;
+            out.push(render_item(item, tag_sources, repeat_path));
+            previous = location;
+        }
+        // An excerpt of the one file the items name belongs to them; otherwise excerpts are
+        // told apart by their paths, and further excerpts of one file by the gap in their
+        // line numbers.
+        let headed = self.excerpts.len() > 1
+            || self.excerpts.first().is_some_and(|excerpt| {
+                let mut paths = self.items.iter().filter_map(|item| item.path.as_deref());
+                let first = paths.next();
+                first != Some(excerpt.path.as_str()) || paths.any(|path| path != excerpt.path)
+            });
+        let mut shown: Option<&str> = None;
+        for excerpt in &self.excerpts {
+            if headed && shown != Some(excerpt.path.as_str()) {
+                out.push(excerpt.path.clone());
+            }
+            shown = Some(excerpt.path.as_str());
+            for (line, text) in (excerpt.first_line..).zip(&excerpt.lines) {
+                out.push(clip(&format!("{line}:{text}"), EXCERPT_COLUMNS));
+            }
         }
         for n in &self.notes {
-            out.push(format!("note: {n}"));
+            out.push(clip(&format!("note: {n}"), MAX_COLUMNS));
         }
         if !self.next.is_empty() {
-            out.push(format!("next: {}", self.next.join(" · ")));
+            out.push(clip(
+                &format!("next: {}", self.next.join(" · ")),
+                MAX_COLUMNS,
+            ));
         }
         let mut footer = format!("-- {} of {}", self.items.len(), self.total);
         if self.truncated {
             footer.push_str(" (truncated; --lines widens the bound)");
         }
         out.push(footer);
-        let mut text = out
-            .into_iter()
-            .map(|l| clip(&l, MAX_COLUMNS))
-            .collect::<Vec<_>>()
-            .join("\n");
+        let mut text = out.join("\n");
         text.push('\n');
         text
     }
 }
 
-fn render_item(item: &Item, tag_source: bool) -> String {
+fn render_item(item: &Item, tag_source: bool, repeat_path: bool) -> String {
     let mut parts = vec![item.kind.clone()];
-    if let Some(n) = &item.name {
-        parts.push(n.clone());
-    }
     if let Some(p) = &item.path {
-        let loc = match (item.line, item.end_line) {
-            (Some(l), Some(e)) => format!("{p}:{l}-{e}"),
-            (Some(l), None) => format!("{p}:{l}"),
-            _ => p.clone(),
+        let span = match (item.line, item.end_line) {
+            (Some(l), Some(e)) => format!(":{l}-{e}"),
+            (Some(l), None) => format!(":{l}"),
+            _ => String::new(),
         };
-        parts.push(loc);
+        let path = if repeat_path && !span.is_empty() {
+            String::new()
+        } else {
+            // Prioritize the filename and line number over a long symbol name or ancestry.
+            // Leave a column for the final ellipsis when trailing metadata is clipped.
+            let room = MAX_COLUMNS.saturating_sub(item.kind.chars().count() + 3 + span.len());
+            clip_path(p, room)
+        };
+        parts.push(format!("{path}{span}"));
     }
-    if let Some(d) = &item.detail {
-        parts.push(single_line(d));
+    if let Some(n) = &item.name {
+        // A name is a locator, not content: with code text to show, it yields the room.
+        parts.push(if item.detail.is_some() {
+            clip(n, NAME_ROOM)
+        } else {
+            n.clone()
+        });
     }
+    let mut tags = Vec::new();
     if let Some(c) = &item.confidence {
-        parts.push(format!("[{c}]"));
+        tags.push(format!("[{c}]"));
     }
     if tag_source {
-        parts.push(format!("<{}>", item.source));
+        tags.push(format!("<{}>", item.source));
     }
+    let Some(d) = &item.detail else {
+        parts.extend(tags);
+        return clip(&parts.join("  "), MAX_COLUMNS);
+    };
+    // A long path must not squeeze out the code text: a clipped match is asked for again.
+    let around: usize = parts
+        .iter()
+        .chain(&tags)
+        .map(|p| p.chars().count() + 2)
+        .sum();
+    let room = MAX_COLUMNS.saturating_sub(around).max(DETAIL_ROOM);
+    parts.push(clip(&single_line(d), room));
+    parts.extend(tags);
     parts.join("  ")
+}
+
+fn clip_path(path: &str, max: usize) -> String {
+    let count = path.chars().count();
+    if count <= max {
+        return path.to_string();
+    }
+    let tail = path
+        .char_indices()
+        .nth(count - max.saturating_sub(1))
+        .map_or("", |(index, _)| &path[index..]);
+    format!("…{tail}")
 }
 
 fn single_line(s: &str) -> String {
@@ -305,6 +426,86 @@ mod tests {
         assert_eq!(v["answer"], ANSWER_ID);
         assert_eq!(v["items"][0]["source"], "rg");
         assert_eq!(v["shown"], 2);
+    }
+
+    #[test]
+    fn compact_code_locators_survive_long_metadata() {
+        let path = format!("src/{}/ActualSource.kt", "parent/".repeat(40));
+        let mut answer = Answer::new("sym", "update");
+        answer.items.push(
+            Item::new("definition", "graph")
+                .name("namespace::".repeat(30) + "update")
+                .at(path.clone(), Some(44))
+                .span(Some(58)),
+        );
+        let bounded = answer.bound(30);
+        assert!(bounded.render().contains("/ActualSource.kt:44-58"));
+        assert_eq!(bounded.to_json()["items"][0]["path"], path);
+    }
+
+    #[test]
+    fn find_groups_displayed_lines_without_reordering_json_results() {
+        let mut answer = Answer::new("find", "needle");
+        for (path, line) in [("src/a.kt", 3), ("src/b.kt", 2), ("src/a.kt", 8)] {
+            answer.items.push(
+                Item::new("match", "rg")
+                    .at(path, Some(line))
+                    .detail("needle"),
+            );
+        }
+        let bounded = answer.clone().bound(30);
+        let text = bounded.render();
+        assert_eq!(text.matches("src/a.kt").count(), 1);
+        assert!(text.contains("src/a.kt:3  needle\nmatch  :8  needle"));
+        assert_eq!(bounded.to_json()["items"][1]["path"], "src/b.kt");
+
+        answer.prioritize_code_matches = true;
+        let ranked = answer.bound(30);
+        assert_eq!(ranked.to_json(), bounded.to_json());
+        let lines: Vec<_> = ranked
+            .render()
+            .lines()
+            .skip(1)
+            .take(3)
+            .map(str::to_owned)
+            .collect();
+        // Ranked hits keep the rank order of their files; a file's lines stay together.
+        assert!(lines[0].contains("src/a.kt:3"));
+        assert!(lines[1].starts_with("match  :8"));
+        assert!(lines[2].contains("src/b.kt:2"));
+    }
+
+    #[test]
+    fn an_excerpt_names_its_file_unless_the_items_above_it_do() {
+        let excerpt = |path: &str| Excerpt {
+            path: path.into(),
+            first_line: 3,
+            lines: vec!["let needle = 1;".into()],
+            next_line: None,
+        };
+        let item = |path: &str| {
+            Item::new("match", "rg")
+                .at(path, Some(3))
+                .detail("let needle = 1;")
+        };
+        let render = |paths: &[&str], lines: usize| {
+            let mut a = Answer::new("find", "needle");
+            a.items = paths.iter().map(|p| item(p)).collect();
+            a.excerpts = vec![excerpt("src/a.kt")];
+            a.bound(lines).render()
+        };
+        // The one item names the file of the excerpt.
+        assert!(!render(&["src/a.kt"], 30).contains("\nsrc/a.kt\n"));
+        // Another file among the items, or no item shown at all: the excerpt says where
+        // it is from.
+        assert!(render(&["src/b.kt", "src/a.kt"], 30).contains("\nsrc/a.kt\n3:let needle = 1;"));
+        let mut bare = Answer::new("find", "needle");
+        bare.excerpts = vec![excerpt("src/a.kt")];
+        assert!(
+            bare.bound(30)
+                .render()
+                .contains("\nsrc/a.kt\n3:let needle = 1;")
+        );
     }
 
     #[test]

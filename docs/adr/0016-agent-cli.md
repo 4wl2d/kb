@@ -70,8 +70,9 @@ on, and their contracts are unchanged.
 * **Output**: every agent command returns one answer (`kb.answer.v1` inside the unchanged
   `kb.cli.v1` envelope): sources (tool id, adapter, version, state of what it read),
   items (kind, name, path, line, end line, detail, confidence, source), notes, follow-ups,
-  total and a truncation flag. Text is at most 30 lines (`--lines` 5..200) of at most 200
-  characters. A line bound fits what agents read; the existing byte and token budgets stay
+  total and a truncation flag. Text is at most 30 lines (`--lines`, minimum 5, capped at
+  200) of at most 200 characters; later, numbered source lines may follow the items
+  outside that bound ([agent-cli.md](../agent-cli.md#one-call-instead-of-two)). A line bound fits what agents read; the existing byte and token budgets stay
   for `context`, whose units are never truncated.
 
 The registry is a plain configuration file for engine-owned adapters. It is not a plugin

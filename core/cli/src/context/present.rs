@@ -19,6 +19,7 @@ use crate::output::Format;
 use crate::versions::{ENGINE_VERSION, PROTOCOL_ID, SKILL_PROTOCOL};
 
 use super::settings::{mode_name, stricter_name, type_name};
+use super::show::AnchorTarget;
 use super::{
     ContextResult, EffectiveSetting, Footer, Header, SettingSource, TierCounts, Unit, UnitBody,
 };
@@ -1123,10 +1124,20 @@ fn anchor_kind(k: AnchorKind) -> &'static str {
 }
 
 pub(super) fn anchor_text(a: &Anchor) -> String {
+    anchor_text_at(a, None)
+}
+
+/// [`anchor_text`] with what the checked-out code says about the target: the line of the
+/// anchored symbol after the path, or that the file is absent.
+pub(super) fn anchor_text_at(a: &Anchor, target: Option<&AnchorTarget>) -> String {
     let mut s = anchor_kind(a.kind).to_string();
+    let line = match target {
+        Some(AnchorTarget::Line(n)) => format!(":{n}"),
+        _ => String::new(),
+    };
     match (&a.repo, &a.path) {
-        (Some(r), Some(p)) => s.push_str(&format!(" {r}:{p}")),
-        (None, Some(p)) => s.push_str(&format!(" {p}")),
+        (Some(r), Some(p)) => s.push_str(&format!(" {r}:{p}{line}")),
+        (None, Some(p)) => s.push_str(&format!(" {p}{line}")),
         (Some(r), None) => s.push_str(&format!(" {r}")),
         (None, None) => {}
     }
@@ -1146,6 +1157,18 @@ pub(super) fn anchor_text(a: &Anchor) -> String {
     }
     if let Some(x) = &a.note {
         s.push_str(&format!(" ({x})"));
+    }
+    match target {
+        Some(AnchorTarget::Missing) => s.push_str(" (not in this checkout)"),
+        Some(AnchorTarget::Document { lines, mentions }) => {
+            s.push_str(&format!(" [{lines} lines"));
+            for (i, (text, line)) in mentions.iter().enumerate() {
+                s.push_str(if i == 0 { "; " } else { ", " });
+                s.push_str(&format!("{text} at :{line}"));
+            }
+            s.push(']');
+        }
+        _ => {}
     }
     s
 }
@@ -1477,7 +1500,13 @@ fn link_lines(o: &mut String, rec: &Record, ind: &str, all: bool) {
 }
 
 /// Full typed record with metadata, anchors and verbatim sections (`kb show`).
-pub(super) fn record_full(p: &ParsedRecord, path: &str, origin: Origin, human: bool) -> String {
+pub(super) fn record_full(
+    p: &ParsedRecord,
+    path: &str,
+    origin: Origin,
+    human: bool,
+    targets: &[Option<AnchorTarget>],
+) -> String {
     let mut o = String::new();
     let c = p.record.common();
     let ind = if human { "  " } else { "" };
@@ -1512,8 +1541,9 @@ pub(super) fn record_full(p: &ParsedRecord, path: &str, origin: Origin, human: b
     record_core(&mut o, &p.record, ind);
     if !c.anchors.is_empty() {
         w!(o, "{ind}anchors:");
-        for a in c.anchors {
-            w!(o, "{ind}- {}", anchor_text(a));
+        for (i, a) in c.anchors.iter().enumerate() {
+            let target = targets.get(i).and_then(Option::as_ref);
+            w!(o, "{ind}- {}", anchor_text_at(a, target));
         }
     }
     for sec in &p.sections {

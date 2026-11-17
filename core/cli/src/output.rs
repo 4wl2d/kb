@@ -106,11 +106,17 @@ pub fn emit(
             match format {
                 Format::Json => {
                     let v = envelope(command, Some(&out), None, &meta);
-                    let _ = writeln!(
-                        so,
-                        "{}",
-                        serde_json::to_string_pretty(&v).unwrap_or_default()
-                    );
+                    if out.result.get("answer").and_then(Value::as_str)
+                        == Some(crate::answer::ANSWER_ID)
+                    {
+                        let _ = writeln!(so, "{v}");
+                    } else {
+                        let _ = writeln!(
+                            so,
+                            "{}",
+                            serde_json::to_string_pretty(&v).unwrap_or_default()
+                        );
+                    }
                 }
                 _ => {
                     if !out.text.is_empty() {

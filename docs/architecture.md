@@ -509,10 +509,10 @@ Global options: `--root`, `--config`, `--profile project|maintainer`, `--format
 compact|terse|human|json` (`--json`), `--offline`, `--snapshot`, `--host`, `--quiet`,
 `--skill-protocol <n>` (mismatch → `SKILL_OUTDATED`). Unknown arguments are rejected.
 
-Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `find`, `check`, `run`, `tools` (§13),
-and `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`, `show`, `sync`,
-`coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`, `drift`,
-`ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
+Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `read`, `find`, `check`, `run`,
+`tools` (§13), and `init`, `doctor`, `validate`, `index`, `context`, `outline`, `search`,
+`show`, `sync`, `coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`,
+`drift`, `ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
 `update {check,prepare,divergence,abandon}`, `schema`,
 `version`. Mutating commands are dry-run by default and write only with `--apply`
 (`update prepare` writes only to its own branch/worktree; `update abandon <branch>` reports
@@ -529,6 +529,8 @@ approved=<yes|no|unknown>[; latest=<tip12>][; pin=<pin12>][; overlay=<digest12> 
 `--quiet`) when freshness is unverified or `approved` is not `yes`.
 
 Machine mode: stdout carries only the protocol document; progress/diagnostics go to stderr.
+An envelope whose `result` is a `kb.answer.v1` answer is written on one line; every other
+envelope is pretty-printed.
 
 Envelope: `{"protocol":"kb.cli.v1","command":..,"ok":bool,"result":..|null,"error":{code,
 exit_code,message,details?,hint?,diagnostics?}|null,"meta":{..non-deterministic..}}`;
@@ -553,8 +555,10 @@ invalid records are `validate` diagnostics and the context reason `SNAPSHOT_INVA
 and exits 30 (`CONTEXT_INCOMPLETE`).
 
 The agent commands print one bounded answer in every text format and `kb.answer.v1` as
-`result` in JSON (§13); `sym`, `callers`, `impact <symbol>`, `doc` and `find` report an unknown
-symbol or no match as `NOT_FOUND` with the answer still printed.
+`result` in JSON (§13; `read` prints numbered source lines); `sym`, `callers`,
+`impact <symbol>`, `doc` and `find` report an unknown symbol or no match as `NOT_FOUND` with
+the answer still printed, unless the text of the checkout answers in another reading (§13,
+Misses).
 
 ## 9. Launcher and runtime
 
@@ -702,10 +706,15 @@ speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every re
   `similar` otherwise. `code-provider` sends a `kb.code.v1` request for the code root's
   `HEAD` and validates the response against Git objects (§ ADR 0011); answers are labelled
   with the commit. `ripgrep` and `git-grep` search with fixed strings by default, smart
-  case, sorted by path, at most 20 matches per file, excluding the KB mount; `git-grep`
-  also answers symbol requests lexically (definition keywords; references by whole word),
-  labelled `lexical`. Every tool starts without a shell, in the code root, with telemetry,
-  update checks and daemons disabled, under its deadline, 16 MiB stdout and 1 MiB stderr.
+  case, at most 20 matches per file and 500 characters of a matched line, ranked from path
+  and line order, excluding the KB mount. `git-grep` also answers symbol requests
+  lexically, labelled `lexical`: `sym` lists only the lines that read as a declaration of
+  the name (a definition keyword before it, every declaration of a line being seen;
+  `fun Receiver.name(` declares `name`; a name after `:`, after `extends` or `implements`,
+  or inside an unclosed `<` is not declared there), `callers` and `impact` its other
+  whole-word uses, a typed use such as `val x: Name` among them. Every tool starts without
+  a shell, in the code root, with telemetry, update checks and daemons disabled, under its
+  deadline, 16 MiB stdout and 1 MiB stderr.
 * **`exec`** (any command-line tool): expands the `args` template (`{subject}`, `{args}`,
   `{file}`, `{kind}`, `{depth}`, `{limit}`, `{globs}`, `{root}`, `{kb}`; an argument with an
   absent optional value is dropped; input a template cannot carry is refused), runs the
@@ -722,17 +731,89 @@ speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every re
 * **Answer** (`kb.answer.v1`, the `result` of the agent commands inside `kb.cli.v1`):
   `command`, `subject`, `sources[]` (`id`, `adapter`, `version?`, `state`), `items[]` (`kind`,
   `name?`, `path?`, `line?`, `end_line?`, `detail?`, `confidence?`, `source`), `shown`,
-  `total`, `truncated`, `notes[]` (≤3), `next[]` (≤3). Items keep their priority order and
-  are cut to fit; text output is at most `--lines` (5..200, default 30) lines of at most 200
-  characters: header, items, notes, `next:`, footer. Deterministic for identical tool
+  `total`, `truncated`, `notes[]` (≤3), `next[]` (≤3), `excerpts[]?` (`path`, `first_line`,
+  `lines[]`, `next_line?`). Items keep their priority order and are cut to fit; text output
+  is at most `--lines` lines (minimum 5, default 30, values above 200 are capped with a
+  note) of at most 200 characters, code text keeping at least 120 after a long path: header,
+  items, notes, `next:`, footer; excerpts follow the items outside that bound. An item line is
+  `kind  path:line[-end]  name  detail  [confidence]  <source when several>`; `find` writes
+  each path once and continues with `match  :LINE  text`. Deterministic for identical tool
   output; timings and tool probes go to `meta`.
+* **Excerpts**: numbered source lines that save the read after a lookup, at most 80 per
+  answer, clipped at 300 columns in text. `sym` attaches a single definition (three lines
+  above it and its span, 15 lines when the tool reports no end; `next:` names the
+  `kb read` for the rest) or the head of each of two to four; `find` and `callers` attach
+  the lines around one to four matches or call sites. An import line (`import`, `package`,
+  `use`, `pub use`, `using`, `#include`, `from x import y`) is listed and not shown.
+  Several excerpts are headed by their path, once per file; a single one is headed unless
+  every shown item is in its file, so also when no item is shown. `next_line` is present
+  only when the 80 lines of the answer ended inside a located span. An excerpt with
+  control characters is left out, and all excerpts of one answer together hold at most
+  32 KiB.
+* **`read`**: `kb read <path> [FIRST [LAST]]` prints numbered lines of one file of the code
+  root's working tree, headed by its path: 40 lines from `FIRST` by default, at most 80; a
+  longer request names the line to resume at, and the last line of the file is marked.
+  Further ranges need `FIRST` and `LAST` of the first one:
+  `kb read <path> FIRST LAST [[<path>] FIRST LAST]...`, a group without a path being another
+  range of the file named last; at most 12 ranges (more are `INVALID_INPUT`), 80 lines per
+  range and 240 per call, the ranges beyond 240 lines named in a closing `-- not read` line.
+  The path is exact, or a unique path suffix or file stem among the files Git lists; no such
+  file and a range past the end are `NOT_FOUND`. `read` runs no tool and its result is not a
+  `kb.answer.v1` answer.
+* **Misses**: when no tool finds the name, `sym`, `callers` and `impact <symbol>` scan the
+  text of the checkout for whole-word uses of the name as written, up to 200 matching
+  lines per file (a `sym` narrowed by `--file` or `--kind` keeps the plain miss). The
+  answers of that scan drop the hand-over notes ``<tool> did not find `<name>` ``.
+  * A line that could declare the name without a keyword makes `sym` answer with it as a
+    `definition` of confidence `possible`, exit 0, without the note about similar symbols.
+    The shapes, chosen by file extension: C family and Java `Type name(` where every word
+    before the name is shaped like a type, modifier or annotation; Go `func (r T) name(`;
+    JavaScript and TypeScript `name(...) {` or `name(...): T {` with the parameter list
+    closed on the line and no arrow or `function`; Rust `static NAME`. Enum entries and
+    other shapes are not recognised.
+  * A name that is used but has no recognisable declaration is `NOT_FOUND` with at most
+    five `reference` items, one per file (a code line rather than an import line), and
+    `next: kb callers <name>` when more files use it. `callers` and `impact` give this
+    answer only when no tool of their route answers from text: `git-grep`, on which the
+    default routes end, answers exit 0 with a note. For `callers` it is
+    ``no line of this checkout reads as a declaration of `X`; these lines are textual
+    uses of `Y` in it``, for `impact`
+    ``no line of this checkout reads as a declaration of `X`; the affected files hold
+    textual uses of `x` ``. `x` is the last segment of the name; `X` is the type before
+    the dot of `Type.member`, else that segment; `Y` is the dotted symbol when a type
+    stands before the dot, else that segment.
+  * A name that occurs nowhere is `NOT_FOUND` (`does not occur`) with the number of files
+    covered. It was looked for as a whole word, as written; `find` matches parts of words
+    and ignores case for lower-case text.
+  * A `Type.member` that no line writes while `member` occurs is `NOT_FOUND` with the
+    message ``no line writes `Type.member` ``, the note ``no line of this checkout writes
+    `Type.member`; `member` occurs in it`` and the follow-ups `kb sym member` and
+    `kb callers member`. This miss is not final; when `member` does not occur either, the
+    answer is `does not occur`. `git-grep` looks a dotted name up by its last segment, so
+    where it answers, the answer is that of `member`: always for `impact`, for `sym` and
+    `callers` unless the type before the dot has no declaration in the checkout.
+
+  `find` tries other readings of a missed text or glob first and says so in a note
+  ([agent-cli.md](agent-cli.md)).
+* **Coverage**: `find` through `ripgrep` searches hidden files too (never `.git`), honours
+  ignore rules and enters submodule work trees. `git-grep`, the text scan behind a miss and
+  the name matching of `read` cover the tracked and untracked files that Git does not
+  ignore: hidden files included, submodules not. When `.gitmodules` lists a submodule other
+  than the mounted knowledge base, the scan's `does not occur` and used-without-declaration
+  answers carry `submodules of this checkout were not scanned` as their second note.
+  `read` opens any existing file given by its exact path, ignored or not.
 * **`doc`**: for a path (or the definition paths of a symbol, at most 3) runs the context
-  selection of `--intent implement` (budget large, at most 20 supplementary units) and
-  renders: registry features in scope, the feature record's purpose, invariant statements,
-  contracts, the feature record's `source` anchors as entry points, boundaries as limits,
-  gaps and decisions; policies that also apply and incomplete knowledge become notes. The
-  knowledge source names the revision, freshness and completeness. `doc` exits 0 unless the
-  subject cannot be resolved; it is orientation, `context` remains the obligation contract.
+  selection of `--intent implement` (budget large, at most 20 supplementary units). By
+  default it prints the source location, or a `kb read` command for an existing
+  documentation file, the ids and titles of the records that apply to or cite the path,
+  their document anchors and the ids of repository-wide records as `guidance`; statements
+  are read with `kb show <id>` or `kb context`. `--format human` and `--json` keep the
+  feature detail: registry features in scope, the feature record's purpose, invariant
+  statements, contracts, the feature record's `source` anchors as entry points, boundaries
+  as limits, gaps and decisions, with policies that also apply as a note. Incomplete
+  knowledge becomes a note; the knowledge source names the revision, freshness and
+  completeness. `doc` exits 0 unless the subject cannot be resolved; it is orientation,
+  `context` remains the obligation contract.
 * **`impact <symbol>`**: the routed dependents (the target itself excluded), then the
   features and records governing the affected files (one line each); a knowledge failure
   becomes a note. Diff mode (`--base`/`--head`/`--working-tree`) is unchanged (§11).

@@ -11,8 +11,10 @@ knowledge base and reach you through kb, not through this skill. Command details
 
 1. **Locate the code.** `{{kb_path}}/kbw sym <name>` for a named symbol, `{{kb_path}}/kbw find "<text>"` for text
    from the task, an error message or a log line.
-2. **Read the feature documentation.** `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` returns the feature's
-   purpose, entry points, invariants, contracts, known limits and gaps. Invariants and
+2. **Read the feature documentation.** `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` lists the ids and
+   titles of the records that apply to or cite the path; read their statements with
+   `{{kb_path}}/kbw show <id>{{snapshot_arg}}`. With `--format human`, `doc` prints the feature's purpose, entry
+   points, invariant statements, contracts, known limits and gaps. Invariants and
    contracts are binding. A gap is an open question: report it, do not guess an answer.
 3. **Analyse dependencies.** `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and `{{kb_path}}/kbw callers <symbol>` show the
    code that depends on what you change, the likely regression points and the features

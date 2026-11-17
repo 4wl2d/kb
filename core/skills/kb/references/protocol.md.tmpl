@@ -7,7 +7,8 @@
 - `--format human`: verbose text for people;
 - `--json` (same as `--format json`): the versioned machine protocol `kb.cli.v1`.
 
-In JSON mode stdout carries only the protocol document; progress and diagnostics go to
+In JSON mode stdout carries only the protocol document (one line when `result` is a
+`kb.answer.v1` answer, pretty-printed otherwise); progress and diagnostics go to
 stderr. Exit code 0 means success; any other code comes with `error.code` (see
 `recovery.md`). Groups: 1 internal, 2 usage, 10-19 project/config, 20-29 freshness and
 snapshots, 30-39 context, 40-49 checks, 50-59 runtime/update, 60-69 environment.
@@ -15,13 +16,15 @@ snapshots, 30-39 context, 40-49 checks, 50-59 runtime/update, 60-69 environment.
 ## Agent answers
 
 `sym`, `callers`, `impact <symbol>`, `doc`, `find`, `check` and `tools` print one bounded
-answer in every text format (at most `--lines` lines, default 30, at most 200 characters
-each) and, in JSON, `result` = `kb.answer.v1`:
+answer in every text format (at most `--lines` lines: default 30, minimum 5, capped at 200
+with a note; at most 200 characters each, more only to keep 120 characters of code text
+after a long path) and, in JSON, `result` = `kb.answer.v1`:
 
 ```json
 {"answer": "kb.answer.v1", "command": "callers", "subject": "refresh",
  "sources": [{"id": "codegraph", "adapter": "codegraph", "version": "codegraph 1.6.2", "state": "index synced, complete"}],
  "items": [{"kind": "caller", "name": "signIn", "path": "app/auth/Login.kt", "line": 3, "detail": "method calls", "source": "codegraph"}],
+ "excerpts": [{"path": "app/auth/Login.kt", "first_line": 1, "lines": ["class Login(private val refresher: TokenRefresher) {", "    fun signIn() {", "        refresher.refresh()", "    }", "}"]}],
  "shown": 1, "total": 1, "truncated": false, "notes": [], "next": ["kb impact refresh"]}
 ```
 
@@ -29,9 +32,15 @@ each) and, in JSON, `result` = `kb.answer.v1`:
 query), `index as is, N file change(s) not indexed`, `commit <sha12>` (commit-bound; no
 uncommitted edits), `working tree, lexical` (text match), or the knowledge revision with
 freshness and completeness. `confidence` is `resolved`, `possible` or `lexical`. `truncated`
-means more items exist than fit: narrow the request or raise `--lines`. Exit 16 `NOT_FOUND`
-still prints the answer; 46 `CHECKS_FAILED` lists the failed checks with their last output
-lines; 65 `TOOL_UNAVAILABLE` lists the attempts in `details`.
+means more items exist than fit: narrow the request or raise `--lines`. `excerpts[]`
+(`path`, `first_line`, `lines[]`, `next_line` only when the 80 lines of the answer ended
+inside a located span) holds up to 80 source lines and 32 KiB of what `sym`, `find` or
+`callers` located, outside the `--lines` bound; a text match's `detail` holds at most 500
+characters. Exit 16 `NOT_FOUND` still prints the answer and says what was covered (`sym`,
+and `callers` and `impact` without a text tool in their route: up to five `reference`
+items, one per file, for a name that is used while no line reads as its declaration;
+`find` and `read`: the number of files checked); 46 `CHECKS_FAILED` lists the failed
+checks with their last output lines; 65 `TOOL_UNAVAILABLE` lists the attempts in `details`.
 
 ## Envelope
 
@@ -110,8 +119,14 @@ is exact. Mandatory units are never truncated: if they do not fit, the call fail
 ## Other commands you may use
 
 - `show <id>` (`--sections` for all deferred bodies, `--section <section>`, `--raw` for file bytes);
-- `outline --intent ...`: inventory only, at most 2000 estimated tokens; not a delivery receipt;
-- `search <words>`: finds records, but is not a substitute for `context`;
+- `outline --intent ... --path <file>...`: inventory only, at most 2000 estimated tokens; not a
+  delivery receipt; `--format terse` lists the ids once per reason and kind;
+- `read <path> [<first> [<last>]]`: 40 numbered source lines from `<first>`, at most 80;
+  `next_line` and `total_lines` say where to resume and where the file ends. `read <path>
+  <first> <last> [[<path>] <first> <last>]...` reads up to 12 ranges and 240 lines per
+  call (`ranges[]`; `unread[]` names the ranges past 240 lines);
+- `search <words>`: finds records and the code files named like the words, but is not a
+  substitute for `context`;
 - `impact <symbol>`, `sym`, `callers`, `doc`, `find`, `check`, `tools`: the agent commands above;
 - `impact --base <rev> [--working-tree]`: knowledge affected by a diff, and unknown coverage;
 - `impact --deep --depth 2 --provider ...`: static consumers at base/head, with uncertainty;

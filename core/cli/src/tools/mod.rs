@@ -268,6 +268,8 @@ pub struct Outcome {
     pub found: bool,
     pub items: Vec<Item>,
     pub notes: Vec<String>,
+    /// First call edge with a working-tree source location, if supplied by the adapter.
+    pub call_site: Option<(String, u32)>,
     /// Files of the affected code (`impact`), for relating them to knowledge.
     pub files: Vec<String>,
 }
@@ -279,6 +281,7 @@ impl Outcome {
             found: false,
             items: Vec::new(),
             notes: Vec::new(),
+            call_site: None,
             files: Vec::new(),
         }
     }

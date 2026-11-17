@@ -565,7 +565,11 @@ the selected renderer, so its receipt and measured cost differ from other format
 mandatory flags, reasons and estimated sizes. It has a hard ceiling of 2000 estimated
 tokens in addition to the requested budget. Optional inventory may be omitted and counted;
 mandatory ids cause an explicit budget failure if they cannot fit. It never supplies a
-delivery receipt and cannot replace `context` before editing.
+delivery receipt and cannot replace `context` before editing. With `--format terse` the
+mandatory inventory is written as one `reason | kind | ids` line per reason and kind, with
+the unit count and their summed estimate, and optional units as `id | kind | tokens-est |
+reason`; every id of the table form is present. `--path` may be repeated: one outline for
+all files of a task lists each record once.
 
 `context --with-code` requires a provider or pinned response file. Validated symbols,
 reference/consumer facts and precedent candidates are optional code units after KB
@@ -743,13 +747,18 @@ line (revision, selection, freshness, approval, approved tip and pin):
 
 ```text
 snapshot: 8541b350d6b6 (latest, freshness=verified); approved=yes; latest=8541b350d6b6
-# kb search "обновление токена": 4 of 4 hit(s)
-note: search is not a context assembly: mandatory obligations, required dependencies and completeness are not checked; use `kb context` before planning or changing code
-300 example.mobile.single-refresh (invariant, accepted): At most one token refresh in flight per session
-  matched: concept auth-token, full-text rank 1
-295 example.mobile.token-storage (policy, accepted): Refresh tokens live only in the platform keystore
-  matched: concept auth-token, full-text rank 2
+# kb search "token storage": 2 of 9 hit(s)
+note: search is not a context assembly; use `kb context` for obligations
+open: kb show <record-id>
+example.mobile.token-storage [policy, accepted] Refresh tokens live only in the platform keystore
+example.decision.token-in-preferences [decision, superseded] Store refresh tokens in shared preferences (superseded)
 ```
+
+(`kb search "token storage" --limit 2` on the synthetic example.) The default and the
+`terse` text list `id [kind, status] title` per record and, in a host checkout, the code
+files named like the query ([agent-cli.md](agent-cli.md#one-call-instead-of-two)).
+`--format human` writes the full note and each record as `score id (kind, status): title`
+with a `matched:` and a `source:` line; `--json` carries `score`, `matched` and `path`.
 
 Use search to find an id; use context before planning or changing code.
 
@@ -758,7 +767,9 @@ Use search to find an id; use context before planning or changing code.
 `kb show <id>` prints one full record of any status from the selected snapshot, verbatim and
 untruncated. `kb show <id>#<section>` (or `--section <section>`) prints one body section;
 `--raw` prints the authoritative file bytes exactly; `--include-proposals` also lists local
-proposals that change the record. Superseded and deprecated records are shown with their
+proposals that change the record. In a host repository the anchors of that repository are
+related to the checked-out code: the line that declares an anchored symbol follows the
+path, and an anchored file that is absent is marked `(not in this checkout)`. Superseded and deprecated records are shown with their
 status and successors:
 
 ```text
