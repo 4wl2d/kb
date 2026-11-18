@@ -577,4 +577,5 @@ The change procedure:
 6. verify: `kb check --base <target>`;
 7. update the documentation in the same change when behaviour changed (`kb-document`), and
    address `kb impact --base <target> --working-tree`;
-8. report the receipt, the checks and unresolved gaps.
+8. summarize the outcome, relevant verification and unresolved gaps. Usage reports and
+   token-savings comparisons are optional diagnostics to run on request.
