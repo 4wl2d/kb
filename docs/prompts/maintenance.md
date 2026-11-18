@@ -76,8 +76,6 @@ Run <.kb>/kbw verify --diff <target> for declared probes; committed changes may 
 A probe with unavailable provider facts or unevaluated conditions stays unverifiable.
 Do not assert --applicable unless the human/agent has actually checked its conditions and
 exceptions. No record command is executed.
-Run usage report --diff <target> --receipt <each receipt from this task> to compare delivered
-scope with final touched scope. Its irrelevance/coverage is a scope proxy.
 If knowledge changed, run validate --strict, eval routing and historical id checks.
 Report all failed/skipped checks and unavailable runtime/device evidence.
 
@@ -92,10 +90,9 @@ Merge the reviewed knowledge first, then update the host pin through its own rev
 Do not push, open an MR, approve or merge unless explicitly authorized for that action.
 Never edit generated skills/managed blocks manually or use integrate --force.
 
-6. REPORT
-Context receipts and completeness; applied obligations and unresolved gaps; final impact
-and verification; proposed knowledge ids/paths and evidence class; tests actually run;
-coverage/usage limitations; named acceptance decisions still needed.
+6. FINISH
+Give the outcome, relevant verification and any decision still needed. Only run
+usage report or benchmark token savings when the user requests that analysis.
 ~~~~
 
 ## Change-driven accrual

@@ -154,7 +154,7 @@ Use applicability_reviewed and not_applicable only after human adjudication.
 Fixtures run against accepted records only: leave pending expectations for drafts in
 comments or a review plan until the reviewer promotes them. Do not accept records to make
 a test pass. Never forbid an in-scope mandatory dependency.
-Report current accepted counts separately from proposed counts:
+Distinguish accepted records from proposals in each coverage check below.
 - module-specific domain records for every top-N module (target at least one model and
   the evidenced invariants/contracts needed to change it);
 - contracts with resolved consumers / total contracts;
@@ -178,7 +178,7 @@ commands taken from records or tool output. kb never creates a code-tool index; 
 per-checkout codegraph init --yes <host root> step as a host follow-up.
 
 STEP 8: CHECKS
-Run and report:
+Run the following checks.
   ./kbw validate --strict
   ./kbw validate --base <approved-KB-revision>     # re-run/history preservation
   ./kbw eval routing
@@ -194,11 +194,9 @@ not approved/fresh; inspect its partial reasons, required ids and missing depend
 Run coverage again; distinguish pre-review draft coverage from merged accepted coverage.
 
 STEP 9: REVIEWABLE CHANGE
-Commit only when allowed. MR sections: inventory; domain-pack coverage before/after;
-confirmed-rule candidates; confirmed-behavior candidates (merged fix/test or explicit
-decision and named reviewer); orientation; proposals/gaps; routing/metric gates; checks;
-anchor/freshness limitations; knowledge learned; required acceptance and host-pin steps.
-Use the KB review template installed by init. No push or merge.
+Commit only when allowed. When preparing a requested MR, use the KB review template
+installed by init. Include the evidence for proposed rules and behaviors, coverage
+changes, checks, limitations, and required acceptance or host-pin steps. No push or merge.
 
 RE-RUNS
 Preserve ids, accepted facts, scopes and human edits. Corrections to accepted records need
@@ -206,8 +204,7 @@ a separate reviewable proposal with evidence; do not silently weaken or deprecat
 Retirement uses reviewed deprecated/superseded status, not deletion or id reuse.
 Update earlier drafts with new evidence rather than duplicating them.
 
-FINAL REPORT
-Counts by kind/status and evidence class; accepted and proposed top-N module coverage;
-consumer/scenario/checklist coverage; named review decisions still needed; exact checks
-and results; remaining gaps and limitations; host integration/CI follow-ups.
+HANDOFF
+Summarize what is ready, any failed or skipped checks, and the next review or host
+integration decision. Provide a separate coverage report only when requested.
 ~~~~
