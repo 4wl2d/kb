@@ -13,7 +13,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
                   reads numbered source lines (read),\n\
                   returns feature documentation (doc) and task-scoped obligations (context)\n\
                   from a typed knowledge base, all in bounded answers that name their source.\n\
-                  Run through the project launcher `kbw`; see README.md.",
+                  Each KB checkout is read by the engine it pins (see `kb engine info`).",
     disable_help_subcommand = true
 )]
 pub struct Cli {
@@ -25,7 +25,8 @@ pub struct Cli {
 
 #[derive(Debug, Clone, Args)]
 pub struct GlobalOpts {
-    /// KB root (defaults to $KB_ROOT set by kbw, else the nearest ancestor with core/release.toml)
+    /// KB root (default: $KB_ROOT, else the nearest directory upwards that has core/release.toml
+    /// or mounts a KB checkout at .kb)
     #[arg(long, global = true, value_name = "DIR")]
     pub root: Option<PathBuf>,
     /// Profile config file override (KB-root-relative)
@@ -191,6 +192,11 @@ pub enum Command {
     Schema(SchemaArgs),
     /// Print engine and contract versions
     Version,
+    /// Engine runtimes of KB checkouts: info, fingerprint, bootstrap, install, package
+    Engine(EngineArgs),
+    /// Manage the installed kb command (update)
+    #[command(name = "self")]
+    SelfCmd(SelfArgs),
 }
 
 #[derive(Debug, Clone, Args)]
@@ -850,6 +856,76 @@ pub struct SchemaArgs {
     /// Write generated schemas to core/schemas
     #[arg(long)]
     pub write: bool,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EngineArgs {
+    #[command(subcommand)]
+    pub command: EngineCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum EngineCommand {
+    /// Which engine serves the KB checkout here, and where its runtime is
+    Info,
+    /// Print the engine fingerprint of the KB checkout
+    Fingerprint,
+    /// Make sure a runtime serves the checkout, building its engine from source (pinned
+    /// toolchain) when none does; prints the runtime directory
+    Bootstrap,
+    /// Verify a release archive of the checkout's engine and install it as its runtime
+    /// (default: the release of the checkout's engine_version)
+    Install(EngineInstallArgs),
+    /// Build the checkout's engine and write kb-<version>-<target>.tar.gz and its .sha256
+    Package(EnginePackageArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EngineInstallArgs {
+    /// Archive path or https URL (default: download the release archive)
+    #[arg(value_name = "ARCHIVE")]
+    pub archive: Option<String>,
+    /// Expected SHA-256 of the archive
+    #[arg(long, value_name = "HEX", conflicts_with = "sha256_file")]
+    pub sha256: Option<String>,
+    /// Checksum file (sha256sum format) with an entry for the archive
+    #[arg(long, value_name = "FILE")]
+    pub sha256_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct EnginePackageArgs {
+    /// Directory for the archive and its .sha256 file
+    #[arg(value_name = "OUT_DIR")]
+    pub out_dir: PathBuf,
+    /// Rust target to build for (default: rustc's host)
+    #[arg(long, value_name = "TRIPLE")]
+    pub target: Option<String>,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SelfArgs {
+    #[command(subcommand)]
+    pub command: SelfCommand,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum SelfCommand {
+    /// Replace this kb with a release (default: the latest), verified before the swap
+    Update(SelfUpdateArgs),
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SelfUpdateArgs {
+    /// Release to install, e.g. 0.2.0 (default: the latest release)
+    #[arg(long, value_name = "VERSION")]
+    pub version: Option<String>,
+    /// Only report whether another release is available
+    #[arg(long)]
+    pub check: bool,
+    /// Reinstall even when that version is already installed
+    #[arg(long)]
+    pub force: bool,
 }
 
 /// Options shared by the bounded agent commands.

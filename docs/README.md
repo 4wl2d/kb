@@ -27,14 +27,14 @@ bug.
 
 | document | content |
 |---|---|
-| [architecture.md](architecture.md) | normative engineering contract: layout, record format, registries, context assembly, freshness and snapshots, index, CLI, launcher, integrations |
+| [architecture.md](architecture.md) | normative engineering contract: layout, record format, registries, context assembly, freshness and snapshots, index, CLI, engine selection and runtimes, integrations |
 | [adr/](adr/) | architecture decision records (below) |
 | [agent-cli.md](agent-cli.md) | the agent commands (`sym`, `callers`, `impact`, `doc`, `find`, `check`, `tools`), bounded answers, the tool registry `tools.toml`, routing and fallbacks, checks, the skill set |
 | [format.md](format.md) | record schemas 1/2, the eight kinds, domain fields, scope, selectors, links, policies and overrides, registries, diagnostic catalogue |
 | [context.md](context.md) | context assembly: scope resolution, mandatory selection, `requires` closure, ranking, ambiguity, proposals, budgets, completeness, receipts, explain, output formats, `search` and `show` |
 | [snapshots-and-trust.md](snapshots-and-trust.md) | per-call freshness, `--snapshot` selection, host detection, engine compatibility, mirror and cache layout, proposal overlay, index behavior, offline work, trust model |
 | [downstream.md](downstream.md) | downstream setup, submodule binding, host integration, CI/MR templates, linked merge requests, sync versus upgrade, coordinated upgrades, recovery, administrator settings |
-| [protocol.md](protocol.md) | machine protocol `kb.cli.v1`: output channels, envelope, per-command results, error and exit codes, `meta` diagnostics, launcher codes, versioning |
+| [protocol.md](protocol.md) | machine protocol `kb.cli.v1`: output channels, envelope, per-command results, error and exit codes, `meta` diagnostics, engine selection and environment, versioning |
 | [troubleshooting.md](troubleshooting.md) | symptom → cause → fix for every error users hit, offline recovery, cache contents, bug reports |
 | [maintainer-guide.md](maintainer-guide.md) | development setup, test suites, required checks, ownership, versions, migrations, schema regeneration, maintainer knowledge, benchmarks, releases, CI |
 | [prompts/adaptation.md](prompts/adaptation.md) | ready-to-paste AI adaptation prompt for a downstream fork |
@@ -56,7 +56,7 @@ bug.
 | [0003](adr/0003-applicability-vs-relevance.md) | separate mandatory applicability (scope) from relevance (selectors) |
 | [0004](adr/0004-freshness-and-snapshots.md) | per-call freshness, explicit selection, isolated mirror |
 | [0005](adr/0005-index.md) | content-addressed SQLite FTS5 index as a rebuildable cache |
-| [0006](adr/0006-launcher-and-runtime.md) | POSIX launcher with fingerprinted runtimes |
+| [0006](adr/0006-launcher-and-runtime.md) | POSIX launcher with fingerprinted runtimes (superseded by 0017) |
 | [0007](adr/0007-budgets-and-receipts.md) | whole-unit packing with byte and estimated-token budgets |
 | [0008](adr/0008-integrations.md) | generated skills and managed instruction blocks |
 | [0009](adr/0009-synthetic-legacy-schema.md) | synthetic legacy schema 0 exercises the migration machinery |
@@ -67,6 +67,7 @@ bug.
 | [0014](adr/0014-knowledge-production.md) | deterministic work orders, draft production and evidence ladder (proposed) |
 | [0015](adr/0015-declarative-verification.md) | bounded probes, source evidence and freshness limits (proposed) |
 | [0016](adr/0016-agent-cli.md) | kb as the single CLI between a coding agent, the code, the docs and the code tools: agent commands, tool registry and adapters, checks, skill set |
+| [0017](adr/0017-kb-command.md) | one installed `kb` command selects each checkout's engine by fingerprint; runtimes in a per-user store; installers and `kb self update`; `kbw` deprecated |
 
 ## Next to the code
 

@@ -25,6 +25,7 @@ use crate::knowledge::{MetaEntry, Origin};
 use crate::model::{AnchorKind, Kind, Registry, Status};
 use crate::output::Format;
 use crate::scope::implied_repos;
+use crate::util::PathExt;
 use crate::util::check_rel_path;
 
 /// Marker of the acknowledgement block in an MR description: `<!-- kb-impact:v1 ... -->`.
@@ -447,8 +448,8 @@ fn pointer_change(top: &Path, entry: &RawEntry) -> Result<KbPointerChange> {
 /// work tree (Git would otherwise silently answer for the superproject).
 fn submodule_head(top: &Path, rel: &str) -> Result<String> {
     let dir = crate::util::safe_join(top, rel)?;
-    let own_top = crate::git::toplevel(&dir).and_then(|p| p.canonicalize().ok());
-    if own_top.is_none() || own_top != dir.canonicalize().ok() {
+    let own_top = crate::git::toplevel(&dir).and_then(|p| p.canonical().ok());
+    if own_top.is_none() || own_top != dir.canonical().ok() {
         return Err(KbError::new(
             ErrorCode::GitError,
             format!("the KB submodule at `{rel}` is not checked out"),

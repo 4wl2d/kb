@@ -19,6 +19,7 @@ use crate::impact::ChangeStatus;
 use crate::output::CommandOutput;
 use crate::source::WorkingTreeSource;
 use crate::tools::{self, command};
+use crate::util::PathExt;
 
 const TAIL: usize = 6;
 
@@ -28,7 +29,7 @@ pub fn run(ctx: &Ctx, args: &CheckArgs) -> Result<CommandOutput> {
     let cwd = ctx
         .env
         .cwd
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| ctx.env.cwd.clone());
     let (files, subject) = if args.files.is_empty() {
         let base = args.base.as_deref().unwrap_or("HEAD");

@@ -33,9 +33,9 @@ pathspec commits), the message as Git will commit it (scissors cut, comments str
 Git would) and, during a rebase, the rebased branch. Host MR jobs read the pinned KB
 revision and check the committed change. Both return native exit codes.
 
-When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host binding (`.kb.toml`)
 declares `selection`, the hook passes `auto` and the engine applies that selection.
-Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kb.toml`
 `pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
 adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
 exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the

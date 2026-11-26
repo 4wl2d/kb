@@ -30,6 +30,7 @@ use crate::error::{ErrorCode, KbError, Result};
 use crate::git::Git;
 use crate::model::{Harness, Profile, ProfileLocation};
 use crate::source::{SourceTree, WorkingTreeSource};
+use crate::util::PathExt;
 use crate::util::{atomic_write, read_file_limited, safe_join, sha256_hex};
 use crate::versions::SKILL_PROTOCOL;
 
@@ -76,7 +77,7 @@ impl IntegrationLock {
         let body = toml::to_string(self)
             .map_err(|e| KbError::internal(format!("cannot serialize the lock: {e}")))?;
         Ok(format!(
-            "# Managed by `kbw integrate`; do not edit. Commit it so conflict detection works for everyone.\n{body}"
+            "# Managed by `kb integrate`; do not edit. Commit it so conflict detection works for everyone.\n{body}"
         ))
     }
 
@@ -105,7 +106,7 @@ pub fn resolve_host_root(kb_root: &Path, cwd: &Path, host: Option<&Path>) -> Res
             cwd.join(h)
         };
         let c = abs
-            .canonicalize()
+            .canonical()
             .map_err(|e| KbError::invalid_input(format!("--host `{}`: {e}", abs.display())))?;
         if !c.is_dir() {
             return Err(KbError::invalid_input(format!(
@@ -116,10 +117,10 @@ pub fn resolve_host_root(kb_root: &Path, cwd: &Path, host: Option<&Path>) -> Res
         return Ok(c);
     }
     let kb = kb_root
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| kb_root.to_path_buf());
     if let Some(top) = crate::git::toplevel(cwd) {
-        let top = top.canonicalize().unwrap_or(top);
+        let top = top.canonical().unwrap_or(top);
         if top != kb {
             return Ok(top);
         }
@@ -128,7 +129,7 @@ pub fn resolve_host_root(kb_root: &Path, cwd: &Path, host: Option<&Path>) -> Res
     let sup = o.stdout_str().trim().to_string();
     if o.ok() && !sup.is_empty() {
         let p = PathBuf::from(&sup);
-        return Ok(p.canonicalize().unwrap_or(p));
+        return Ok(p.canonical().unwrap_or(p));
     }
     Err(KbError::invalid_input(
         "cannot determine the host repository (the current directory is not in a Git work tree other than the KB, and the KB is not a submodule)",
@@ -380,7 +381,7 @@ pub fn plan_install(
                 ErrorCode::DriftDetected,
                 format!("the bundle has no `{}` for its harnesses", b.bundle_file),
             )
-            .with_hint("regenerate the bundle with `./kbw integrate --generate --apply`")
+            .with_hint("regenerate the bundle with `kb integrate --generate --apply`")
         })?;
         block_targets.insert(b.host_file.to_string(), Some(normalize_content(content)));
     }
@@ -499,7 +500,7 @@ fn install_warnings(
         Ok(_) => w.push(
             Diagnostic::warning(
                 "BUNDLE_STALE",
-                "the committed bundle differs from what `kbw integrate --generate` renders now; installing the committed (reviewed) bundle",
+                "the committed bundle differs from what `kb integrate --generate` renders now; installing the committed (reviewed) bundle",
             )
             .at_path(generated_dir(loc)),
         ),
@@ -511,13 +512,13 @@ fn install_warnings(
             .at_path(generated_dir(loc)),
         ),
     }
-    let kb = kb_root.canonicalize().ok();
-    let mounted = host_root.join(&bundle.manifest.kb_path).canonicalize().ok();
+    let kb = kb_root.canonical().ok();
+    let mounted = host_root.join(&bundle.manifest.kb_path).canonical().ok();
     if kb.is_none() || kb != mounted {
         w.push(Diagnostic::warning(
             "KB_PATH_MISMATCH",
             format!(
-                "the skill tells agents to run `{}/kbw`, but that path in the host is not this KB checkout",
+                "the skill expects this KB checkout at `{}` in the host, but that path is not this KB checkout",
                 bundle.manifest.kb_path
             ),
         ));
@@ -599,7 +600,7 @@ pub fn skill_status(kb_root: &Path, host_root: &Path) -> Result<SkillStatus> {
     let lock = match read_host_file(host_root, LOCK_PATH)? {
         None => {
             status.message =
-                "no kb integration is installed in the host; run `kbw integrate --apply` there"
+                "no kb integration is installed in the host; run `kb integrate --apply` there"
                     .into();
             return Ok(status);
         }
@@ -621,13 +622,13 @@ pub fn skill_status(kb_root: &Path, host_root: &Path) -> Result<SkillStatus> {
     } else {
         status.state = SkillState::Outdated;
         status.message = format!(
-            "installed skill protocol {} differs from the engine's {SKILL_PROTOCOL}: regenerate the bundle, run `kbw integrate --apply` in the host, then re-read the skill or start a new agent session",
+            "installed skill protocol {} differs from the engine's {SKILL_PROTOCOL}: regenerate the bundle, run `kb integrate --apply` in the host, then re-read the skill or start a new agent session",
             lock.skill_protocol
         );
     }
     if bundle_skill_protocol.is_some_and(|p| p != SKILL_PROTOCOL) {
         status.message.push_str(
-            "; the committed bundle is also outdated (`kbw integrate --generate --apply`)",
+            "; the committed bundle is also outdated (`kb integrate --generate --apply`)",
         );
     }
     Ok(status)

@@ -1,6 +1,9 @@
 //! `kb migrate` and `kb update`: real transformations of the synthetic legacy fixtures and
 //! update scenarios against synthetic upstream/downstream repositories (local paths only,
 //! isolated Git configuration, no network).
+// Helpers of the Unix-only tests (shell hooks, process groups) are unused elsewhere.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 mod common;
 
 use std::collections::BTreeMap;
@@ -332,13 +335,9 @@ const ENGINE_FILES: [&str; 6] = [
     "core/migrations/README.md",
 ];
 
-/// Stand-in launcher of the synthetic upstream: records how it was invoked and fails,
-/// like an engine whose bootstrap is broken.
-const FAILING_KBW: &str = "#!/bin/sh\n\
-{ echo \"args=$*\"; echo \"KB_ROOT=$KB_ROOT\"; echo \"KB_CACHE_DIR=$KB_CACHE_DIR\"; \
-echo \"KBW_CARGO_TARGET_DIR=$KBW_CARGO_TARGET_DIR\"; } > \"$KBW_STUB_LOG\"\n\
-echo 'synthetic engine bootstrap failure' >&2\n\
-exit 7\n";
+/// The synthetic upstream's `kbw`: an engine-owned path like any other (in the real engine
+/// the deprecated forwarder to `kb`).
+const SYNTHETIC_KBW: &str = "#!/bin/sh\nexec kb \"$@\"\n";
 
 struct Repos {
     sb: Sandbox,
@@ -361,7 +360,7 @@ fn repos(conflict: bool) -> Repos {
         fs::create_dir_all(dst.parent().unwrap()).unwrap();
         fs::copy(common::repo_root().join(f), dst).unwrap();
     }
-    write(&up.join("kbw"), FAILING_KBW);
+    write(&up.join("kbw"), SYNTHETIC_KBW);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -750,7 +749,7 @@ fn update_prepare_custom_branch_can_always_be_abandoned() {
         .as_array()
         .unwrap()
         .iter()
-        .find_map(|s| s.as_str().unwrap().split_once("kbw update abandon "))
+        .find_map(|s| s.as_str().unwrap().split_once("kb update abandon "))
         .map(|(_, rest)| rest.split(" (").next().unwrap().trim().to_string())
         .expect("next_steps name the abandon command");
     assert_eq!(printed, "kb-update/review-0.2 --apply");
@@ -774,10 +773,57 @@ fn update_prepare_custom_branch_can_always_be_abandoned() {
 #[cfg(unix)]
 #[test]
 fn update_prepare_engine_failure_keeps_worktree_and_main_checkout() {
+    use std::os::unix::fs::PermissionsExt;
     let r = repos(false);
+    // v0.2.1 carries complete engine sources, so the worktree's engine can only be served by
+    // a runtime built for it: the explicit bootstrap step reaches cargo.
+    for f in ["Cargo.lock", "core/cli/Cargo.toml"] {
+        let dst = r.upstream.join(f);
+        fs::create_dir_all(dst.parent().unwrap()).unwrap();
+        fs::copy(common::repo_root().join(f), dst).unwrap();
+    }
+    write(
+        &r.upstream.join("core/cli/src/main.rs"),
+        "// Synthetic engine source.\nfn main() {}\n",
+    );
+    r.sb.commit_all(&r.upstream, "engine 0.2.1 sources (synthetic upstream)");
+    r.sb.git(
+        &r.upstream,
+        &["tag", "-a", "v0.2.1", "-m", "synthetic 0.2.1"],
+    );
+    // Toolchain stand-ins: rustc reports the pinned version, cargo records how it was
+    // started and fails like a broken engine build.
+    let pinned = kb::versions::ReleaseManifest::parse(
+        &fs::read_to_string(common::repo_root().join("core/release.toml")).unwrap(),
+    )
+    .unwrap()
+    .rust_toolchain;
+    let bin = r.sb.path().join("toolchain");
+    let log = r.sb.path().join("cargo.log");
+    write(
+        &bin.join("rustc"),
+        &format!(
+            "#!/bin/sh\nprintf 'rustc {pinned} (synthetic)\\nrelease: {pinned}\\nhost: x-synthetic\\n'\n"
+        ),
+    );
+    write(
+        &bin.join("cargo"),
+        &format!(
+            "#!/bin/sh\n{{ echo \"args=$*\"; echo \"pwd=$(pwd)\"; echo \"KB_ROOT=$KB_ROOT\"; \
+             echo \"KB_CACHE_DIR=$KB_CACHE_DIR\"; echo \"CARGO_TARGET_DIR=$CARGO_TARGET_DIR\"; }} > '{}'\n\
+             echo 'synthetic engine build failure' >&2\nexit 7\n",
+            log.display()
+        ),
+    );
+    for tool in ["rustc", "cargo"] {
+        fs::set_permissions(bin.join(tool), fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap())),
+    )
+    .unwrap();
     let up = r.upstream.to_str().unwrap();
     let before = main_state(&r);
-    let log = r.sb.path().join("kbw-stub.log");
     let (out, v) = r.kb(
         &[
             "update",
@@ -785,49 +831,62 @@ fn update_prepare_engine_failure_keeps_worktree_and_main_checkout() {
             "--upstream",
             up,
             "--ref",
-            "v0.2.0",
+            "v0.2.1",
             "--branch",
             "kb-update/try-1",
         ],
-        &[("KBW_STUB_LOG", log.to_str().unwrap())],
+        &[("PATH", path.to_str().unwrap())],
     );
     assert_exit(&out, 53);
     assert_eq!(v["error"]["code"], "UPDATE_FAILED");
     let details = &v["error"]["details"];
-    // The explicit bootstrap of the target engine is the first engine step.
-    assert_eq!(details["step"], "bootstrap");
-    assert_eq!(details["exit_code"], 7);
+    // The explicit bootstrap of the target engine is the first engine step; it failed as
+    // BOOTSTRAP_FAILED because cargo did.
+    assert_eq!(details["step"], "bootstrap", "{v:#}");
+    assert_eq!(details["exit_code"], 55, "{v:#}");
     assert!(
         v["error"]["hint"]
             .as_str()
             .unwrap()
-            .contains("kbw update abandon kb-update/try-1 --apply"),
+            .contains("kb update abandon kb-update/try-1 --apply"),
         "{v:#}"
     );
+    let output = details["output"].as_str().unwrap();
     assert!(
-        details["output"]
-            .as_str()
-            .unwrap()
-            .contains("synthetic engine bootstrap failure")
+        output.contains("synthetic engine build failure"),
+        "{output}"
     );
+    assert!(output.contains("BOOTSTRAP_FAILED"), "{output}");
     let wt = r.downstream.join(".cache/update/kb-update-try-1");
     assert_eq!(details["worktree"], wt.to_str().unwrap());
-    // The production runner ran `<worktree>/kbw --kbw-bootstrap` with an isolated cache.
+    // The production runner bootstrapped the worktree's engine (`kb engine bootstrap` with
+    // the worktree as root and its own cache) into the shared Cargo target directory.
     let invocation = fs::read_to_string(&log).unwrap();
-    assert!(invocation.contains("args=--kbw-bootstrap"), "{invocation}");
+    assert!(
+        invocation.contains(&format!(
+            "args=build --release --locked -p kb --manifest-path {}\n",
+            wt.join("Cargo.toml").display()
+        )),
+        "{invocation}"
+    );
+    assert!(
+        invocation.contains(&format!("pwd={}\n", wt.display())),
+        "{invocation}"
+    );
     assert!(
         invocation.contains(&format!("KB_ROOT={}\n", wt.display())),
         "{invocation}"
     );
     assert!(invocation.contains(&format!("KB_CACHE_DIR={}\n", wt.join(".cache").display())));
     assert!(invocation.contains(&format!(
-        "KBW_CARGO_TARGET_DIR={}\n",
+        "CARGO_TARGET_DIR={}\n",
         r.downstream.join(".cache/cargo-target").display()
     )));
     // The merge commit exists on the kept branch; the main checkout is untouched.
     let parents = r.sb.git(&wt, &["rev-list", "--parents", "-n1", "HEAD"]);
     assert_eq!(parents.split(' ').count(), 3, "HEAD must be a merge commit");
     assert!(wt.join("core/templates/UPSTREAM-0.2.0.txt").is_file());
+    assert_eq!(main_state(&r), before);
     assert_eq!(main_state(&r), before);
     assert!(
         !r.downstream
@@ -989,7 +1048,7 @@ fn update_prepare_happy_path_produces_a_validated_reviewable_branch() {
     );
     r.sb.commit_all(&r.downstream, "record upstream base");
     let before = main_state(&r);
-    let env = kb::env::Env::discover(Some(&r.downstream), true).unwrap();
+    let env = kb::env::Env::discover(Some(&r.downstream), None, true).unwrap();
     let loc = ProfileLocation::for_profile(Profile::Project);
     let src = kb::update::UpstreamSource {
         upstream: r.upstream.to_str().unwrap().to_string(),
@@ -1041,7 +1100,7 @@ fn update_prepare_happy_path_produces_a_validated_reviewable_branch() {
         report
             .next_steps
             .iter()
-            .any(|s| s.ends_with("kbw update abandon kb-update/v0.2.0 --apply")),
+            .any(|s| s.ends_with("kb update abandon kb-update/v0.2.0 --apply")),
         "{:?}",
         report.next_steps
     );

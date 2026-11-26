@@ -1,20 +1,22 @@
 # ADR 0001: One upstream, one downstream fork per product
 
-Status: accepted
+Status: accepted; amended by [ADR 0017](0017-kb-command.md) (one installed `kb` command
+selects the engine each checkout pins, instead of running `<kb>/kbw`).
 
 ## Context
 
 Knowledge must be versioned with the engine that interprets it, mounted into several host
-repositories (mobile, backend, libraries), and usable without installing or reconciling a
-global CLI.
+repositories (mobile, backend, libraries), and usable without reconciling a global engine
+version.
 
 ## Decision
 
-A single upstream repository carries the engine (`core/`, `kbw`, Cargo files), schemas,
+A single upstream repository carries the engine (`core/`, Cargo files, installers), schemas,
 migrations, templates, shared skills and release machinery. Each product keeps exactly one
 downstream fork/private copy that preserves upstream history and adds `project/`. Host
 repositories mount the downstream as a Git submodule (conventional path `.kb`) or use a
-separate checkout, and run `<kb>/kbw`.
+separate checkout, and run the installed `kb` command, which reads each checkout with the
+engine built from that checkout's own engine sources (ADR 0017).
 
 Engine-owned paths are declared in `core/release.toml`; `kb update divergence` reports
 undeclared engine edits against the upstream base recorded in `project/upstream.toml`.

@@ -21,10 +21,10 @@ Schema-1 records remain readable before migration; new fields require schema 2.
 ## Using `kb migrate`
 
 ```sh
-kbw migrate                # dry-run: per-file plan and unified diff, writes nothing
-kbw migrate --apply        # transform, verify, then write
-kbw migrate --to 2         # explicit target (default: the engine's document schema)
-kbw --json migrate         # machine-readable plan (kb.cli.v1 envelope)
+kb migrate                 # dry-run: per-file plan and unified diff, writes nothing
+kb migrate --apply         # transform, verify, then write
+kb migrate --to 2          # explicit target (default: the engine's document schema)
+kb --json migrate          # machine-readable plan (kb.cli.v1 envelope)
 ```
 
 What is scanned (directly in the working tree, so it works while the current engine

@@ -25,9 +25,10 @@ kb-impact:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
   script:
     - git submodule update --init -- "$KB_PATH"      # pinned revision, no recursion
-    - (cd "$KB_PATH" && rustup toolchain install)
-    - '"$KB_PATH/kbw" --kbw-bootstrap'               # explicit runtime bootstrap
+    # kb for the pinned KB: its release, else a source build; explicit engine bootstrap.
+    - sh "$KB_PATH/core/templates/ci/install-kb.sh" "$KB_PATH" "$CI_PROJECT_DIR/.cache/kb-bin"
+    - export PATH="$CI_PROJECT_DIR/.cache/kb-bin:$PATH"
     - git fetch --no-tags origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
     - printf '%s\n' "$CI_MERGE_REQUEST_DESCRIPTION" > "${TMPDIR:-/tmp}/mr-description.md"
-    - '"$KB_PATH/kbw" impact --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --statement "${TMPDIR:-/tmp}/mr-description.md" --snapshot pinned --check'
-    - '"$KB_PATH/kbw" integrate --check'
+    - 'kb --root "$KB_PATH" impact --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --statement "${TMPDIR:-/tmp}/mr-description.md" --snapshot pinned --check'
+    - 'kb --root "$KB_PATH" integrate --check'

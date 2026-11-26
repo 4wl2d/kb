@@ -1,9 +1,9 @@
 # kb skills (canonical sources)
 
 Engine-owned sources of the agent integration. They are never installed directly:
-`kbw integrate --generate` renders them with `project/skill-config/skill.toml` and the
+`kb integrate --generate` renders them with `project/skill-config/skill.toml` and the
 profile config into `project/skill-config/generated/` (committed and reviewed), and
-`<kb_path>/kbw integrate --apply` installs that bundle into each host repository.
+`kb integrate --apply` installs that bundle into each host repository.
 
 The bundle is a skill set of four skills, installed side by side in the harness's skill
 directory (for example `.claude/skills/<name>/` or `.agents/skills/<name>/`):
@@ -30,9 +30,10 @@ Instruction blocks and pointers:
 | `blocks/claude-command.md.tmpl` | short Claude aliases `.claude/commands/<skill>.md`, one per skill, when the skill set is shared from another directory |
 
 Placeholders (strict; unknown placeholders are errors): `{{project_name}}`,
-`{{namespace}}`, `{{kb_path}}`, `{{skill_protocol}}`, `{{engine_version}}`,
+`{{namespace}}`, `{{kb_path}}`, `{{kb}}` (how agents call kb: `kb`, or `kb --root <kb_path>`
+when the KB is not mounted at `.kb`), `{{skill_protocol}}`, `{{engine_version}}`,
 `{{default_intent}}`, `{{notes}}`, `{{snapshot_arg}}` (empty, or ` --snapshot latest|pinned`
-from `snapshot` in skill.toml; appended to every snapshot-reading `kbw` command the skills
+from `snapshot` in skill.toml; appended to every snapshot-reading `kb` command the skills
 and the instruction blocks show), `{{agents_skill_path}}` and `{{claude_skill_path}}` (the
 installed `kb` SKILL.md each instruction block points to), `{{skills_dir}}` (the host
 directory that holds the skill set, for example `.claude/skills`; skills and blocks use it

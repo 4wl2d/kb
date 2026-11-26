@@ -19,30 +19,23 @@ pub struct Env {
 }
 
 impl Env {
-    /// Discover the KB root from `--root`, `$KB_ROOT`, or the nearest ancestor of `cwd`
-    /// containing `core/release.toml`.
-    pub fn discover(root: Option<&Path>, quiet: bool) -> Result<Env> {
+    /// Discover the KB root: `--root`, else `$KB_ROOT`, else the nearest directory from the
+    /// current directory (then from `--host`) upwards that has `core/release.toml` or mounts
+    /// a KB checkout at `.kb` (see [`crate::launcher::resolve`]).
+    pub fn discover(root: Option<&Path>, host: Option<&Path>, quiet: bool) -> Result<Env> {
         let cwd = std::env::current_dir().map_err(|e| KbError::io("current directory", e))?;
-        let candidate = match root {
-            Some(r) => Some(absolutize(&cwd, r)),
-            None => match std::env::var_os("KB_ROOT") {
-                Some(v) if !v.is_empty() => Some(absolutize(&cwd, Path::new(&v))),
-                _ => cwd
-                    .ancestors()
-                    .find(|a| a.join(MANIFEST_PATH).is_file())
-                    .map(Path::to_path_buf),
-            },
-        };
-        let kb_root = candidate.ok_or_else(|| {
+        let env_root = crate::launcher::resolve::env_root();
+        let found =
+            crate::launcher::resolve::find(&cwd, root, env_root.as_deref().map(Path::new), host);
+        let kb_root = found.map(|f| f.dir).ok_or_else(|| {
             KbError::new(
                 ErrorCode::ConfigInvalid,
-                "cannot find the KB root (no core/release.toml in this directory or its ancestors)",
+                "cannot find the KB root (no core/release.toml or .kb/core/release.toml in this directory or above)",
             )
-            .with_hint("run the project launcher (e.g. `.kb/kbw`) or pass --root")
+            .with_hint("run kb inside a KB checkout or a host repository that mounts one at .kb, or pass --root <dir>")
         })?;
-        let kb_root = kb_root
-            .canonicalize()
-            .map_err(|e| KbError::io(kb_root.display(), e))?;
+        let kb_root =
+            crate::util::canonicalize(&kb_root).map_err(|e| KbError::io(kb_root.display(), e))?;
         let manifest_path = kb_root.join(MANIFEST_PATH);
         let text = std::fs::read_to_string(&manifest_path).map_err(|e| {
             KbError::new(

@@ -38,8 +38,8 @@ features = ["cli-protocol"]
 [[module]]
 id = "kb.launcher"
 repo = "kb"
-title = "kbw launcher, runtime bootstrap and release packaging"
-paths = ["kbw", ".github/workflows/**", "core/release.toml", "rust-toolchain.toml"]
+title = "kb command: engine selection, runtimes, installers and release packaging"
+paths = ["core/cli/src/launcher/**", "core/cli/build.rs", "install.sh", "install.ps1", "kbw", ".github/workflows/**", "core/release.toml", "rust-toolchain.toml"]
 features = ["runtime-bootstrap"]
 
 [[module]]

@@ -1,4 +1,4 @@
-# Tool registry of the maintainer profile: the tools `./kbw --profile maintainer <command>`
+# Tool registry of the maintainer profile: the tools `kb --profile maintainer <command>`
 # routes to when working on the kb engine itself. Format: docs/agent-cli.md#tool-registry.
 schema = 1
 
@@ -79,7 +79,7 @@ id = "tests"
 adapter = "command"
 program = "cargo"
 run = ["test", "--workspace", "--locked"]
-paths = ["core/**", "kbw", "Cargo.toml", "Cargo.lock"]
+paths = ["core/**", "kbw", "install.sh", "install.ps1", "Cargo.toml", "Cargo.lock"]
 description = "cargo test --workspace --locked"
 timeout_seconds = 3600
 
@@ -88,24 +88,24 @@ id = "shellcheck"
 adapter = "command"
 program = "shellcheck"
 run = ["{files}"]
-paths = ["kbw", "core/templates/ci/*.sh", "core/templates/ci/hooks/commit-msg"]
-description = "shellcheck on the changed launcher and CI scripts"
+paths = ["install.sh", "kbw", "core/templates/ci/*.sh", "core/templates/ci/hooks/commit-msg"]
+description = "shellcheck on the changed installer, kbw forwarder and CI scripts"
 
 [[tool]]
 id = "schemas"
 adapter = "command"
-program = "{kb}/kbw"
-run = ["schema", "--check"]
+program = "kb"
+run = ["--root", "{kb}", "schema", "--check"]
 paths = ["core/cli/src/model/**", "core/cli/src/schema_export.rs", "core/cli/src/cli/args.rs", "core/cli/src/error.rs", "core/schemas/**"]
-description = "./kbw schema --check"
+description = "kb schema --check"
 
 [[tool]]
 id = "templates"
 adapter = "command"
-program = "{kb}/kbw"
-run = ["validate", "--profile", "maintainer", "--templates"]
+program = "kb"
+run = ["--root", "{kb}", "validate", "--profile", "maintainer", "--templates"]
 paths = ["core/templates/**", "core/maintainer-knowledge/**", "core/skills/**"]
-description = "./kbw validate --profile maintainer --templates"
+description = "kb validate --profile maintainer --templates"
 
 [routes]
 sym = ["codegraph", "git-grep"]

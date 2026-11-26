@@ -2,7 +2,7 @@
 
 **Everything here is invented.** The product, the repositories (`mobile`, `backend`,
 `shared-contracts`), the teams, the records and the `.invalid` URLs exist only to demonstrate
-and test kb. The example is never used as default project data: `kbw init` without
+and test kb. The example is never used as default project data: `kb init` without
 `--example` creates an empty project.
 
 ## What it demonstrates
@@ -30,16 +30,16 @@ Use a scratch clone of the upstream repository so that no real downstream is tou
 
 ```sh
 git clone <upstream repository> kb-demo && cd kb-demo
-./kbw init --example synthetic-multirepo            # dry-run: prints the plan
-./kbw init --example synthetic-multirepo --apply    # writes project/, GitHub/GitLab KB CI and review templates
-./kbw validate                                      # records, links, policies, routing tests
+kb init --example synthetic-multirepo            # dry-run: prints the plan
+kb init --example synthetic-multirepo --apply    # writes project/, GitHub/GitLab KB CI and review templates
+kb validate                                      # records, links, policies, routing tests
 ```
 
 Context from the local working tree (the upstream approved ref does not contain the example,
 so select the working tree explicitly and skip the remote check):
 
 ```sh
-./kbw context --offline --snapshot working-tree --intent implement \
+kb context --offline --snapshot working-tree --intent implement \
   --task "Retry the token refresh after a network error" \
   --repo mobile --path mobile:app/auth/TokenRefresher.kt
 ```
@@ -56,7 +56,7 @@ git checkout -b demo && git add -A && git commit -m "Synthetic example"
 git init --bare ../kb-demo-origin.git
 git remote set-url origin "$(cd .. && pwd)/kb-demo-origin.git"
 git push origin demo:refs/heads/main
-./kbw context --intent implement --task "Retry the token refresh after a network error" \
+kb context --intent implement --task "Retry the token refresh after a network error" \
   --repo mobile --path mobile:app/auth/TokenRefresher.kt
 ```
 

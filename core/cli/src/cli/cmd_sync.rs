@@ -89,7 +89,7 @@ fn render(r: &SyncReport) -> String {
                     let from = match (p.source, &p.path) {
                         (PinSource::Submodule, Some(path)) => format!("submodule {path}"),
                         (PinSource::Submodule, None) => "submodule".into(),
-                        (PinSource::BindingFile, _) => ".kbw.toml".into(),
+                        (PinSource::BindingFile, _) => ".kb.toml".into(),
                     };
                     let status = match h.status {
                         PinStatus::NoPin => String::new(),

@@ -48,7 +48,7 @@ pub fn run(ctx: &Ctx, args: &SchemaArgs) -> Result<CommandOutput> {
                 ),
             )
             .with_details(json!({ "files": drift }))
-            .with_hint("run `kbw schema --write` and review the diff"),
+            .with_hint("run `kb schema --write` and review the diff"),
         ));
     }
     Ok(out)

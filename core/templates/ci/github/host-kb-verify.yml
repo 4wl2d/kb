@@ -19,12 +19,13 @@ jobs:
           submodules: false
           ref: ${{ github.event.pull_request.head.sha }}
       - run: git submodule update --init -- "$KB_PATH"
-      - working-directory: ${{ env.KB_PATH }}
-        run: rustup toolchain install
-      - run: '"$KB_PATH/kbw" --kbw-bootstrap'
+      - name: Install kb for the pinned KB (release, else a source build; explicit engine bootstrap)
+        run: |
+          sh "$KB_PATH/core/templates/ci/install-kb.sh" "$KB_PATH" "$RUNNER_TEMP/kb-bin"
+          echo "$RUNNER_TEMP/kb-bin" >> "$GITHUB_PATH"
       - name: Verify declared probes against the committed change
         env:
           KB_VERIFY_BASE: ${{ github.event.pull_request.base.sha }}
           KB_VERIFY_HEAD: ${{ github.event.pull_request.head.sha }}
           KB_VERIFY_BRANCH: ${{ github.head_ref }}
-        run: '"$KB_PATH/kbw" verify --diff "$KB_VERIFY_BASE" --head "$KB_VERIFY_HEAD" --branch "$KB_VERIFY_BRANCH" --snapshot pinned --strict'
+        run: 'kb --root "$KB_PATH" verify --diff "$KB_VERIFY_BASE" --head "$KB_VERIFY_HEAD" --branch "$KB_VERIFY_BRANCH" --snapshot pinned --strict'

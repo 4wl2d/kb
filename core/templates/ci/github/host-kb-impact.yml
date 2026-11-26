@@ -37,6 +37,10 @@ env:
 jobs:
   kb-impact:
     runs-on: ubuntu-latest
+    env:
+      # The runtime store and Cargo build directory of `kb engine bootstrap`, cached below.
+      KB_RUNTIME_DIR: ${{ github.workspace }}/.cache/kb-runtime
+      KB_CARGO_TARGET_DIR: ${{ github.workspace }}/.cache/kb-cargo-target
     steps:
       - uses: actions/checkout@v7
         with:
@@ -46,18 +50,18 @@ jobs:
       - name: Check out the pinned KB revision (no recursive submodules)
         run: git submodule update --init -- "$KB_PATH"
 
-      - name: Install the KB's pinned Rust toolchain
-        working-directory: ${{ env.KB_PATH }}
-        run: rustup toolchain install
-
-      - name: Cache the kb runtime
+      - name: Cache kb engine runtimes and builds
         uses: actions/cache@v6
         with:
-          path: ${{ env.KB_PATH }}/.cache/runtime
-          key: kb-runtime-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', env.KB_PATH), format('{0}/core/release.toml', env.KB_PATH), format('{0}/core/cli/**', env.KB_PATH)) }}
+          path: |
+            .cache/kb-runtime
+            .cache/kb-cargo-target
+          key: kb-engine-${{ runner.os }}-${{ hashFiles(format('{0}/Cargo.lock', env.KB_PATH), format('{0}/core/release.toml', env.KB_PATH), format('{0}/core/cli/**', env.KB_PATH)) }}
 
-      - name: Bootstrap the kb runtime of the pinned KB (explicit; source build or cache hit)
-        run: '"$KB_PATH/kbw" --kbw-bootstrap'
+      - name: Install kb for the pinned KB (release, else a source build; explicit engine bootstrap)
+        run: |
+          sh "$KB_PATH/core/templates/ci/install-kb.sh" "$KB_PATH" "$RUNNER_TEMP/kb-bin"
+          echo "$RUNNER_TEMP/kb-bin" >> "$GITHUB_PATH"
 
       - name: Save the merge request description
         env:
@@ -68,7 +72,7 @@ jobs:
         env:
           BASE_REF: ${{ github.base_ref }}
         # Pinned KB revision (the checkout bootstrapped above); see the header.
-        run: '"$KB_PATH/kbw" impact --base "origin/$BASE_REF" --statement "$RUNNER_TEMP/mr-description.md" --snapshot pinned --check'
+        run: 'kb --root "$KB_PATH" impact --base "origin/$BASE_REF" --statement "$RUNNER_TEMP/mr-description.md" --snapshot pinned --check'
 
       - name: Installed agent skill and managed blocks are current
-        run: '"$KB_PATH/kbw" integrate --check'
+        run: 'kb --root "$KB_PATH" integrate --check'

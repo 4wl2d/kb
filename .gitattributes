@@ -1,0 +1,4 @@
+# The same bytes on every platform: knowledge records, fixtures, golden files and engine
+# sources are compared and hashed byte for byte (engine fingerprint, anchors, receipts), and
+# the shell scripts must keep LF to run. Git detects binary files itself.
+* text=auto eol=lf

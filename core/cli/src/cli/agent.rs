@@ -15,6 +15,7 @@ use crate::model::{Intent, Kind, Level, Record, Registry, Status};
 use crate::output::{CommandOutput, Format};
 use crate::source::WorkingTreeSource;
 use crate::tools::{self, Roots};
+use crate::util::PathExt;
 
 /// Where the agent commands operate.
 pub struct Workspace {
@@ -30,7 +31,7 @@ pub fn workspace(ctx: &Ctx) -> Result<Workspace> {
     let kb = ctx
         .env
         .kb_root
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| ctx.env.kb_root.clone());
     let code = host
         .as_ref()

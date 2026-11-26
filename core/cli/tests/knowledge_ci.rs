@@ -1,4 +1,6 @@
 //! Execute shipped CI glue against offline platform fixtures and the actual engine.
+//! The glue is POSIX shell (it runs on Linux CI runners), so these tests run on Unix only.
+#![cfg(unix)]
 mod common;
 use common::{Sandbox, write};
 use serde_json::{Value, json};
@@ -6,22 +8,23 @@ use std::fs;
 use std::path::Path;
 use std::process::{Command, Output};
 
+/// Run a shipped CI script with the built `kb` first on PATH, as CI jobs install it.
 fn script(sb: &Sandbox, cwd: &Path, name: &str, args: &[&str]) -> Output {
     let mut cmd = Command::new("sh");
     cmd.current_dir(cwd)
         .arg(common::repo_root().join(format!("core/templates/ci/{name}")))
         .args(args);
     common::isolated_env(&mut cmd, &sb.home());
-    cmd.env("KB_REVIEW_DATE", "2026-01-01");
+    cmd.env("KB_REVIEW_DATE", "2026-01-01")
+        .env("PATH", common::path_with_kb(&sb.path()));
     cmd.output().unwrap()
 }
 
 fn engine_checkout(sb: &Sandbox, root: &Path) {
     sb.init_repo(root);
     common::write_min_project(root);
-    write(&root.join(".gitignore"), "kbw\n.cache/\n");
+    write(&root.join(".gitignore"), ".cache/\n");
     sb.commit_all(root, "synthetic knowledge");
-    fs::copy(common::kb_bin(), root.join("kbw")).unwrap();
 }
 
 #[test]

@@ -24,6 +24,9 @@ sha2 = "0.11"
 toml = "1"
 toml_edit = "0.25"
 unicode-normalization = "0.1"
+flate2 = "1"
+tar = { version = "0.4", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_System_Console"] }
 tempfile = "3"
 proptest = { version = "1", default-features = false, features = ["std"] }
 

@@ -35,7 +35,7 @@ impl World {
         let kb = host.join(".kb");
         sb.init_repo(&host);
         write(&host.join(".gitignore"), ".kb/\n");
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(&host.join("app/auth/Client.rs"), "// Synthetic fixture\n");
         sb.commit_all(&host, "synthetic host");
         sb.init_repo(&kb);

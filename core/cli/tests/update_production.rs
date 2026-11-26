@@ -1,13 +1,14 @@
 //! A coordinated format update through the production path (specification sections 7 and
-//! 13): `kb update prepare` with the production runner, which runs `<worktree>/kbw`, the
-//! real launcher of the target engine. It bootstraps that engine explicitly inside the
-//! update worktree and lets it migrate a legacy (schema 0) project and validate the result.
+//! 13): `kb update prepare` with the production runner, which runs this `kb` with the update
+//! worktree as root, so engine selection runs the target engine. The target's engine sources
+//! differ from the running kb (a marker comment), so the explicit bootstrap step builds it;
+//! that engine then migrates a legacy (schema 0) project and validates the result.
 //!
 //! The synthetic upstream holds this checkout's real engine files (`engine_paths` of
 //! core/release.toml); the downstream project is the synthetic legacy fixture
 //! `core/migrations/fixtures/v0`. Everything is local and offline. The only compilation is
 //! the source bootstrap with the pinned toolchain, which shares compiled dependencies with
-//! the launcher and end-to-end tests through a directory under Cargo's test tmpdir.
+//! the end-to-end test through a directory under Cargo's test tmpdir.
 #![cfg(unix)]
 
 mod common;
@@ -42,9 +43,9 @@ fn show(o: &Output) -> String {
 }
 
 /// Cargo target directory shared by source builds across test runs (the same directory as
-/// in the launcher and end-to-end tests), so a bootstrap recompiles only the `kb` crate.
+/// in the end-to-end test), so a bootstrap recompiles only the `kb` crate.
 fn shared_target_dir() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("kbw-cargo-target")
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("kb-cargo-target")
 }
 
 fn real_home() -> PathBuf {
@@ -78,12 +79,11 @@ fn toolchain_env(c: &mut Command) {
     c.env("PATH", path)
         .env("CARGO_HOME", cargo_home())
         .env("CARGO_NET_OFFLINE", "true")
-        .env("KBW_CARGO_TARGET_DIR", shared_target_dir())
+        .env("KB_CARGO_TARGET_DIR", shared_target_dir())
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET")
-        .env_remove("KBW_AUTO_BOOTSTRAP")
-        .env_remove("KBW_FINGERPRINT")
-        .env_remove("KBW_ALLOW_TOOLCHAIN_MISMATCH");
+        .env_remove("KB_AUTO_BOOTSTRAP")
+        .env_remove("KB_ALLOW_TOOLCHAIN_MISMATCH");
     if let Some(r) = rustup_home() {
         c.env("RUSTUP_HOME", r);
     }
@@ -243,10 +243,18 @@ fn update_prepare_migrates_a_legacy_project_with_the_bootstrapped_target_engine(
     copy_path(&fixture("v0"), &down.join("project"));
     let head = sb.commit_all(&down, "adopt the synthetic legacy project");
 
-    // Upstream v0.1.1: an engine-side change outside the Rust sources.
+    // Upstream v0.1.1: an engine-side change, in the documentation and in the Rust sources
+    // (a comment), so the target engine is not the kb under test.
     let doc = up.join(UPSTREAM_DOC);
     let text = fs::read_to_string(&doc).unwrap();
     fs::write(&doc, format!("{text}\n{UPSTREAM_MARKER}\n")).unwrap();
+    let lib = up.join("core/cli/src/lib.rs");
+    let text = fs::read_to_string(&lib).unwrap();
+    fs::write(
+        &lib,
+        format!("{text}\n// Synthetic upstream engine v0.1.1.\n"),
+    )
+    .unwrap();
     let v011 = sb.commit_all(&up, "kb engine 0.1.1 (synthetic upstream)");
     sb.git(&up, &["tag", "-a", TAG, "-m", "kb 0.1.1"]);
     let upstream_refs = sb.git(&up, &["for-each-ref", "--format=%(refname) %(objectname)"]);
@@ -351,7 +359,8 @@ fn update_prepare_migrates_a_legacy_project_with_the_bootstrapped_target_engine(
         "{recorded}"
     );
 
-    // The worktree is clean and holds the target engine bootstrapped in its own cache.
+    // The worktree is clean; its engine was bootstrapped into the runtime store, as the
+    // runtime of the worktree's own fingerprint.
     let wt = PathBuf::from(r["worktree"].as_str().unwrap());
     assert_eq!(wt, down.join(".cache/update/kb-update-v0.1.1"));
     assert_eq!(sb.git(&wt, &["rev-parse", "HEAD"]), tip);
@@ -359,7 +368,7 @@ fn update_prepare_migrates_a_legacy_project_with_the_bootstrapped_target_engine(
         sb.git(&wt, &["status", "--porcelain", "--untracked-files=all"]),
         ""
     );
-    let runtimes: Vec<PathBuf> = fs::read_dir(wt.join(".cache/runtime"))
+    let runtimes: Vec<PathBuf> = fs::read_dir(sb.home().join("kb-runtime"))
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.is_dir() && !p.file_name().unwrap().to_string_lossy().starts_with('.'))
@@ -373,6 +382,14 @@ fn update_prepare_migrates_a_legacy_project_with_the_bootstrapped_target_engine(
         .into_owned();
     assert!(info.contains(&format!("\nfingerprint={fp}\n")), "{info}");
     assert!(info.contains("\nsource=source-build\n"), "{info}");
+    assert_ne!(
+        fp,
+        kb::versions::BUILD_FINGERPRINT,
+        "the target is another engine"
+    );
+    let (o, v) = kb_json(&sb, &wt, &["engine", "fingerprint"], false);
+    assert_eq!(o.status.code(), Some(0), "{}", show(&o));
+    assert_eq!(v["result"]["fingerprint"], fp.as_str());
 
     // The main checkout is unchanged, still legacy, and never bootstrapped; nothing was
     // pushed to the upstream.

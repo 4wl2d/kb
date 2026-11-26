@@ -24,7 +24,6 @@ pub fn run(ctx: &Ctx, args: &DoctorArgs) -> Result<CommandOutput> {
     let opts = DoctorOptions {
         host: ctx.global.host.as_deref(),
         online: args.online,
-        fingerprint: std::env::var("KBW_FINGERPRINT").ok(),
     };
     let report = doctor::run(&ctx.env, &loc, &opts);
     let text = doctor::render(&report, ctx.format);

@@ -295,7 +295,7 @@ pub(super) fn absent(
     );
     submodules_note(ws, answer);
     agent::not_found(format!("`{name}` does not occur in this checkout")).with_hint(
-        "check the spelling: the name was looked for as a whole word, as written, in the files `kbw find` and `kbw read` cover",
+        "check the spelling: the name was looked for as a whole word, as written, in the files `kb find` and `kb read` cover",
     )
 }
 
@@ -343,7 +343,7 @@ pub(super) fn used(
         answer.next(format!("kb callers {}", shell_word(name)));
     }
     agent::not_found(format!("no declaration of `{name}` was found in this checkout")).with_hint(
-        "it is declared in a dependency, in generated code or in a form the text scan does not recognise; the uses above are what the files `kbw find` and `kbw read` cover hold of it, so cite them",
+        "it is declared in a dependency, in generated code or in a form the text scan does not recognise; the uses above are what the files `kb find` and `kb read` cover hold of it, so cite them",
     )
 }
 
@@ -369,7 +369,7 @@ fn undeclared(ws: &agent::Workspace, args: &SymArgs, answer: &mut Answer) -> Opt
     match sighting(ws, name) {
         Sighting::Unknown | Sighting::Declared(_) => Some(plain(
             answer,
-            "check the spelling, try `kbw find <text>`, or see `kbw tools` for the connected tools",
+            "check the spelling, try `kb find <text>`, or see `kb tools` for the connected tools",
         )),
         Sighting::Possible(hits) => {
             answer.notes.retain(|note| {

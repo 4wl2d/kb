@@ -2,6 +2,9 @@
 //! `tools`): routing through the tool registry, fallbacks, bounded answers that name their
 //! source, configured checks and the knowledge lookup. A shell script stands in for
 //! CodeGraph (synthetic JSON, labeled); no test needs an installed code tool or the network.
+//! The stand-ins are POSIX shell scripts, so these tests run on Unix only; Windows CI runs
+//! the engine through the other suites.
+#![cfg(unix)]
 
 mod common;
 

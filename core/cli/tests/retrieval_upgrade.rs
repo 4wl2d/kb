@@ -30,7 +30,7 @@ impl World {
         let revision = sb.commit_all(&kb, "synthetic knowledge");
         sb.git(&kb, &["update-ref", "refs/remotes/origin/main", &revision]);
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(
             &host.join("app/auth/TokenHTTPClient.kt"),
             "// Synthetic tracked fixture.\nclass TokenHTTPClient\n",

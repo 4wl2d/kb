@@ -27,14 +27,14 @@ uncommitted edits, and the engine validates the facts against Git objects. Its
 The versions pinned above (ast-index 3.54.0, CodeGraph 1.6.1) apply to this commit-bound
 adapter. The engine's live `codegraph` adapter ([ADR 0016](../../docs/adr/0016-agent-cli.md))
 is separate: it queries the host's own `.codegraph/` index with whatever CodeGraph version
-is installed and reports that version in each answer's header and in `kbw tools`.
+is installed and reports that version in each answer's header and in `kb tools`.
 
 The per-invocation `--provider` options below remain for context composition
 (`context --with-code`), deep impact (`impact --deep`), coverage fan-in and consumer
 suggestions on draft submission:
 
 ```sh
-./kbw context --host /path/to/host --path src/store.rs --intent implement \
+kb context --host /path/to/host --path src/store.rs --intent implement \
   --with-code --provider /path/to/kb-code-provider --provider-timeout 300 \
   --provider-arg=--backend --provider-arg=codegraph \
   --provider-arg=--tool --provider-arg=/path/to/codegraph

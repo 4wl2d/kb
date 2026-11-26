@@ -17,7 +17,7 @@ pub fn run(ctx: &Ctx, args: &RunArgs) -> Result<CommandOutput> {
     let cap = args.capability.as_str();
     if Capability::routed(cap).is_some() || RESERVED_CAPABILITIES.contains(&cap) {
         return Err(KbError::invalid_input(format!(
-            "`{cap}` is a kb command; run `kbw {cap} ...` instead of `kbw run {cap}`"
+            "`{cap}` is a kb command; run `kb {cap} ...` instead of `kb run {cap}`"
         )));
     }
     let ws = agent::workspace(ctx)?;
@@ -34,7 +34,7 @@ pub fn run(ctx: &Ctx, args: &RunArgs) -> Result<CommandOutput> {
                 .to_string()
         } else {
             format!(
-                "declared capabilities: {}; `kbw tools` lists them",
+                "declared capabilities: {}; `kb tools` lists them",
                 known.join(", ")
             )
         }));

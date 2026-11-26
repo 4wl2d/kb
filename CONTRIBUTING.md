@@ -8,14 +8,14 @@ in downstream forks under `project/` and never comes back here.
 
 * Rust toolchain pinned in `rust-toolchain.toml` (rustup picks it up automatically).
 * Git ≥ 2.38 (`git merge-tree --write-tree` is used by `kb update check`).
-* `shellcheck` for the launcher and the CI/hook shell templates
-  (`shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`, as in
-  `AGENTS.md`).
+* `shellcheck` for the installer, the `kbw` forwarder and the CI/hook shell templates
+  (`shellcheck install.sh kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`,
+  as in `AGENTS.md`).
 
 ```sh
 cargo test --workspace --locked
-./kbw --kbw-bootstrap        # builds the release runtime used by the launcher
-./kbw version
+cargo run -q -p kb -- engine info   # a build of this working tree serves it in-process
+cargo run -q -p kb -- version
 ```
 
 ## Change workflow
@@ -23,8 +23,8 @@ cargo test --workspace --locked
 1. Read `AGENTS.md`, `docs/architecture.md` and the relevant ADRs. Query the maintainer
    profile for obligations touching your paths.
 2. Keep changes small and covered by tests that exercise real behavior (the executable,
-   the launcher, real temporary Git repositories).
-3. Update documentation, schemas (`./kbw schema --write`), templates and `CHANGELOG.md`
+   engine selection, real temporary Git repositories).
+3. Update documentation, schemas (`kb schema --write`), templates and `CHANGELOG.md`
    in the same change.
 4. Significant decisions get an ADR in `docs/adr/`.
 

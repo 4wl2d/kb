@@ -1,6 +1,8 @@
 # ADR 0006: POSIX launcher with fingerprinted runtimes
 
-Status: accepted
+Status: superseded by [ADR 0017](0017-kb-command.md): the installed `kb` command selects
+each checkout's runtime by the same fingerprint; `kbw` remains for one release as a
+deprecated forwarder to `kb`. The text below records the original decision.
 
 ## Decision
 

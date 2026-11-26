@@ -202,8 +202,8 @@ pub struct SkillConfig {
     /// Default intent suggested in examples.
     #[serde(default = "default_intent")]
     pub default_intent: Intent,
-    /// Snapshot selection written as `--snapshot` into every generated kbw command; `latest`
-    /// and `pinned` override a host `.kbw.toml` `selection`, `auto` defers to it.
+    /// Snapshot selection written as `--snapshot` into every generated kb command; `latest`
+    /// and `pinned` override a host `.kb.toml` `selection`, `auto` defers to it.
     #[serde(default)]
     pub snapshot: SkillSnapshot,
     /// Extra project notes appended to the skill (plain Markdown, non-normative).
@@ -250,7 +250,8 @@ impl Harness {
     }
 }
 
-/// Optional host binding file `.kbw.toml` in the host repository root.
+/// Optional host binding file `.kb.toml` in the host repository root (`.kbw.toml` before the
+/// `kb` command, still read when `.kb.toml` does not exist).
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct HostBinding {
@@ -268,7 +269,10 @@ pub struct HostBinding {
     pub selection: Option<SkillSnapshot>,
 }
 
-pub const HOST_BINDING_FILE: &str = ".kbw.toml";
+pub const HOST_BINDING_FILE: &str = ".kb.toml";
+
+/// The binding's name before the `kb` command; read when `.kb.toml` does not exist.
+pub const LEGACY_HOST_BINDING_FILE: &str = ".kbw.toml";
 
 /// `project/upstream.toml`: the upstream base this downstream was last updated from.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

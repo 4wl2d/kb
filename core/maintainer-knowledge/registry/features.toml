@@ -22,7 +22,7 @@ repos = ["kb"]
 
 [[feature]]
 id = "runtime-bootstrap"
-title = "Launcher runtime selection and bootstrap"
+title = "Engine selection, runtimes and bootstrap"
 repos = ["kb"]
 
 [[feature]]

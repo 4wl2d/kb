@@ -14,14 +14,15 @@
     - git clone --no-checkout "$KB_REPO_URL" kb-source
     - git -C kb-source checkout --detach "$KB_PIN"
     - test "$(git -C kb-source rev-parse HEAD)" = "$KB_PIN"
-    - (cd kb-source && rustup toolchain install && ./kbw --kbw-bootstrap)
+    - sh kb-source/core/templates/ci/install-kb.sh kb-source "$CI_PROJECT_DIR/.cache/kb-bin"
+    - export PATH="$CI_PROJECT_DIR/.cache/kb-bin:$PATH"
 kb-knowledge-draft:
   extends: .kb-accrual
   environment: knowledge-draft
   timeout: 30m
   script:
     - sh kb-source/core/templates/ci/export-merged-change.sh gitlab "$KB_HOST_REPO_ID" "$KB_MR_IID" change-inputs
-    - kb-source/kbw propose begin --host "$CI_PROJECT_DIR" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$CI_PROJECT_DIR/change-inputs/export.json" --json > work-order.json
+    - kb --root kb-source propose begin --host "$CI_PROJECT_DIR" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$CI_PROJECT_DIR/change-inputs/export.json" --json > work-order.json
     - mkdir draft-output
     - 'printf ''%s\n'' ''{"protocol":"kb.draft-output.v1"}'' > draft-output/manifest.json'
     - test -x kb-source/project/ci/draft-agent

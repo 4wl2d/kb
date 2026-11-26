@@ -36,12 +36,12 @@ Shorten the core or leave records scoped.
 
 Generate and install again after knowledge or workflow changes. A core receipt is checked
 against the selected snapshot, the bundle, the host lock, the actual instruction bytes
-and the mounted launcher path. Read the source before passing it to context. Historical
+and the mounted KB path. Read the source before passing it to context. Historical
 replay must use frozen instructions and full context, not a current core.
 
 ## Load probes
 
-`{{kb_path}}/kbw integrate --probe` checks the installed files and emits a challenge.
+`{{kb}} integrate --probe` checks the installed files and emits a challenge.
 It explicitly leaves runtime loading unverified. Run the challenge in a fresh, trusted
 session of each enabled harness; preserve the exact harness version, response and tool
 calls. The marker must be reported before tools and the initial diagnose call must occur.

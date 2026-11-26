@@ -14,11 +14,11 @@ PARAMETERS
 - Approved KB revision: <resolved commit>; reviewer: <name or unknown>
 
 1. DIAGNOSE BEFORE THE FIRST EDIT
-Locate the code with <.kb>/kbw sym <name> or <.kb>/kbw find "<text>"; read
-<.kb>/kbw doc <path-or-symbol> and analyse <.kb>/kbw impact <symbol> and callers <symbol>.
+Locate the code with kb sym <name> or kb find "<text>"; read
+kb doc <path-or-symbol> and analyse kb impact <symbol> and callers <symbol>.
 Answers are bounded and name their source; lexical or static answers are navigation
 evidence, so confirm decisive facts in the source.
-Run <.kb>/kbw context --intent diagnose --task "<symptom/task>" --skill-protocol 3.
+Run kb context --intent diagnose --task "<symptom/task>" --skill-protocol 3.
 Path-free scope is provisional. Once files/modules are known, run scoped implement/debug/
 review context before editing. Use explicit repo:path for other repositories.
 Mandatory units include their typed conditions and exceptions. Resolve gaps and conflicts;
@@ -67,11 +67,11 @@ Pending draft expectations stay comments until review. Use Tier A to check order
 and response-size limits, not as proof of agent solution quality.
 
 4. VERIFY THE ACTUAL FINAL SCOPE
-Run <.kb>/kbw check --base <target>: the configured checks for the changed files, validation
+Run kb check --base <target>: the configured checks for the changed files, validation
 of changed knowledge and the declared probes. Fix every failure (exit 46); never weaken a
 check or edit tools.toml to pass it.
-Run <.kb>/kbw impact --base <target> --working-tree.
-Run <.kb>/kbw verify --diff <target> for declared probes; committed changes may use
+Run kb impact --base <target> --working-tree.
+Run kb verify --diff <target> for declared probes; committed changes may use
 --head <commit>, and the commit hook uses --staged plus the pending message file.
 A probe with unavailable provider facts or unevaluated conditions stays unverifiable.
 Do not assert --applicable unless the human/agent has actually checked its conditions and
@@ -110,14 +110,14 @@ Use a pinned host checkout for each registry repository; pass every required
 `--repo-root id=path`. Keep raw JSON reports in the CI artifacts/review branch.
 
 ```sh
-./kbw validate --strict --stale 90 --on YYYY-MM-DD
-./kbw anchors check --snapshot working-tree --offline --at HEAD --repo-root repo=/host
-./kbw drift --snapshot working-tree --offline --since verified --repo-root repo=/host --json
-./kbw ledger --snapshot working-tree --offline --on YYYY-MM-DD --sample 10 --seed review-week --repo-root repo=/host --json
-./kbw coverage --snapshot working-tree --offline --host /host --repo repo --since 180d
-./kbw eval routing
-./kbw integrate --generate --check
-./kbw update divergence
+kb validate --strict --stale 90 --on YYYY-MM-DD
+kb anchors check --snapshot working-tree --offline --at HEAD --repo-root repo=/host
+kb drift --snapshot working-tree --offline --since verified --repo-root repo=/host --json
+kb ledger --snapshot working-tree --offline --on YYYY-MM-DD --sample 10 --seed review-week --repo-root repo=/host --json
+kb coverage --snapshot working-tree --offline --host /host --repo repo --since 180d
+kb eval routing
+kb integrate --generate --check
+kb update divergence
 ```
 
 Dates and stale-day limits are team parameters. Without `--on`, freshness is relative to

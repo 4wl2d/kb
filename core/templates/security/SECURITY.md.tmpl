@@ -2,22 +2,22 @@
 
 <!-- Keep this file at .github/SECURITY.md (rendered from the kb template
 core/templates/security/SECURITY.md.tmpl). Do not replace the root SECURITY.md: it is
-engine-owned, and editing it is reported by `kbw update divergence`. -->
+engine-owned, and editing it is reported by `kb update divergence`. -->
 
 ## Reporting a vulnerability
 
 Report suspected vulnerabilities privately to {{security_contact}}. Do not open a public
-issue. Include the affected revision (`./kbw version` and `git rev-parse HEAD`), steps to
+issue. Include the affected revision (`kb version` and `git rev-parse HEAD`), steps to
 reproduce, and the impact you observed.
 
 Vulnerabilities in the kb engine itself (everything outside `project/`) should also be
 reported to the upstream kb project, as described in the engine's policy in the root
-`SECURITY.md`, so that every downstream receives the fix through `./kbw update`.
+`SECURITY.md`, so that every downstream receives the fix through `kb update`.
 
 ## Where this policy lives
 
 This policy is `.github/SECURITY.md`. The root `SECURITY.md` belongs to the kb engine: it
-is updated with the engine by `./kbw update` and is not edited in this repository. GitHub
+is updated with the engine by `kb update` and is not edited in this repository. GitHub
 shows `.github/SECURITY.md` in preference to the root file, so reporters see this policy.
 
 ## Trust model

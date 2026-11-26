@@ -26,6 +26,7 @@ use crate::error::{ErrorCode, KbError, Result};
 use crate::git::{Git, check_revision_arg, git_failure, redact};
 use crate::migrate;
 use crate::model::{ProfileConfig, ProfileLocation, UPSTREAM_FILE, UpstreamConfig};
+use crate::util::PathExt;
 use crate::util::{atomic_write, check_rel_path, sha256_hex};
 use crate::versions::{MANIFEST_PATH, ReleaseManifest};
 
@@ -38,8 +39,8 @@ pub trait EngineRunner {
     /// returned as output, not as an error.
     fn run(&self, worktree: &Path, args: &[&str]) -> Result<Output>;
 
-    /// Explicitly bootstrap the target engine of `worktree` before any other step. The
-    /// launcher never builds implicitly, so `update prepare` performs this documented action
+    /// Explicitly bootstrap the target engine of `worktree` before any other step. Normal
+    /// commands never build implicitly, so `update prepare` performs this documented action
     /// itself. Returns `None` when the runner needs no bootstrap.
     fn bootstrap(&self, worktree: &Path) -> Result<Option<Output>> {
         let _ = worktree;
@@ -47,18 +48,20 @@ pub trait EngineRunner {
     }
 }
 
-/// Production runner: `<worktree>/kbw <args>` with the worktree as KB root and its own
-/// cache, sharing only the Cargo target directory to reuse builds.
-pub struct KbwRunner {
+/// Production runner: this `kb` with the worktree as KB root (`--root`, `KB_ROOT`) and its
+/// own cache. Engine selection runs the worktree's engine by its fingerprint, so `bootstrap`
+/// is `kb engine bootstrap` for the worktree. Only the Cargo target directory is shared,
+/// to reuse builds.
+pub struct KbRunner {
     pub cargo_target_dir: PathBuf,
 }
 
-impl KbwRunner {
-    /// The Cargo target directory is the one the user configured for the launcher
-    /// (`KBW_CARGO_TARGET_DIR`), else the main checkout's default, so the target engine's
-    /// build reuses compiled dependencies instead of starting from scratch.
-    pub fn new(kb_root: &Path) -> KbwRunner {
-        let cargo_target_dir = std::env::var_os("KBW_CARGO_TARGET_DIR")
+impl KbRunner {
+    /// The Cargo target directory is the one the user configured (`KB_CARGO_TARGET_DIR`),
+    /// else the main checkout's default, so the target engine's build reuses compiled
+    /// dependencies instead of starting from scratch.
+    pub fn new(kb_root: &Path) -> KbRunner {
+        let cargo_target_dir = std::env::var_os("KB_CARGO_TARGET_DIR")
             .filter(|v| !v.is_empty())
             .map(PathBuf::from)
             // The engine runs in the worktree: anchor a relative value at our cwd.
@@ -67,45 +70,43 @@ impl KbwRunner {
                 _ => p,
             })
             .unwrap_or_else(|| kb_root.join(".cache/cargo-target"));
-        KbwRunner { cargo_target_dir }
+        KbRunner { cargo_target_dir }
     }
 
     fn launch(&self, worktree: &Path, args: &[&str]) -> Result<Output> {
-        let launcher = worktree.join("kbw");
-        if !launcher.is_file() {
-            return Err(KbError::new(
+        let kb = std::env::current_exe().map_err(|e| {
+            KbError::new(
                 ErrorCode::UpdateFailed,
-                format!(
-                    "the target engine has no launcher at {}",
-                    launcher.display()
-                ),
-            ));
-        }
-        Command::new(&launcher)
+                format!("cannot locate the running kb: {e}"),
+            )
+        })?;
+        Command::new(&kb)
+            .arg("--root")
+            .arg(worktree)
             .args(args)
             .current_dir(worktree)
             .env("KB_ROOT", worktree)
             .env("KB_CACHE_DIR", worktree.join(".cache"))
-            .env("KBW_CARGO_TARGET_DIR", &self.cargo_target_dir)
-            .env_remove("KBW_AUTO_BOOTSTRAP")
+            .env("KB_CARGO_TARGET_DIR", &self.cargo_target_dir)
+            .env_remove("KB_AUTO_BOOTSTRAP")
             .stdin(Stdio::null())
             .output()
             .map_err(|e| {
                 KbError::new(
                     ErrorCode::UpdateFailed,
-                    format!("cannot run {}: {e}", launcher.display()),
+                    format!("cannot run {}: {e}", kb.display()),
                 )
             })
     }
 }
 
-impl EngineRunner for KbwRunner {
+impl EngineRunner for KbRunner {
     fn run(&self, worktree: &Path, args: &[&str]) -> Result<Output> {
         self.launch(worktree, args)
     }
 
     fn bootstrap(&self, worktree: &Path) -> Result<Option<Output>> {
-        self.launch(worktree, &["--kbw-bootstrap"]).map(Some)
+        self.launch(worktree, &["engine", "bootstrap"]).map(Some)
     }
 }
 
@@ -194,7 +195,7 @@ impl CheckReport {
                 )
                 .with_details(json!({"conflicts": self.merge.conflicts}))
                 .with_hint(
-                    "`kbw update prepare` creates an update worktree with these conflicts for \
+                    "`kb update prepare` creates an update worktree with these conflicts for \
                      manual resolution; the main checkout is never modified",
                 ),
             );
@@ -390,7 +391,7 @@ pub fn prepare(
     if repo.branch_commit(&branch)?.is_some() {
         return Err(KbError::invalid_input(format!("branch `{branch}` already exists"))
             .with_hint(format!(
-                "pass --branch {BRANCH_PREFIX}<name>, or discard the previous attempt with `kbw update abandon {branch} --apply`"
+                "pass --branch {BRANCH_PREFIX}<name>, or discard the previous attempt with `kb update abandon {branch} --apply`"
             )));
     }
     let worktree = env.cache_dir.join("update").join(sanitize(&branch));
@@ -400,7 +401,7 @@ pub fn prepare(
             worktree.display()
         ))
         .with_hint(
-            "remove it with `kbw update abandon <branch> --apply` or `git worktree remove`",
+            "remove it with `kb update abandon <branch> --apply` or `git worktree remove`",
         ));
     }
     let up = fetch_upstream(env, &cfg, src)?;
@@ -414,7 +415,7 @@ pub fn prepare(
             ErrorCode::GitError,
             "the KB HEAD moved while preparing the update",
         )
-        .with_hint("re-run `kbw update prepare`"));
+        .with_hint("re-run `kb update prepare`"));
     }
     if up.cache.is_ancestor(&up.info.commit, &repo.head)? {
         return Err(KbError::invalid_input(format!(
@@ -485,11 +486,11 @@ pub fn prepare(
     }
 
     let mut steps = Vec::new();
-    // The launcher never builds implicitly: bootstrapping the target engine inside the
-    // worktree (its own .cache) is an explicit step of this command.
+    // Normal commands never build an engine: bootstrapping the target engine of the
+    // worktree is an explicit step of this command.
     if let Some(boot) = runner
         .bootstrap(&worktree)
-        .map_err(|e| fail.error("bootstrap", "kbw --kbw-bootstrap", 1, &e.message))?
+        .map_err(|e| fail.error("bootstrap", "kb engine bootstrap", 1, &e.message))?
     {
         if !boot.status.success() {
             let text = format!(
@@ -499,14 +500,14 @@ pub fn prepare(
             );
             return Err(fail.error(
                 "bootstrap",
-                "kbw --kbw-bootstrap",
+                "kb engine bootstrap",
                 boot.status.code().unwrap_or(-1),
                 &text,
             ));
         }
         steps.push(StepReport {
             name: "bootstrap".into(),
-            command: "kbw --kbw-bootstrap".into(),
+            command: "kb engine bootstrap".into(),
             status: "ok".into(),
             note: None,
         });
@@ -523,7 +524,7 @@ pub fn prepare(
     } else {
         steps.push(StepReport {
             name: "integrate".into(),
-            command: "kbw integrate --generate --apply".into(),
+            command: "kb integrate --generate --apply".into(),
             status: "skipped".into(),
             note: Some(format!("no {skill_config}; nothing to generate")),
         });
@@ -569,7 +570,7 @@ pub fn prepare(
         format!("review: git diff HEAD...{branch}"),
         format!("push the branch yourself (kb never pushes): git push <remote> {branch}"),
         "open a merge request and merge it after review; then remove the worktree with `git worktree remove`".into(),
-        format!("to discard instead: kbw update abandon {branch} --apply"),
+        format!("to discard instead: kb update abandon {branch} --apply"),
     ];
     Ok(PrepareReport {
         branch,
@@ -597,7 +598,7 @@ pub fn divergence(env: &Env) -> Result<DivergenceReport> {
             ErrorCode::ConfigInvalid,
             format!("{UPSTREAM_FILE} has no `revision`"),
         )
-        .with_hint("set `revision` to the upstream commit this downstream was last updated from (kbw update prepare records it)")
+        .with_hint("set `revision` to the upstream commit this downstream was last updated from (kb update prepare records it)")
     })?;
     check_revision_arg(&revision)?;
     let commit = repo.git.resolve_commit(&revision)?.ok_or_else(|| {
@@ -605,7 +606,7 @@ pub fn divergence(env: &Env) -> Result<DivergenceReport> {
             ErrorCode::GitError,
             format!("upstream revision {revision} is not present in the KB repository"),
         )
-        .with_hint("fetch it from the upstream (e.g. `git fetch <upstream-url> <tag>`) or run `kbw update check`")
+        .with_hint("fetch it from the upstream (e.g. `git fetch <upstream-url> <tag>`) or run `kb update check`")
     })?;
     for p in &cfg.engine_patches {
         check_rel_path(p.path.trim_end_matches('/')).map_err(|e| {
@@ -694,7 +695,7 @@ pub fn abandon(env: &Env, branch: &str, apply: bool, force: bool) -> Result<Aban
             ErrorCode::NotFound,
             format!("no update worktree for branch `{branch}`"),
         )
-        .with_hint("only branches with a worktree created by `kbw update prepare` are abandoned; delete other branches with git after review"));
+        .with_hint("only branches with a worktree created by `kb update prepare` are abandoned; delete other branches with git after review"));
     };
     let update_dir = canonical(&env.cache_dir.join("update"));
     if !canonical(&wt.path).starts_with(&update_dir) {
@@ -742,7 +743,7 @@ pub fn abandon(env: &Env, branch: &str, apply: bool, force: bool) -> Result<Aban
         )
         .with_details(json!({ "branch": branch, "worktree": report.worktree, "dirty": n }))
         .with_hint(format!(
-            "commit or copy what you want to keep, then discard the rest explicitly: kbw update abandon {branch} --apply --force"
+            "commit or copy what you want to keep, then discard the rest explicitly: kb update abandon {branch} --apply --force"
         )));
     }
     if wt.path.exists() {
@@ -915,7 +916,7 @@ pub fn render_abandon(r: &AbandonReport) -> String {
     };
     format!(
         "dry-run: would abandon {branch} (at {at})\n  worktree {wt}: {state}\n  branch {branch}: {recover}\n\
-         nothing was removed; run `kbw update abandon {branch} {flags}` to remove both\n",
+         nothing was removed; run `kb update abandon {branch} {flags}` to remove both\n",
         branch = r.branch,
         at = short(&r.commit),
         wt = r.worktree,
@@ -1117,7 +1118,7 @@ fn resolve_url(env: &Env, raw: &str) -> Result<(String, String)> {
         return Ok((raw.to_string(), protocol));
     }
     let path = env.cwd.join(raw);
-    let path = path.canonicalize().map_err(|e| {
+    let path = path.canonical().map_err(|e| {
         KbError::invalid_input(format!("upstream path `{raw}` is not accessible: {e}"))
     })?;
     Ok((path_str(&path)?.to_string(), protocol))
@@ -1409,7 +1410,7 @@ impl FailureContext {
         }))
         .with_hint(format!(
             "the worktree {} is kept for inspection and the main checkout was not modified; \
-             fix and commit there, or discard with `kbw update abandon {} --apply` \
+             fix and commit there, or discard with `kb update abandon {} --apply` \
              (add --force for uncommitted changes)",
             self.worktree.display(),
             self.branch
@@ -1423,7 +1424,7 @@ fn run_step(
     name: &str,
     args: &[&str],
 ) -> Result<StepReport> {
-    let command = format!("kbw {}", args.join(" "));
+    let command = format!("kb {}", args.join(" "));
     let out = runner
         .run(&fail.worktree, args)
         .map_err(|e| fail.error(name, &command, 1, &e.message))?;
@@ -1453,10 +1454,10 @@ fn conflict_error(
     let next = vec![
         format!("cd {wt} and resolve the conflicts; kb never resolves semantic conflicts"),
         "git add <files> && git commit --no-edit".to_string(),
-        "run ./kbw migrate --apply, ./kbw integrate --generate --apply (if configured) and ./kbw validate in the worktree".to_string(),
+        "run kb migrate --apply, kb integrate --generate --apply (if configured) and kb validate in the worktree".to_string(),
         format!("set revision = \"{}\" and ref = \"{}\" in {UPSTREAM_FILE}, commit", up.commit, up.reference),
         format!(
-            "or discard: kbw update abandon {} --apply (add --force to discard the conflicted files)",
+            "or discard: kb update abandon {} --apply (add --force to discard the conflicted files)",
             fail.branch
         ),
     ];
@@ -1543,7 +1544,7 @@ fn version_notes(v: &BTreeMap<String, VersionChange>, schema: &SchemaSupport) ->
     let changed = |k: &str| v.get(k).is_some_and(|c| c.changed);
     let mut notes = Vec::new();
     if schema.migration_required {
-        notes.push("knowledge migration required: `update prepare` runs `kbw migrate --apply` on the update branch".into());
+        notes.push("knowledge migration required: `update prepare` runs `kb migrate --apply` on the update branch".into());
     }
     if changed("protocol") {
         notes.push("the CLI JSON protocol changes: update scripts that parse kb output".into());
@@ -1552,7 +1553,7 @@ fn version_notes(v: &BTreeMap<String, VersionChange>, schema: &SchemaSupport) ->
         notes.push("the index schema changes: derived indexes are rebuilt on first use".into());
     }
     if changed("skill_protocol") {
-        notes.push("the skill protocol changes: after merging, re-run `kbw integrate --apply` in host repositories and start new agent sessions so the updated skill is loaded".into());
+        notes.push("the skill protocol changes: after merging, re-run `kb integrate --apply` in host repositories and start new agent sessions so the updated skill is loaded".into());
     }
     notes
 }
@@ -1566,7 +1567,7 @@ fn read_upstream_config(kb_root: &Path) -> Result<UpstreamConfig> {
                 ErrorCode::ConfigInvalid,
                 format!("{UPSTREAM_FILE} is missing: the upstream base is unknown"),
             )
-            .with_hint("`kbw update prepare` records it; or create it with `schema = 1` and `revision = \"<upstream commit>\"`"));
+            .with_hint("`kb update prepare` records it; or create it with `schema = 1` and `revision = \"<upstream commit>\"`"));
         }
         Err(e) => return Err(KbError::io(UPSTREAM_FILE, e)),
     };
@@ -1645,13 +1646,10 @@ fn tail(text: &str, lines: usize) -> String {
 }
 
 fn canonical(p: &Path) -> PathBuf {
-    if let Ok(c) = p.canonicalize() {
+    if let Ok(c) = p.canonical() {
         return c;
     }
-    match (
-        p.parent().and_then(|d| d.canonicalize().ok()),
-        p.file_name(),
-    ) {
+    match (p.parent().and_then(|d| d.canonical().ok()), p.file_name()) {
         (Some(dir), Some(name)) => dir.join(name),
         _ => p.to_path_buf(),
     }

@@ -9,6 +9,7 @@ use crate::context::{canonical_json, delivery::record_digest, estimate_tokens};
 use crate::error::{KbError, Result};
 use crate::knowledge::{KnowledgeView, Origin};
 use crate::model::{Delivery, Kind, Record, Status};
+use crate::util::PathExt;
 use crate::util::{read_file_limited, safe_join, sha256_hex};
 
 pub const CORE_TOKEN_CAP: u64 = 600;
@@ -137,9 +138,9 @@ pub fn verify_installed(
         return Err(stale());
     }
     let bundle = super::generate::load_bundle(kb_root, loc)?;
-    if host.join(&bundle.manifest.kb_path).canonicalize().ok() != kb_root.canonicalize().ok() {
+    if host.join(&bundle.manifest.kb_path).canonical().ok() != kb_root.canonical().ok() {
         return Err(KbError::invalid_input(
-            "the installed core's launcher path does not point to this KB checkout",
+            "the installed core's KB path does not point to this KB checkout",
         ));
     }
     if bundle.manifest.core.as_ref() != Some(&expected)

@@ -8,12 +8,15 @@ kb-knowledge:
     # Full history: `validate --base` and `update divergence` compare with older commits.
     GIT_DEPTH: "0"
     GIT_SUBMODULE_STRATEGY: none
+    # Runtime store and Cargo build directory of `kb engine bootstrap` (cached below).
+    KB_RUNTIME_DIR: $CI_PROJECT_DIR/.cache/kb-runtime
+    KB_CARGO_TARGET_DIR: $CI_PROJECT_DIR/.cache/cargo-target
   cache:
     key:
-      # GitLab accepts at most two files here; the runtime directory is keyed by its own
-      # fingerprint (toolchain included), so this key only affects cache reuse.
+      # GitLab accepts at most two files here; runtimes are stored by engine fingerprint,
+      # so this key only affects cache reuse.
       files: [Cargo.lock, core/release.toml]
-    paths: [.cache/runtime]
+    paths: [.cache/kb-runtime, .cache/cargo-target]
   artifacts:
     when: always
     paths: [.cache/knowledge-ci/]
@@ -21,15 +24,16 @@ kb-knowledge:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - rustup toolchain install   # the version pinned in rust-toolchain.toml
-    - ./kbw --kbw-bootstrap      # explicit runtime bootstrap (source build or cache hit)
+    # kb for this checkout: its release, else a source build; explicit engine bootstrap.
+    - sh core/templates/ci/install-kb.sh . "$CI_PROJECT_DIR/.cache/kb-bin"
+    - export PATH="$CI_PROJECT_DIR/.cache/kb-bin:$PATH"
     # Provision read-only hosts pinned in project/ci/hosts.tsv before this step.
     - sh core/templates/ci/check-knowledge.sh
     - |
       if [ -n "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" ]; then
         git fetch --no-tags origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
-        ./kbw validate --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+        kb validate --base "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
       fi
-    - ./kbw integrate --generate --check
-    - ./kbw update divergence
-    - ./kbw schema --check
+    - kb integrate --generate --check
+    - kb update divergence
+    - kb schema --check

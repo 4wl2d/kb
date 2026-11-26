@@ -4,7 +4,7 @@
 //! overwritten, except `project/README.md` (the upstream placeholder), which is replaced by
 //! the project README. An existing `project/project.toml` means the project is already
 //! initialized. The plan also renders the skill bundle (`project/skill-config/generated/`)
-//! so that `kbw integrate --generate --check` passes right after init, and installs the
+//! so that `kb integrate --generate --check` passes right after init, and installs the
 //! downstream GitHub/GitLab KB CI and review templates: the workflow
 //! `.github/workflows/kb-knowledge.yml` and the files in `KB_REVIEW_FILES`.
 
@@ -25,6 +25,7 @@ use crate::integrate::template::{RenderedFile, Vars, render_dir, render_one, tom
 use crate::integrate::{Action, Change};
 use crate::model::ids::check_namespace;
 use crate::model::{Harness, Profile, ProfileLocation, UPSTREAM_FILE, UpstreamConfig};
+use crate::util::PathExt;
 use crate::util::{atomic_write, read_file_limited, safe_join};
 
 /// Project skeleton templates (rendered into `project/`).
@@ -198,8 +199,8 @@ pub fn list_examples(kb_root: &Path) -> Vec<String> {
 
 /// The KB checkout's `HEAD` commit when the KB root is itself a Git work tree root.
 fn kb_head(kb_root: &Path) -> Option<String> {
-    let top = crate::git::toplevel(kb_root)?.canonicalize().ok()?;
-    if top != kb_root.canonicalize().ok()? {
+    let top = crate::git::toplevel(kb_root)?.canonical().ok()?;
+    if top != kb_root.canonical().ok()? {
         return None;
     }
     Git::new(kb_root).resolve_commit("HEAD").ok().flatten()
@@ -208,7 +209,7 @@ fn kb_head(kb_root: &Path) -> Option<String> {
 fn upstream_vars(vars: &mut Vars, url: Option<&str>, revision: Option<&str>) {
     let url_line = match url {
         Some(u) => format!("url = {}", toml_string(u)),
-        None => "# url = \"<upstream repository URL>\"   # not set: pass --upstream-url to `kbw init` or edit this line".into(),
+        None => "# url = \"<upstream repository URL>\"   # not set: pass --upstream-url to `kb init` or edit this line".into(),
     };
     let rev_line = match revision {
         Some(r) => format!("revision = {}", toml_string(r)),
@@ -268,7 +269,7 @@ pub fn plan(kb_root: &Path, opts: &InitOptions) -> Result<InitPlan> {
             ),
         )
         .with_details(json!({"path": loc.config}))
-        .with_hint("edit project/ directly; `kbw validate` checks it"));
+        .with_hint("edit project/ directly; `kb validate` checks it"));
     }
     check_remote(&opts.remote).map_err(KbError::invalid_input)?;
     check_approved_ref(&opts.approved_ref).map_err(KbError::invalid_input)?;

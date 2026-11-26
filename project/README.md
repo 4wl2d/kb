@@ -3,15 +3,15 @@
 This directory holds the project-owned knowledge of a downstream knowledge base. In the
 upstream kb repository it is intentionally empty: upstream ships the engine, templates and
 skills, never project data. Until a downstream is initialized, project commands such as
-`./kbw context` fail with `PROJECT_NOT_INITIALIZED` (exit code 10).
+`kb context` fail with `PROJECT_NOT_INITIALIZED` (exit code 10).
 
 ## Initialize a downstream
 
 In your product's fork or private copy of this repository (keep the upstream history):
 
 ```sh
-./kbw init --name "<Product name>" --namespace <ns>                # dry-run: shows the plan
-./kbw init --name "<Product name>" --namespace <ns> --apply        # writes the files
+kb init --name "<Product name>" --namespace <ns>                # dry-run: shows the plan
+kb init --name "<Product name>" --namespace <ns> --apply        # writes the files
 ```
 
 Useful options: `--remote <name>` and `--approved-ref <ref>` (trust boundary, default
@@ -27,6 +27,6 @@ follow BOOTSTRAP.md to turn the empty structure into the project's knowledge bas
 
 ## Try the synthetic example
 
-`./kbw init --example synthetic-multirepo --apply` materializes an invented multi-repository
+`kb init --example synthetic-multirepo --apply` materializes an invented multi-repository
 product (namespace `example`) for demonstration and testing. Use it only in a scratch clone;
 see `core/templates/examples/synthetic-multirepo/README.md`.

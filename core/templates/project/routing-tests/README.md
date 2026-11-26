@@ -1,6 +1,6 @@
 # Routing tests
 
-Golden context requests for this knowledge base. `./kbw validate` runs every `*.toml` file in
+Golden context requests for this knowledge base. `kb validate` runs every `*.toml` file in
 this directory (skip with `--no-routing`) and fails with `ROUTING_TESTS_FAILED` when a case
 does not hold.
 
@@ -23,7 +23,7 @@ Other optional fields: `modules`, `features`, `concepts`, `host_versions` (`repo
 (`complete`, `partial`, `conflict`, `incomplete`), `expect_ambiguous` (normalized phrases),
 `expect_budget_exceeded`.
 
-Tier A (`./kbw eval routing`) additionally supports `change_types`, `expect_order` (relative
+Tier A (`kb eval routing`) additionally supports `change_types`, `expect_order` (relative
 order of distinct delivered record ids), `max_tokens` (estimated complete compact response),
 `relevant`, `recall_k` (default 10) and `min_recall_percent` (0..100, requires relevant labels).
 Recall uses distinct record ids in delivery order. `not_applicable` lists human-adjudicated

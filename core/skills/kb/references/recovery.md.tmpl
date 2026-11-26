@@ -1,9 +1,10 @@
 # Recovery: error codes and what to do
 
 Every failure carries a stable symbolic code and exit code (`error.code`, `error.exit_code`
-in JSON), a message, optional `details` and often a `hint`. Read the hint first. Launcher:
-`{{kb_path}}/kbw`. Never work around an error by switching to `--offline`, another snapshot
-or a smaller scope without telling the user.
+in JSON), a message, optional `details` and often a `hint`. Read the hint first. Command:
+`{{kb}}`. Never work around an error by switching to `--offline`, another snapshot
+or a smaller scope without telling the user. `kb` never builds or downloads an engine
+implicitly: getting a runtime is an explicit action.
 
 Reuse the task's existing authorization. Routine reads, validation, fetches and a local
 bootstrap needed for an authorized implementation/setup do not need another permission
@@ -13,16 +14,16 @@ their concrete effect. A recovery suggestion does not grant it.
 | code | exit | what it means | what to do |
 |---|---|---|---|
 | `INTERNAL` | 1 | engine bug | Report it with the command and output; continue without claiming complete context. |
-| `USAGE` | 2 | invalid or unknown arguments | Fix the command line (`{{kb_path}}/kbw <command> --help`). |
-| `PROJECT_NOT_INITIALIZED` | 10 | the KB has no `project/project.toml` | Tell the user; initializing a KB (`kbw init`) is a maintainer decision, not yours. |
+| `USAGE` | 2 | invalid or unknown arguments | Fix the command line (`{{kb}} <command> --help`). |
+| `PROJECT_NOT_INITIALIZED` | 10 | the KB has no `project/project.toml` | Tell the user; initializing a KB (`kb init`) is a maintainer decision, not yours. |
 | `CONFIG_INVALID` | 11 | project, skill or lock configuration is invalid | Report the message; configuration changes go through KB review. |
-| `UNSUPPORTED_SCHEMA_VERSION` | 13 | a file uses a schema this engine cannot read | Stop; context is not complete. The KB needs `kbw migrate` or an engine update (maintainers). |
+| `UNSUPPORTED_SCHEMA_VERSION` | 13 | a file uses a schema this engine cannot read | Stop; context is not complete. The KB needs `kb migrate` or an engine update (maintainers). |
 | `ALREADY_INITIALIZED` | 14 | `init` on an initialized KB | Nothing to do; edit `project/` instead. |
 | `UNKNOWN_SCOPE` | 15 | an explicit repo/module/feature/concept id does not exist | Check the ids in the KB registry (`project/registry/*.toml`) and retry. |
-| `NOT_FOUND` | 16 | record, section, file, symbol or text not found (agent commands still print their answer) | For a record, check the id (`kbw search <words>{{snapshot_arg}}`); record ids are stable and never reused. For code, the answer says what was covered: do not repeat the same question. A name that does not occur was looked for as a whole word, as written: check the spelling (`kbw find` matches parts of words and ignores case for lower-case text), then report it, like a text or file that occurs nowhere, as absent from the files checked. ``no line writes `Type.member` `` is not final: look the member up by its own name, as `next:` says. For a name that is used while no line reads as its declaration, cite the listed uses and report what the scan saw (the declaration may be in a dependency, in generated code or in a form the scan does not recognise). |
+| `NOT_FOUND` | 16 | record, section, file, symbol or text not found (agent commands still print their answer) | For a record, check the id (`kb search <words>{{snapshot_arg}}`); record ids are stable and never reused. For code, the answer says what was covered: do not repeat the same question. A name that does not occur was looked for as a whole word, as written: check the spelling (`kb find` matches parts of words and ignores case for lower-case text), then report it, like a text or file that occurs nowhere, as absent from the files checked. ``no line writes `Type.member` `` is not final: look the member up by its own name, as `next:` says. For a name that is used while no line reads as its declaration, cite the listed uses and report what the scan saw (the declaration may be in a dependency, in generated code or in a form the scan does not recognise). |
 | `FRESHNESS_UNVERIFIED` | 20 | the approved ref could not be fetched | Context is not verified. Tell the user (network, VPN, credentials). Use `--offline` only if the user accepts unverified knowledge, and report `freshness = unverified`. |
 | `UPDATE_REQUIRED` | 21 | the selected snapshot needs another engine, or the host pin differs from the approved tip | Report both revisions from `details`. Ask the user to update the KB submodule through review, or to choose `--snapshot pinned` explicitly. |
-| `SNAPSHOT_NOT_FOUND` | 22 | the requested revision does not exist locally or remotely | Check the revision; `{{kb_path}}/kbw sync` is a read-only fetch and may already be within the task's authority. |
+| `SNAPSHOT_NOT_FOUND` | 22 | the requested revision does not exist locally or remotely | Check the revision; `{{kb}} sync` is a read-only fetch and may already be within the task's authority. |
 | `SKILL_OUTDATED` | 23 | this skill is older than the engine | Re-read `SKILL.md`; if the protocol number did not change, ask the user to start a new session. |
 | `CONTEXT_INCOMPLETE` | 30 | completeness is `partial`, `conflict` or `incomplete` (full result printed) | Use what was delivered, but list the undetermined, conflicting or missing parts; narrow the scope with `--path`/`--repo` when that is the cause. Never call it complete. |
 | `CONTEXT_BUDGET_EXCEEDED` | 31 | mandatory knowledge does not fit the budget | Re-run with `--budget` at least the required amount from `details`; do not proceed on partial obligations. |
@@ -32,26 +33,20 @@ their concrete effect. A recovery suggestion does not grant it.
 | `ENGINE_DIVERGED` | 43 | engine-owned paths differ from the upstream base | Maintainers only: move engine changes upstream or record them in `project/upstream.toml`. |
 | `IMPACT_UNACKNOWLEDGED` | 44 | affected knowledge or unknown coverage is not acknowledged | Update the `kb-impact` block of the merge request (`none` with a reason, `linked`, or `included`) and, when knowledge changes, propose it. |
 | `CONFLICT` | 45 | generated files, managed blocks or draft identities conflict | Preserve local edits and inspect duplicates. `--force` requires existing or new explicit authority to discard those exact edits. |
-| `CHECKS_FAILED` | 46 | a configured check, changed-knowledge validation or a declared probe failed (`kbw check`; result printed) | Read the output lines of the failed check, fix the cause and re-run `{{kb_path}}/kbw check`; never edit `tools.toml` to silence a check. |
-| `RUNTIME_INCOMPATIBLE` | 50 | the running binary does not match the local engine | Always run through `{{kb_path}}/kbw`; if it persists, ask the user to re-bootstrap (`{{kb_path}}/kbw --kbw-bootstrap`). |
+| `CHECKS_FAILED` | 46 | a configured check, changed-knowledge validation or a declared probe failed (`kb check`; result printed) | Read the output lines of the failed check, fix the cause and re-run `{{kb}} check`; never edit `tools.toml` to silence a check. |
+| `RUNTIME_INCOMPATIBLE` | 50 | the running binary does not match the local engine | Run plain `{{kb}}` (not a runtime binary directly); `{{kb}} engine info` shows which runtime serves the checkout. If it persists, report it. |
 | `UPDATE_CONFLICT` | 51 | an upstream update could not be prepared cleanly | Maintainers resolve it in the update worktree; nothing in the main checkout changed. |
 | `MIGRATION_FAILED` | 52 | a schema migration failed | Report the message; the previous files are intact. |
 | `UPDATE_FAILED` | 53 | preparing an update failed | Report the message; the previous runtime and checkout are intact. |
+| `RUNTIME_NOT_BOOTSTRAPPED` | 54 | no runtime exists for the checkout's engine (first use, an engine edit, or the KB checkout moved to another engine version) | Run `{{kb}} engine install` (release runtime) or `{{kb}} engine bootstrap` (source build) when that is covered by the task; otherwise explain which one is needed before asking. |
+| `BOOTSTRAP_FAILED` | 55 | the source build failed; any earlier runtime is intact | Report the build output; do not retry in a loop. |
+| `TOOLCHAIN_MISMATCH` | 56 | the installed rustc is not the pinned toolchain | Report it; installing toolchains is the user's decision. |
+| `ARTIFACT_INVALID` | 57 | a release archive failed verification (digest, entries, BUILD-INFO, smoke test) | Report it; never bypass digest verification. |
+| `PACKAGE_FAILED` | 58 | `kb engine package` could not build or write an archive | Report it (maintainers only). |
 | `GIT_ERROR` | 60 | a Git command failed | Report the (redacted) message; check that you are inside the host repository. |
-| `INDEX_ERROR` | 61 | the local index cache failed | Retry once; then `{{kb_path}}/kbw index --rebuild` (the cache is derived data). |
+| `INDEX_ERROR` | 61 | the local index cache failed | Retry once; then `{{kb}} index --rebuild` (the cache is derived data). |
 | `IO_ERROR` | 62 | a file could not be read or written | Report the path and message. |
 | `UNSAFE_PATH` | 63 | a path escapes its root, uses `..` or a symlink | Use repository-relative paths without `..`; symlinks are refused by design. |
 | `INVALID_INPUT` | 64 | an argument or file is malformed | Fix the input named in the message (for example malformed `<!-- kb:begin/end -->` markers). |
-| `TOOL_UNAVAILABLE` | 65 | no connected tool could answer (not installed, no index, or every routed tool failed; `details.attempts` says why) | Run `{{kb_path}}/kbw tools`; report what is missing (installing tools or creating indexes is the user's decision). Read source directly for this question meanwhile. |
-
-## Launcher errors (`kbw: error[CODE]: ...` on stderr, exit 50)
-
-The launcher reports its own errors before the engine runs. It never builds or installs an
-engine implicitly: bootstrapping is an explicit, documented action.
-
-| code | what it means | what to do |
-|---|---|---|
-| `KBW_RUNTIME_NOT_BOOTSTRAPPED` | no runtime exists for this checkout's engine (first use, or the KB checkout moved to another engine version) | Run `{{kb_path}}/kbw --kbw-bootstrap` when that local build is covered by the task; otherwise explain the required build or verified archive installation before asking. |
-| `KBW_BOOTSTRAP_FAILED` | the source build failed; any earlier runtime is intact | Report the build output; do not retry in a loop. |
-| `KBW_TOOLCHAIN_MISMATCH` | the installed rustc is not the pinned toolchain | Report it; installing toolchains is the user's decision. |
-| `KBW_ARTIFACT_INVALID` | a release archive failed verification (digest, entries, BUILD-INFO, smoke test) | Report it; never bypass digest verification. |
+| `TOOL_UNAVAILABLE` | 65 | no connected tool could answer (not installed, no index, or every routed tool failed; `details.attempts` says why) | Run `{{kb}} tools`; report what is missing (installing tools or creating indexes is the user's decision). Read source directly for this question meanwhile. |
+| `DOWNLOAD_FAILED` | 66 | a release file could not be downloaded (no network, no `curl`, or no such release) | Report it; do not switch to unverified downloads. |

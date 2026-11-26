@@ -20,7 +20,7 @@ impl World {
         common::write_min_project(&kb);
         sb.commit_all(&kb, "synthetic knowledge");
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(&host.join("app/auth/Store.rs"), "// Synthetic old state\n");
         let base = sb.commit_all(&host, "synthetic base");
         Self { sb, kb, host, base }

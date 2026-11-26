@@ -19,6 +19,7 @@ use crate::model::tools::Capability;
 use crate::model::{Anchor, AnchorKind, Common};
 use crate::output::{CommandOutput, Format};
 use crate::tools::{self, CodeQuery, Roots};
+use crate::util::PathExt;
 use crate::util::safe_join;
 
 const KNOWLEDGE: &str = "knowledge";
@@ -40,7 +41,7 @@ pub fn run(ctx: &Ctx, args: &DocArgs) -> Result<CommandOutput> {
     let cwd = ctx
         .env
         .cwd
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| ctx.env.cwd.clone());
     let compact = matches!(ctx.format, Format::Compact | Format::Terse);
     let path_subject = is_path(&args.subject, &cwd, &ws.roots.code);
@@ -103,7 +104,7 @@ pub fn run(ctx: &Ctx, args: &DocArgs) -> Result<CommandOutput> {
                 "`{}` is neither a path nor a symbol a connected tool knows",
                 args.subject
             ))
-            .with_hint("pass a host-relative path, or check the name with `kbw sym <name>`");
+            .with_hint("pass a host-relative path, or check the name with `kb sym <name>`");
             return Ok(agent::output(answer, args.answer.lines, Some(failure)));
         }
         if paths.len() > 3 {

@@ -22,4 +22,4 @@ path = "docs/placeholder.md"                # host-relative path, or `url = "htt
 +++
 ## Details
 
-Placeholder: explanatory Markdown shown by `kbw show <id> --section details`.
+Placeholder: explanatory Markdown shown by `kb show <id> --section details`.

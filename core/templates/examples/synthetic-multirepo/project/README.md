@@ -1,9 +1,9 @@
 # Example: synthetic multi-repository product (SYNTHETIC)
 
-This project was created with `kbw init --example synthetic-multirepo`. Every repository,
+This project was created with `kb init --example synthetic-multirepo`. Every repository,
 team, record and URL in it is invented for demonstration and testing; none of it describes
 a real product or organization. Do not build real work on it: initialize a real project with
-`kbw init --name <name> --namespace <ns>` in a fresh downstream instead.
+`kb init --name <name> --namespace <ns>` in a fresh downstream instead.
 
 The invented product has three repositories (`mobile`, `backend`, `shared-contracts`), two
 features (`login`, `checkout`), cross-repository contracts, a product-wide review policy with

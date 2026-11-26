@@ -36,9 +36,9 @@ Rules that hold in every format:
     same way after the result; in JSON mode it is only in the envelope.
 * The process exit code is `0` on success and otherwise equals `error.exit_code`.
 * `--json` and `--format` together are a usage error.
-* The launcher `kbw` reports its own failures before the engine runs, as text on stderr only
-  (`kbw: error[KBW_...]: ...`), with an empty stdout even when `--json` was passed. See
-  [Launcher error codes](#launcher-error-codes).
+* Engine selection failures (no runtime for the checkout's engine, a runtime that cannot be
+  started) are errors of the command that was asked for, in the same envelope. See
+  [Engine selection and the environment](#engine-selection-and-the-environment).
 
 ### Snapshot line in text output
 
@@ -86,7 +86,7 @@ Failures come in two shapes:
   `UNSUPPORTED_SCHEMA_VERSION` (`update check`).
 
 A hard error captured in a host repository of the synthetic example (`mobile`, KB mounted at
-`.kb`) with `.kb/kbw --json context --intent implement --path app/auth/TokenRefresher.kt --budget 100`:
+`.kb`) with `kb --json context --intent implement --path app/auth/TokenRefresher.kt --budget 100`:
 
 ```json
 {
@@ -148,7 +148,7 @@ argument that names a subcommand, otherwise `null`:
   "error": {
     "code": "USAGE",
     "exit_code": 2,
-    "hint": "run `kbw <command> --help` for the accepted arguments",
+    "hint": "run `kb <command> --help` for the accepted arguments",
     "message": "error: unexpected argument '--nosuch' found\n\nUsage: kb --json <COMMAND>\n\nFor more information, try '--help'."
   },
   "meta": {},
@@ -194,11 +194,11 @@ report types and integration tests. Members listed as "+ `snapshot`" carry prove
 | `integrate` | `level` (`kb` with `--generate`, `host` otherwise), `mode` (`dry-run`/`check`/`apply`), `harnesses`, `kb_path`, `engine_version`, `skill_protocol`, `changes[]`, `summary`, `clean`; host level adds `host`, `lock`, `warnings` | `DRIFT_DETECTED` with `--check`, `CONFLICT` with `--apply`; hard `INVALID_INPUT` when no host is found |
 | `migrate` | dry-run: `mode`, `config`, `current`, `target`, `oldest_supported`, `pending`, `migrations[]`, `files[]`; `--apply`: `mode`, `config`, `target`, `written[]`, `up_to_date`, `skipped[]` | hard: `UNSUPPORTED_SCHEMA_VERSION`, `MIGRATION_FAILED` |
 | `update check` | `upstream` (`url`, `reference`, `commit`), `head`, `versions`, `schema`, `merge` (`clean`, `conflicts`, `merge_base`, `up_to_date`), `divergence`, `uncommitted`, `notes` | `UPDATE_CONFLICT`, `UNSUPPORTED_SCHEMA_VERSION`; `--offline` is `INVALID_INPUT` |
-| `update prepare` | `branch`, `worktree`, `base`, `upstream`, `versions`, `schema`, `steps[]` (`bootstrap`, `migrate`, `integrate`, `validate`), `commits[]`, `changes`, `uncommitted`, `notes`, `next_steps` | hard: `UPDATE_CONFLICT`, `UPDATE_FAILED`, `INVALID_INPUT` (branch not under `kb-update/`, branch or worktree exists); `next_steps` and the hints name `kbw update abandon <branch> --apply` for discarding |
+| `update prepare` | `branch`, `worktree`, `base`, `upstream`, `versions`, `schema`, `steps[]` (`bootstrap`, `migrate`, `integrate`, `validate`), `commits[]`, `changes`, `uncommitted`, `notes`, `next_steps` | hard: `UPDATE_CONFLICT`, `UPDATE_FAILED`, `INVALID_INPUT` (branch not under `kb-update/`, branch or worktree exists); `next_steps` and the hints name `kb update abandon <branch> --apply` for discarding |
 | `update divergence` | `revision`, `reference`, `url`, `engine_paths`, `diverged[]`, `patched[]`, `unused_patches[]` | `ENGINE_DIVERGED` |
 | `update abandon` | `mode` (`dry-run`/`apply`), `branch`, `commit`, `worktree`, `dirty` (number of `git status` entries of the worktree, `null` when its directory is missing), `commits_not_in_head` | dry-run unless `--apply`; hard: `NOT_FOUND`, `INVALID_INPUT` (not a `kb-update/*` branch, worktree outside `.cache/update/` or locked), `CONFLICT` with `--apply` when the worktree has uncommitted, untracked or conflicted files (`details` `{branch, worktree, dirty}`; `--apply --force` discards them), `USAGE` for `--force` without `--apply` |
 | `schema` | `dir`, `schemas[]`, `in_sync`, `drift[]`; with `--write`: `dir`, `schemas[]`, `changes[]` | `DRIFT_DETECTED` only with `--check` |
-| `version` | `engine_version`, `document_schema`, `protocol`, `index_schema`, `skill_protocol`, `parser_version`, `build_fingerprint` | needs no KB root; `build_fingerprint` is `unknown` for builds made outside `kbw` |
+| `version` | `engine_version`, `document_schema`, `protocol`, `index_schema`, `skill_protocol`, `parser_version`, `build_fingerprint` | needs no KB root; `build_fingerprint` is `unknown` for builds made outside `kb` |
 
 Additive command contracts (CLI envelope/error meanings remain `kb.cli.v1`):
 
@@ -245,13 +245,13 @@ as `validate` diagnostics and as the context reason `SNAPSHOT_INVALID`, not as a
 | code | exit | group | meaning | typical action |
 |---|---|---|---|---|
 | `INTERNAL` | 1 | internal | engine bug or impossible state | [report a bug](troubleshooting.md#reporting-bugs) |
-| `USAGE` | 2 | usage | unknown or invalid arguments, missing required option, conflicting flags | fix the command line; `kbw <command> --help` |
+| `USAGE` | 2 | usage | unknown or invalid arguments, missing required option, conflicting flags | fix the command line; `kb <command> --help` |
 | `PROJECT_NOT_INITIALIZED` | 10 | project/config | `project/project.toml` does not exist | [initialize](troubleshooting.md#project_not_initialized) (maintainer decision) |
-| `CONFIG_INVALID` | 11 | project/config | KB root not found, or a config, lock, bundle or remote setting is invalid | fix the file named in the message through review; run from the launcher or pass `--root` |
-| `UNSUPPORTED_SCHEMA_VERSION` | 13 | project/config | a file, migration target or upstream uses a document schema this engine cannot read or migrate | `kbw migrate`, or update through an intermediate upstream release |
+| `CONFIG_INVALID` | 11 | project/config | KB root not found, or a config, lock, bundle or remote setting is invalid | fix the file named in the message through review; run inside a KB checkout or a host that mounts one at `.kb`, or pass `--root` |
+| `UNSUPPORTED_SCHEMA_VERSION` | 13 | project/config | a file, migration target or upstream uses a document schema this engine cannot read or migrate | `kb migrate`, or update through an intermediate upstream release |
 | `ALREADY_INITIALIZED` | 14 | project/config | `init` on an initialized KB | edit `project/` directly |
 | `UNKNOWN_SCOPE` | 15 | project/config | an explicit repo, module, feature or concept id is not in the registry | check `project/registry/*.toml` (ids are case-sensitive) |
-| `NOT_FOUND` | 16 | project/config | record, section, host repository or update worktree not found; for agent commands an unknown symbol, an unresolvable `doc` subject or no `find` match (answer printed), and a file or first line that `read` does not find | for a record check the id (`kbw search`); for code the answer says what was looked for and in which files, and names the lookup still worth making, if any ([agent-cli.md](agent-cli.md#misses-are-final)); run from the host or pass `--host` |
+| `NOT_FOUND` | 16 | project/config | record, section, host repository or update worktree not found; for agent commands an unknown symbol, an unresolvable `doc` subject or no `find` match (answer printed), and a file or first line that `read` does not find | for a record check the id (`kb search`); for code the answer says what was looked for and in which files, and names the lookup still worth making, if any ([agent-cli.md](agent-cli.md#misses-are-final)); run from the host or pass `--host` |
 | `FRESHNESS_UNVERIFIED` | 20 | freshness/snapshot | the approved ref could not be fetched in this call | [restore access or go offline explicitly](troubleshooting.md#freshness_unverified) |
 | `UPDATE_REQUIRED` | 21 | freshness/snapshot | the host pin differs from the approved tip, or the selected snapshot needs another engine | [choose a snapshot or update the pin](troubleshooting.md#update_required) |
 | `SNAPSHOT_NOT_FOUND` | 22 | freshness/snapshot | the requested revision, pin or approved tip is not known | fetch it, run once online, or select another snapshot |
@@ -265,16 +265,22 @@ as `validate` diagnostics and as the context reason `SNAPSHOT_INVALID`, not as a
 | `IMPACT_UNACKNOWLEDGED` | 44 | checks | affected knowledge or unknown coverage has no valid `kb-impact` acknowledgement | add or fix the block in the MR description |
 | `CONFLICT` | 45 | checks | generated files or managed blocks were edited outside kb (`integrate --apply`), or an update worktree has uncommitted, untracked or conflicted files (`update abandon --apply`); nothing was written or removed | move the edits into the KB, or keep what matters and re-run with `--apply --force` after review |
 | `CHECKS_FAILED` | 46 | checks | a configured check command failed or could not start, changed knowledge has validation errors, or a declared probe failed (`check`; the answer is printed) | read the `output` lines of the failed check and fix the cause; never edit `tools.toml` to silence a check |
-| `RUNTIME_INCOMPATIBLE` | 50 | runtime/update | the running binary does not match the checkout's `core/release.toml` | run through `kbw`; re-bootstrap |
-| `UPDATE_CONFLICT` | 51 | runtime/update | merging the upstream ref conflicts (predicted by `check`, left in the worktree by `prepare`) | resolve in the update worktree, or discard it with `kbw update abandon <branch> --apply --force` (the conflicted files count as uncommitted) |
+| `RUNTIME_INCOMPATIBLE` | 50 | runtime/update | the running binary does not match the checkout's `core/release.toml`, or a runtime does not report the fingerprint it was selected for | run plain `kb` (`kb engine info`); replace the runtime with `kb engine bootstrap` or `kb engine install` |
+| `UPDATE_CONFLICT` | 51 | runtime/update | merging the upstream ref conflicts (predicted by `check`, left in the worktree by `prepare`) | resolve in the update worktree, or discard it with `kb update abandon <branch> --apply --force` (the conflicted files count as uncommitted) |
 | `MIGRATION_FAILED` | 52 | runtime/update | a migration transform or verification failed; nothing was written | report the listed files |
-| `UPDATE_FAILED` | 53 | runtime/update | a step of `update prepare` failed; the worktree is kept | inspect `details.output`, fix there, or discard with `kbw update abandon <branch> --apply` (add `--force` for uncommitted changes) |
+| `UPDATE_FAILED` | 53 | runtime/update | a step of `update prepare` failed; the worktree is kept | inspect `details.output`, fix there, or discard with `kb update abandon <branch> --apply` (add `--force` for uncommitted changes) |
+| `RUNTIME_NOT_BOOTSTRAPPED` | 54 | runtime/update | no runtime serves the checkout's engine fingerprint (first use, an engine edit, or a checkout moved to another engine); normal commands never build or download one (unless `KB_AUTO_BOOTSTRAP=1`) | `kb engine install` (release runtime) or `kb engine bootstrap` (source build); `details` names the checkout, its engine and the running kb |
+| `BOOTSTRAP_FAILED` | 55 | runtime/update | the source build failed, cargo is missing, the engine inputs changed during the build, or the built binary failed the smoke test (it must report this `engine_version` and fingerprint); an earlier runtime is unchanged | read the build output; bootstrap again once edits are finished |
+| `TOOLCHAIN_MISMATCH` | 56 | runtime/update | `rustc` (as selected in the checkout) is not the pinned `rust_toolchain` (a warning instead when `KB_ALLOW_TOOLCHAIN_MISMATCH=1`) | install the pinned toolchain (rustup reads `rust-toolchain.toml`) |
+| `ARTIFACT_INVALID` | 57 | runtime/update | a release archive failed verification (digest, entries, `BUILD-INFO`, smoke test), or no archive exists for this platform; the active runtime or installed kb is unchanged | never bypass the digest; for engine patches use `kb engine bootstrap` |
+| `PACKAGE_FAILED` | 58 | runtime/update | `kb engine package` could not build, smoke-test or write the archive | read the message |
 | `GIT_ERROR` | 60 | environment | a Git command failed or the repository state changed mid-command | read the (credential-redacted) message; retry |
 | `INDEX_ERROR` | 61 | environment | the SQLite cache could not be opened or used | [retry, then rebuild](troubleshooting.md#index_error-and-index-recovery) |
 | `IO_ERROR` | 62 | environment | a file could not be read or written, or changed while being read (retryable) | check the path; re-run |
 | `UNSAFE_PATH` | 63 | environment | a path is absolute, escapes its root, contains `..` or is a symlink | use a relative path inside the repository |
 | `INVALID_INPUT` | 64 | environment | malformed argument or file (revision, `--path .`, kind, statement block, branch name), or options that do not combine (`doctor --online` with `--offline`) | fix the input named in the message |
-| `TOOL_UNAVAILABLE` | 65 | environment | no connected tool could answer an agent request: not installed, no index for the code root, or every routed tool failed (`details.attempts`) | `kbw tools` and `kbw doctor` show what is missing; install the tool or create its index, or change `routes` in `tools.toml` |
+| `TOOL_UNAVAILABLE` | 65 | environment | no connected tool could answer an agent request: not installed, no index for the code root, or every routed tool failed (`details.attempts`) | `kb tools` and `kb doctor` show what is missing; install the tool or create its index, or change `routes` in `tools.toml` |
+| `DOWNLOAD_FAILED` | 66 | environment | a release file could not be downloaded (`curl` missing, no network, or no such release or asset) | restore access, or download the files yourself and pass the archive path with `--sha256` |
 
 ### Context status reasons
 
@@ -315,12 +321,12 @@ stderr and in `meta.diagnostics`. Recovery is never silent.
 | `INDEX_RECOVERED` | warning | the index file was damaged: corrupt or not a database, a database without kb metadata (no `meta` table), unreadable metadata, a required table missing, WAL mode unavailable, or damage found at query time; it was moved aside to `<profile>.sqlite.corrupt-<pid>-<nanos>`, the snapshot was rebuilt and the query retried once. `meta.index.recovery` has `kind = corrupt` and `moved_to` |
 | `INDEX_REBUILT` | info | a well-formed index whose metadata (`index_schema`, `layout`, `parser_version`, `engine_version`, `profile`) differs or lacks a key, for example one written by another engine or before a key existed, was rebuilt in place with no `.corrupt-*` file (`kind = outdated`, `reason` like `parser_version 1 -> 2` or `layout missing -> 2`), or `kb index --rebuild` was requested (`kind = requested`) |
 | `PROPOSAL_*` and proposal parse diagnostics | warning/error | problems of the proposal overlay (`PROPOSAL_NOT_APPLIED`, `PROPOSAL_REPLACES_RECORD`, `PROPOSAL_UNREADABLE`); with `--include-proposals` also the parse diagnostics of each changed file (for example `FRONT_MATTER_INVALID`) |
-| `HOST_BINDING_REPO_UNKNOWN` | warning | `.kbw.toml` names a `repo` the registry does not define; the host repo is identified by its remotes instead |
+| `HOST_BINDING_REPO_UNKNOWN` | warning | `.kb.toml` names a `repo` the registry does not define; the host repo is identified by its remotes instead |
 | `HOST_REPO_UNKNOWN` | warning | `impact`: the host repository is not identified in the registry; only repo-independent path selectors were evaluated |
 | `RECEIPT_NOT_SAVED` | warning | `context`: the receipt could not be stored under `.cache`; a later `--since-receipt` or `--core-receipt` naming it fails and full context is needed |
 | `USAGE_NOT_LOGGED` | warning | `context`: the private usage log could not be appended; `usage report` will not include this call |
 
-Example (`kbw --json --offline show <id>` after the index file was overwritten with garbage;
+Example (`kb --json --offline show <id>` after the index file was overwritten with garbage;
 the path is shortened):
 
 ```json
@@ -337,33 +343,33 @@ the path is shortened):
 }
 ```
 
-Host binding: when the host has a `.kbw.toml` its `selection` (`auto`, `latest`, `pinned`)
+Host binding: when the host has a `.kb.toml` its `selection` (`auto`, `latest`, `pinned`)
 is the default of `--snapshot auto`, and its `repo`/`pin` feed host identification; see
 [snapshots-and-trust.md](snapshots-and-trust.md).
 
-## Launcher error codes
+## Engine selection and the environment
 
-`kbw` (POSIX sh) prints `kbw: error[<CODE>]: <message>` on stderr and exits before the engine
-runs; stdout stays empty and no envelope is printed. Progress lines are `kbw: <text>`.
+Before a command runs, `kb` selects the engine that reads the checkout (architecture §9): the
+running binary when it was built from the checkout's engine sources, else the runtime of that
+fingerprint, which then runs the command in place of the started process (its exit code is
+the command's exit code). Failures of this step are protocol errors of the requested command:
+in JSON mode stdout carries one envelope (`command` is the subcommand named in the
+arguments), in text mode `error[<CODE>]: ...` goes to stderr. `kb engine ...` and
+`kb self ...` are always handled by the started `kb`; their results use the same envelope
+(`command` is `engine` or `self`).
 
-| code | exit | meaning |
-|---|---|---|
-| `KBW_USAGE` | 2 | invalid launcher flag or arguments (launcher flags are recognized only as the first argument) |
-| `KBW_RUNTIME_NOT_BOOTSTRAPPED` | 50 | no runtime for this checkout's engine fingerprint; normal commands never build implicitly (unless `KBW_AUTO_BOOTSTRAP=1`) |
-| `KBW_BOOTSTRAP_FAILED` | 50 | the source build failed, the engine inputs changed during the build, or the built binary failed the smoke test (`kb --json version` must report this `engine_version` and `build_fingerprint`); an earlier runtime is unchanged |
-| `KBW_TOOLCHAIN_MISMATCH` | 50 | `rustc` is not the pinned `rust_toolchain` (a warning instead when `KBW_ALLOW_TOOLCHAIN_MISMATCH=1`) |
-| `KBW_ARTIFACT_INVALID` | 50 | a release archive failed verification (digest, entries, `BUILD-INFO`, smoke test); the active runtime is unchanged |
-| `KBW_PACKAGE_FAILED` | 50 | `--kbw-package` could not build or write the archive |
-| `KBW_MANIFEST_INVALID` | 50 | `core/release.toml` is missing or malformed, or the build inputs cannot be hashed |
+Environment: `KB_ROOT` (the checkout; set for a selected runtime), `KB_RUNTIME_DIR` (runtime
+store), `KB_CARGO_TARGET_DIR` (Cargo target directory of source builds, default
+`<root>/.cache/cargo-target`; a relative value is resolved against the current directory),
+`KB_AUTO_BOOTSTRAP=1` (normal commands build a missing runtime), `KB_ALLOW_TOOLCHAIN_MISMATCH=1`,
+`KB_RELEASES_URL` (release location for `engine install` and `self update`) and
+`KB_CACHE_DIR` (default `<kb root>/.cache`). `KB_SELECTED_FINGERPRINT` is set by `kb` for the
+runtime it starts and is not an interface. Source builds receive the fingerprint as
+`KBW_BUILD_FINGERPRINT` for kbw-era engines; newer engines compute it in `build.rs`.
 
-Exit 50 is shared with the engine's `RUNTIME_INCOMPATIBLE` and exit 2 with `USAGE`; tell them
-apart by the empty stdout and the `kbw:` stderr prefix. Interrupts exit 129/130/143 (HUP, INT,
-TERM). Environment read by the launcher: `KBW_AUTO_BOOTSTRAP`, `KBW_ALLOW_TOOLCHAIN_MISMATCH`,
-`KBW_CARGO_TARGET_DIR` (Cargo target directory of source builds, default
-`<root>/.cache/cargo-target`; a relative value is resolved against the directory `kbw` is run
-from, not against the root); it exports `KB_ROOT` and `KBW_FINGERPRINT` to the engine and
-passes the fingerprint to source builds as `KBW_BUILD_FINGERPRINT`. The engine itself also
-honors `KB_CACHE_DIR` (default `<kb root>/.cache`).
+The deprecated `kbw` forwarder prints its own few errors as `kbw: error[<CODE>]: ...` on
+stderr: `KBW_USAGE` (2, unknown launcher flag), `KBW_LOOP` (2, the `kb` on PATH runs `kbw`
+again) and `KB_NOT_INSTALLED` (50, no `kb` on PATH).
 
 ## Versioning
 
@@ -375,8 +381,9 @@ honors `KB_CACHE_DIR` (default `<kb root>/.cache`).
 | engine | `engine_version` (semver) | the release |
 
 * `kb version` reports all of them plus the build fingerprint (`kb 0.1.0 (document schema 2,
-  protocol 1, index schema 2, skill protocol 3) build <fingerprint>`); `kbw --json version`
-  adds `parser_version` and `build_fingerprint` (`unknown` for a build made outside `kbw`).
+  protocol 1, index schema 2, skill protocol 3) build <fingerprint>`); `kb --json version`
+  adds `parser_version` and `build_fingerprint` (the engine fingerprint of the sources the
+  binary was built from, computed by `build.rs`; `unknown` only outside a full checkout).
 * The maintainer contract `kb.contract.cli-protocol` (in `core/maintainer-knowledge/`)
   requires increasing `protocol` when an envelope field is removed or changes meaning, and
   `skill_protocol` when generated instructions change the calls or their interpretation;
@@ -386,6 +393,6 @@ honors `KB_CACHE_DIR` (default `<kb root>/.cache`).
   `index_schema` or `protocol` than the running engine fails with `UPDATE_REQUIRED`
   (`details.mismatches`); a runtime that differs from the checkout's own manifest (including
   `skill_protocol`) fails with `RUNTIME_INCOMPATIBLE`.
-* The schema files are generated from the Rust model (`kbw schema --write`) and drift-checked
-  by `kbw schema --check` and the test suite; see
+* The schema files are generated from the Rust model (`kb schema --write`) and drift-checked
+  by `kb schema --check` and the test suite; see
   [maintainer-guide.md](maintainer-guide.md#regenerating-schemas).

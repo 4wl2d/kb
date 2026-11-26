@@ -292,6 +292,56 @@
         {
           "properties": {
             "code": {
+              "const": "RUNTIME_NOT_BOOTSTRAPPED"
+            },
+            "exit_code": {
+              "const": 54
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "BOOTSTRAP_FAILED"
+            },
+            "exit_code": {
+              "const": 55
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "TOOLCHAIN_MISMATCH"
+            },
+            "exit_code": {
+              "const": 56
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "ARTIFACT_INVALID"
+            },
+            "exit_code": {
+              "const": 57
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "PACKAGE_FAILED"
+            },
+            "exit_code": {
+              "const": 58
+            }
+          }
+        },
+        {
+          "properties": {
+            "code": {
               "const": "GIT_ERROR"
             },
             "exit_code": {
@@ -348,6 +398,16 @@
               "const": 65
             }
           }
+        },
+        {
+          "properties": {
+            "code": {
+              "const": "DOWNLOAD_FAILED"
+            },
+            "exit_code": {
+              "const": 66
+            }
+          }
         }
       ],
       "properties": {
@@ -378,12 +438,18 @@
             "UPDATE_CONFLICT",
             "MIGRATION_FAILED",
             "UPDATE_FAILED",
+            "RUNTIME_NOT_BOOTSTRAPPED",
+            "BOOTSTRAP_FAILED",
+            "TOOLCHAIN_MISMATCH",
+            "ARTIFACT_INVALID",
+            "PACKAGE_FAILED",
             "GIT_ERROR",
             "INDEX_ERROR",
             "IO_ERROR",
             "UNSAFE_PATH",
             "INVALID_INPUT",
-            "TOOL_UNAVAILABLE"
+            "TOOL_UNAVAILABLE",
+            "DOWNLOAD_FAILED"
           ],
           "type": "string"
         },
@@ -448,6 +514,7 @@
             "doc",
             "doctor",
             "drift",
+            "engine",
             "eval",
             "find",
             "impact",
@@ -462,6 +529,7 @@
             "run",
             "schema",
             "search",
+            "self",
             "show",
             "sym",
             "sync",

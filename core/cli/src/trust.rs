@@ -188,7 +188,7 @@ pub fn plan_stamps(
     for (id, (entry, parsed)) in selected {
         if parsed.record.common().schema != 2 {
             return Err(KbError::invalid_input(format!(
-                "{id} needs schema 2; run kbw migrate before stamping"
+                "{id} needs schema 2; run kb migrate before stamping"
             )));
         }
         let text = entry.raw.as_ref();

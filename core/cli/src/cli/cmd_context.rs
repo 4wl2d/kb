@@ -17,6 +17,7 @@ use crate::host::{self, HostContext};
 use crate::knowledge::{KnowledgeView, SnapshotInfo};
 use crate::model::{BudgetUnit, Intent, Kind, Registry};
 use crate::output::CommandOutput;
+use crate::util::PathExt;
 
 pub fn run(ctx: &Ctx, args: &ContextArgs) -> Result<CommandOutput> {
     run_inner(ctx, args, false)
@@ -82,7 +83,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
     let cwd = ctx
         .env
         .cwd
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| ctx.env.cwd.clone());
     let paths = args
         .paths
@@ -376,7 +377,7 @@ fn run_inner(ctx: &Ctx, args: &ContextArgs, outline: bool) -> Result<CommandOutp
     Ok(s.finish(out))
 }
 
-/// Host facts for the context engine: identified repo (or the unknown `.kbw.toml` repo, so
+/// Host facts for the context engine: identified repo (or the unknown `.kb.toml` repo, so
 /// that the engine reports `HOST_REPO_UNKNOWN`), host `HEAD` and the version of the host
 /// repo read from its registry `version_file` (explicit `--host-version` values win inside
 /// the engine).
@@ -478,7 +479,7 @@ fn resolve_existing_prefix(p: &Path) -> Option<PathBuf> {
     let mut tail = vec![p.file_name()?.to_os_string()];
     let mut base = p.parent()?.to_path_buf();
     let canonical = loop {
-        if let Ok(c) = base.canonicalize() {
+        if let Ok(c) = base.canonical() {
             break c;
         }
         tail.push(base.file_name()?.to_os_string());
@@ -573,7 +574,7 @@ mod tests {
     #[test]
     fn absolute_paths_through_symlinked_prefixes_stay_inside_the_host() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().canonicalize().unwrap();
+        let base = crate::util::canonicalize(dir.path()).unwrap();
         let root = base.join("real/host");
         std::fs::create_dir_all(root.join("app/auth")).unwrap();
         std::fs::create_dir_all(base.join("elsewhere")).unwrap();

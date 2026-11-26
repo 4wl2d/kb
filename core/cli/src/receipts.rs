@@ -8,6 +8,7 @@ use serde_json::Value;
 use crate::context::{ContextResult, canonical_json, receipt_id_of, to_json};
 use crate::env::Env;
 use crate::error::{ErrorCode, KbError, Result};
+use crate::util::PathExt;
 use crate::util::{FieldHasher, atomic_write, read_file_limited, safe_join};
 
 const MAX_RECEIPT_BYTES: u64 = 32 * 1024 * 1024;
@@ -22,7 +23,7 @@ struct Stored {
 
 pub fn subject(env: &Env, host: Option<&Path>, profile: &str) -> String {
     let canonical = |p: &Path| {
-        p.canonicalize()
+        p.canonical()
             .unwrap_or_else(|_| p.to_path_buf())
             .to_string_lossy()
             .into_owned()

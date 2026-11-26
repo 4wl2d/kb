@@ -49,7 +49,7 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
                 ErrorCode::Usage,
                 "`kb impact` needs --base <rev> (or --working-tree, which defaults the base to HEAD)",
             )
-            .with_hint("e.g. `kbw impact --base origin/main`, or `kbw impact --working-tree` for local changes"));
+            .with_hint("e.g. `kb impact --base origin/main`, or `kb impact --working-tree` for local changes"));
         }
     };
     let statement = read_statement(ctx, args)?;
@@ -58,7 +58,7 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
             ErrorCode::NotFound,
             "no host repository was detected: `kb impact` analyses the diff of the repository the KB describes",
         )
-        .with_hint("run it from the host repository (e.g. `.kb/kbw impact ...`) or pass --host <dir>")
+        .with_hint("run it from the host repository (where plain `kb impact ...` finds the KB mounted at .kb) or pass --host <dir>")
     })?;
     let diff = impact::host_diff(
         &host.root,
@@ -104,7 +104,7 @@ pub fn run(ctx: &Ctx, args: &ImpactArgs) -> Result<CommandOutput> {
     if report.repo.is_none() {
         s.note(crate::diag::Diagnostic::warning(
             "HOST_REPO_UNKNOWN",
-            "the host repository is not identified in the registry (remote URL or `.kbw.toml repo`); \
+            "the host repository is not identified in the registry (remote URL or `.kb.toml repo`); \
              only repo-independent path selectors were evaluated",
         ));
     }

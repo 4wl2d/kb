@@ -8,10 +8,7 @@ use std::process::{Command, Output};
 
 /// Absolute path of the repository root (the upstream checkout under test).
 pub fn repo_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../..")
-        .canonicalize()
-        .unwrap()
+    kb::util::canonicalize(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).unwrap()
 }
 
 /// The `kb` executable built by Cargo for this test run.
@@ -33,14 +30,39 @@ pub fn isolated_env(cmd: &mut Command, home: &Path) {
         .env("GIT_COMMITTER_DATE", "2026-01-01T00:00:00Z")
         .env_remove("KB_ROOT")
         .env_remove("KB_CACHE_DIR")
-        // Launcher settings of the developer's shell must not leak into tests; tests that
-        // need them set them explicitly after this call.
+        // Engine selection settings of the developer's shell must not leak into tests; tests
+        // that need them set them explicitly after this call. The runtime store is private
+        // to the sandbox (on Windows the default store does not follow HOME).
+        .env("KB_RUNTIME_DIR", home.join("kb-runtime"))
+        .env_remove("KB_CARGO_TARGET_DIR")
+        .env_remove("KB_AUTO_BOOTSTRAP")
+        .env_remove("KB_ALLOW_TOOLCHAIN_MISMATCH")
+        .env_remove("KB_RELEASES_URL")
+        .env_remove("KB_INSTALL_DIR")
+        .env_remove("KB_SELECTED_FINGERPRINT")
+        .env_remove("XDG_DATA_HOME")
         .env_remove("KBW_CARGO_TARGET_DIR")
         .env_remove("KBW_AUTO_BOOTSTRAP")
         .env_remove("KBW_FINGERPRINT")
         .env_remove("KBW_ALLOW_TOOLCHAIN_MISMATCH")
+        .env_remove("KBW_FORWARDED")
         .env_remove("GIT_DIR")
         .env_remove("GIT_WORK_TREE");
+}
+
+/// `PATH` with a directory holding the built `kb` first, as an installed `kb` would be
+/// found by scripts, hooks and CI templates.
+pub fn path_with_kb(sandbox: &Path) -> std::ffi::OsString {
+    let bin = sandbox.join("kb-bin");
+    let exe = bin.join(format!("kb{}", std::env::consts::EXE_SUFFIX));
+    if !exe.exists() {
+        fs::create_dir_all(&bin).unwrap();
+        if fs::hard_link(kb_bin(), &exe).is_err() {
+            fs::copy(kb_bin(), &exe).unwrap();
+        }
+    }
+    let rest = std::env::var_os("PATH").unwrap_or_default();
+    std::env::join_paths(std::iter::once(bin).chain(std::env::split_paths(&rest))).unwrap()
 }
 
 /// A scratch area with an isolated HOME.
@@ -55,8 +77,9 @@ impl Sandbox {
         Sandbox { dir }
     }
 
+    /// Canonical, without the Windows verbatim prefix (Git and the engine get plain paths).
     pub fn path(&self) -> PathBuf {
-        self.dir.path().canonicalize().unwrap()
+        kb::util::canonicalize(self.dir.path()).unwrap()
     }
 
     pub fn home(&self) -> PathBuf {

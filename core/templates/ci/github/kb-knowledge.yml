@@ -1,4 +1,4 @@
-# kb knowledge checks for a downstream KB repository (installed by `kbw init` as
+# kb knowledge checks for a downstream KB repository (installed by `kb init` as
 # .github/workflows/kb-knowledge.yml). These checks report problems; they do not enforce
 # reviews. Branch protection, required checks and approval rules are configured separately
 # by a repository administrator.
@@ -15,23 +15,28 @@ permissions:
 jobs:
   knowledge:
     runs-on: ubuntu-latest
+    env:
+      # Runtime store and Cargo build directory of `kb engine bootstrap` (cached below).
+      KB_RUNTIME_DIR: ${{ github.workspace }}/.cache/kb-runtime
+      KB_CARGO_TARGET_DIR: ${{ github.workspace }}/.cache/cargo-target
     steps:
       - uses: actions/checkout@v7
         with:
           # Full history: `validate --base` and `update divergence` compare with older commits.
           fetch-depth: 0
 
-      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
-        run: rustup toolchain install
-
-      - name: Cache the kb runtime
+      - name: Cache kb engine runtimes and builds
         uses: actions/cache@v6
         with:
-          path: .cache/runtime
-          key: kb-runtime-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'core/release.toml', 'core/cli/**') }}
+          path: |
+            .cache/kb-runtime
+            .cache/cargo-target
+          key: kb-engine-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'core/release.toml', 'core/cli/**') }}
 
-      - name: Bootstrap the kb runtime of this checkout (explicit; source build or cache hit)
-        run: ./kbw --kbw-bootstrap
+      - name: Install kb for this checkout (release, else a source build; explicit engine bootstrap)
+        run: |
+          sh core/templates/ci/install-kb.sh . "$RUNNER_TEMP/kb-bin"
+          echo "$RUNNER_TEMP/kb-bin" >> "$GITHUB_PATH"
 
       # Add read-only host checkouts at the SHAs declared in project/ci/hosts.tsv.
       # Missing source evidence fails explicitly; it is not a skipped success.
@@ -51,13 +56,13 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           BASE_REF: ${{ github.base_ref }}
-        run: ./kbw validate --base "origin/$BASE_REF"
+        run: kb validate --base "origin/$BASE_REF"
 
       - name: Generated skill bundle matches project/skill-config
-        run: ./kbw integrate --generate --check
+        run: kb integrate --generate --check
 
       - name: Engine-owned paths match the recorded upstream base
-        run: ./kbw update divergence
+        run: kb update divergence
 
       - name: JSON schemas match the engine
-        run: ./kbw schema --check
+        run: kb schema --check

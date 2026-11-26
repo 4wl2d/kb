@@ -9,7 +9,7 @@ Advisories) instead of public issues.
 ## Downstream repositories
 
 This file is engine-owned (listed in `engine_paths` of `core/release.toml`): every
-downstream receives it unchanged through `./kbw update`, and editing it there is reported
+downstream receives it unchanged through `kb update`, and editing it there is reported
 as engine divergence. A downstream does not edit it; it publishes its own policy and
 contact at `.github/SECURITY.md`, rendered from `core/templates/security/SECURITY.md.tmpl`.
 GitHub shows a `SECURITY.md` in `.github/` in preference to the one at the repository root
@@ -48,7 +48,7 @@ so reporters see the downstream policy. On hosts without that convention, link
   the host repository, under a deadline and output limits. The registry is read only from
   the working tree of the KB checkout that supplies the engine, never from a fetched
   snapshot. It is trusted configuration and is reviewed like engine code: a malicious
-  registry is equivalent to a malicious engine checkout, the same trust root as the `kbw`
+  registry is equivalent to a malicious engine checkout, the same trust root as the `kb`
   binary the user already runs.
 * **Nothing else is executed.** kb never runs text from knowledge records, procedures,
   probes, commit messages or tool output ([ADR 0015](docs/adr/0015-declarative-verification.md),

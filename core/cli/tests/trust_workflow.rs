@@ -26,7 +26,7 @@ impl World {
         sb.git(&kb, &["remote", "add", "origin", kb.to_str().unwrap()]);
         sb.git(&kb, &["update-ref", "refs/remotes/origin/main", &commit]);
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(
             &host.join("app/auth/Store.rs"),
             "// Synthetic source\npub fn persist() -> u32 {\n    1\n}\n",

@@ -107,7 +107,7 @@ pub fn generate() -> BTreeMap<String, String> {
         ),
         (
             "host-binding",
-            "Host binding (.kbw.toml in a host repository)",
+            "Host binding (.kb.toml in a host repository)",
             "Optional host repo id, KB pin and snapshot selection.",
             model_schema::<HostBinding>(),
         ),

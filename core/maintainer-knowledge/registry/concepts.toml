@@ -22,5 +22,5 @@ aliases = ["deterministic", "stable order", "ranking", "tie break", "детер�
 
 [[concept]]
 id = "runtime"
-title = "Engine runtime and launcher"
-aliases = ["runtime", "launcher", "bootstrap", "artifact", "kbw"]
+title = "Engine selection and runtimes"
+aliases = ["runtime", "launcher", "bootstrap", "artifact", "engine selection", "self update", "installer", "kbw"]

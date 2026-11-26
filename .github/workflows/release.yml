@@ -1,6 +1,7 @@
-# Release workflow: builds versioned kb runtime archives for macOS arm64 and Linux x86_64
-# with the project launcher (`./kbw --kbw-package`), writes SHA256SUMS and creates a GitHub
-# release. It has not published anything by itself; a release exists only after an owner
+# Release workflow: builds the versioned kb archives for macOS arm64, Linux x86_64 and arm64
+# (static, musl) and Windows x86_64 with `kb engine package`, verifies each with its installer
+# (install.sh, install.ps1), `kb self update` and `kb engine install`, writes SHA256SUMS and
+# creates a GitHub release. It has not published anything by itself; a release exists only after an owner
 # pushes a tag and this workflow succeeds.
 #
 # Prerequisites (administrator/owner actions, not guaranteed by this file):
@@ -14,15 +15,15 @@
 #   * `workflow_dispatch` rebuilds an existing tag (for example after a runner outage); it
 #     does not create tags.
 #
-# Consumers install an archive with an explicit digest, never by piping to a shell:
-#   ./kbw --kbw-install-artifact <archive-url> --sha256 <digest from SHA256SUMS>
-# The archive only activates when its BUILD-INFO fingerprint equals the local engine's.
-# The Linux binary is built on ubuntu-latest and needs a glibc at least as new as that
-# runner's.
+# Consumers install the kb command with install.sh or install.ps1 (or update it with
+# `kb self update`), which verify the archive against SHA256SUMS of the same release before
+# using it. As an engine runtime (`kb engine install`) an archive only activates when its
+# BUILD-INFO fingerprint equals the checkout's engine. The Linux binaries are statically
+# linked and need no particular glibc.
 #
 # Downstream opt-out: every downstream fork inherits this engine-owned file (core/release.toml
 # engine_paths), and editing or deleting it is reported as engine divergence by
-# `kbw update divergence`. A downstream that does not publish its own runtime archives sets
+# `kb update divergence`. A downstream that does not publish its own runtime archives sets
 # the repository variable KB_RELEASE to `disabled` (Settings > Secrets and variables >
 # Actions > Variables, or `gh variable set KB_RELEASE --body disabled`): every job is then
 # skipped, so pushing a `v*` tag builds and publishes nothing. Any other value, or no
@@ -91,38 +92,90 @@ jobs:
         include:
           - os: macos-15
             target: aarch64-apple-darwin
+          # Linux archives are static (musl), so they run on any distribution.
           - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
+            target: x86_64-unknown-linux-musl
+          - os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-musl
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
     env:
       VERSION: ${{ needs.verify.outputs.version }}
       TARGET: ${{ matrix.target }}
+      KB_CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v7
         with:
           ref: refs/tags/${{ env.TAG }}
           persist-credentials: false
 
-      - name: Install the pinned toolchain (rust-toolchain.toml)
+      - name: Install the pinned toolchain (rust-toolchain.toml) and the target
         run: |
           rustup toolchain install
+          rustup target add "$TARGET"
           rustc --version
 
-      - name: Build the release archive
-        # Source-builds the runtime (cargo build --release --locked -p kb with the pinned
-        # toolchain) and writes dist/kb-<version>-<target>.tar.gz plus its .sha256 file.
-        run: ./kbw --kbw-package dist
+      - name: Install the musl C toolchain (bundled SQLite)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
 
-      - name: Verify the archive with the installer
+      - name: Build the release archive
+        # A host kb packages the engine of this tag: cargo build --release --locked -p kb
+        # --target $TARGET with the pinned toolchain, a smoke run of the result, then
+        # dist/kb-<version>-<target>.tar.gz plus its .sha256 file.
+        run: |
+          cargo build --release --locked -p kb
+          target/release/kb engine package dist --target "$TARGET"
+
+      - name: Lay out the archive as a release (local stand-in for KB_RELEASES_URL)
         run: |
           set -eu
-          archive="dist/kb-$VERSION-$TARGET.tar.gz"
-          test -f "$archive"
-          (cd dist && shasum -a 256 -c "kb-$VERSION-$TARGET.tar.gz.sha256")
-          ./kbw --kbw-install-artifact "$archive" --sha256-file "$archive.sha256"
-          ./kbw --kbw-runtime-info
-          ./kbw version
+          archive="kb-$VERSION-$TARGET.tar.gz"
+          test -f "dist/$archive"
+          for dir in "download/v$VERSION" latest/download; do
+            mkdir -p "$RUNNER_TEMP/releases/$dir"
+            cp "dist/$archive" "$RUNNER_TEMP/releases/$dir/"
+            cp "dist/$archive.sha256" "$RUNNER_TEMP/releases/$dir/SHA256SUMS"
+          done
+          cat "dist/$archive.sha256"
+
+      - name: Verify the archive with install.sh and kb self update
+        if: runner.os != 'Windows'
+        env:
+          KB_RELEASES_URL: ${{ runner.temp }}/releases
+          KB_RUNTIME_DIR: ${{ runner.temp }}/kb-runtime
+        run: |
+          set -eu
+          sh install.sh --version "$VERSION" --dir "$RUNNER_TEMP/kb-bin"
+          installed="$RUNNER_TEMP/kb-bin/kb"
+          test "$("$installed" --version)" = "kb $VERSION"
+          "$installed" self update --force
+          "$installed" engine install
+          "$installed" engine info
+          "$installed" version
+
+      - name: Verify the archive with install.ps1 and kb self update
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          KB_RELEASES_URL: ${{ runner.temp }}\releases
+          KB_RUNTIME_DIR: ${{ runner.temp }}\kb-runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\install.ps1 -Version $env:VERSION -Dir "$env:RUNNER_TEMP\kb-bin" -NoPathUpdate
+          $installed = "$env:RUNNER_TEMP\kb-bin\kb.exe"
+          if ((& $installed --version) -ne "kb $env:VERSION") { throw 'unexpected kb version' }
+          foreach ($args_ in @(@('self', 'update', '--force'), @('engine', 'install'), @('engine', 'info'), @('version'))) {
+            & $installed @args_
+            if ($LASTEXITCODE -ne 0) { throw "kb $($args_ -join ' ') exited with $LASTEXITCODE" }
+          }
 
       - uses: actions/upload-artifact@v7
         with:
@@ -157,7 +210,7 @@ jobs:
           export LC_ALL=C
           for sum in *.sha256; do sha256sum -c "$sum"; done
           set -- kb-*.tar.gz
-          test "$#" -eq 2
+          test "$#" -eq 4
           sha256sum "$@" > SHA256SUMS
           cat SHA256SUMS
 
@@ -168,5 +221,5 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
             --title "kb $VERSION" \
-            --notes "kb $VERSION runtime archives for aarch64-apple-darwin and x86_64-unknown-linux-gnu. Install with ./kbw --kbw-install-artifact <archive-url> --sha256 <digest from SHA256SUMS>; the archive activates only for a checkout whose engine fingerprint matches its BUILD-INFO." \
+            --notes "kb $VERSION for aarch64-apple-darwin, x86_64-unknown-linux-musl, aarch64-unknown-linux-musl and x86_64-pc-windows-msvc. Install with install.sh (macOS, Linux) or install.ps1 (Windows) from this tag, or update an installed kb with `kb self update`; each verifies the archive against SHA256SUMS. As an engine runtime (`kb engine install`) an archive serves only a checkout whose engine fingerprint matches its BUILD-INFO." \
             dist/kb-*.tar.gz dist/kb-*.tar.gz.sha256 dist/SHA256SUMS

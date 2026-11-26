@@ -2,7 +2,7 @@
 //!
 //! Layering: pure logic (`model`, `parse`, `validate`, `normalize`, `glob`, `context`,
 //! `answer`) is separate from adapters (`git`, `host`, `snapshot`, `overlay`, `source`,
-//! `index`, `integrate`, `update`, `tools`) and from the CLI (`cli`, `output`).
+//! `index`, `integrate`, `update`, `tools`, `launcher`) and from the CLI (`cli`, `output`).
 
 pub mod answer;
 pub mod cli;
@@ -24,6 +24,7 @@ pub mod index;
 pub mod init;
 pub mod integrate;
 pub mod knowledge;
+pub mod launcher;
 pub mod migrate;
 pub mod model;
 pub mod normalize;

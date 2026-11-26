@@ -29,6 +29,7 @@ use crate::model::registry::normalize_remote_url;
 use crate::model::{ProfileConfig, ProfileLocation, SkillSnapshot};
 use crate::source::{FrozenWorkingTree, SourceTree, WorkingTreeSource};
 use crate::util::FieldHasher;
+use crate::util::PathExt;
 use crate::versions::{
     ENGINE_VERSION, INDEX_SCHEMA, MANIFEST_PATH, PARSER_VERSION, ReleaseManifest,
     check_snapshot_compat,
@@ -238,8 +239,8 @@ pub fn kb_git(env: &Env) -> Option<Git> {
 
 /// [`kb_git`] for an explicit KB root.
 pub fn kb_git_at(kb_root: &Path) -> Option<Git> {
-    let top = git::toplevel(kb_root)?.canonicalize().ok()?;
-    (top == kb_root.canonicalize().ok()?).then(|| Git::new(kb_root))
+    let top = git::toplevel(kb_root)?.canonical().ok()?;
+    (top == kb_root.canonical().ok()?).then(|| Git::new(kb_root))
 }
 
 // ---------------------------------------------------------------------------------------
@@ -478,7 +479,7 @@ fn resolve_local_url(kb_root: &Path, url: &str) -> String {
     }
     let joined = kb_root.join(url);
     joined
-        .canonicalize()
+        .canonical()
         .unwrap_or(joined)
         .to_string_lossy()
         .into_owned()
@@ -537,7 +538,7 @@ fn select(
                 "no approved revision is known (offline, and nothing was fetched before)",
             )
             .with_hint(
-                "run once without --offline (e.g. `kbw sync`), or select --snapshot pinned or working-tree",
+                "run once without --offline (e.g. `kb sync`), or select --snapshot pinned or working-tree",
             )),
         },
         Mode::Pinned => match pin {
@@ -545,7 +546,7 @@ fn select(
             None => Err(KbError::new(
                 ErrorCode::SnapshotNotFound,
                 if host.is_some() {
-                    "the host has no KB pin (no KB submodule gitlink in HEAD and no `.kbw.toml` pin)"
+                    "the host has no KB pin (no KB submodule gitlink in HEAD and no `.kb.toml` pin)"
                 } else {
                     "no host repository was detected, so there is no KB pin"
                 },
@@ -614,7 +615,7 @@ fn check_engine(source: &dyn SourceTree, label: &str) -> Result<()> {
             format!("snapshot {label} cannot be interpreted by this engine: {why}"),
         )
         .with_details(json!({ "revision": label }))
-        .with_hint("update the KB checkout to that revision through review and re-run kbw")
+        .with_hint("update the KB checkout to that revision through review and re-run kb")
     };
     let bytes = source
         .read_path(MANIFEST_PATH)?
