@@ -886,9 +886,11 @@ mod tests {
     #[test]
     fn local_urls_resolve_against_kb_root() {
         let root = Path::new("/nonexistent/kb");
+        // Joined with the platform separator (`\` on Windows, where Git accepts both).
+        let sep = std::path::MAIN_SEPARATOR;
         assert_eq!(
             resolve_local_url(root, "../origin.git"),
-            "/nonexistent/kb/../origin.git"
+            format!("/nonexistent/kb{sep}../origin.git")
         );
         assert_eq!(resolve_local_url(root, "/srv/kb.git"), "/srv/kb.git");
         assert_eq!(
@@ -899,7 +901,10 @@ mod tests {
             resolve_local_url(root, "https://example.invalid/kb.git"),
             "https://example.invalid/kb.git"
         );
-        assert_eq!(resolve_local_url(root, "./a:b"), "/nonexistent/kb/./a:b");
+        assert_eq!(
+            resolve_local_url(root, "./a:b"),
+            format!("/nonexistent/kb{sep}./a:b")
+        );
     }
 
     #[test]

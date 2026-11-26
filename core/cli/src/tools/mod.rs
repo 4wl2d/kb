@@ -515,13 +515,29 @@ pub fn rel_to_code(roots: &Roots, path: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `path` (written `/code/...`) as an absolute path on this platform, where Windows
+    /// needs a drive.
+    pub(super) fn abs(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{path}")
+        } else {
+            path.to_string()
+        }
+    }
+
     #[test]
     fn programs_resolve_by_placeholder() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let tool = bin.join("tool");
-        std::fs::write(&tool, "#!/bin/sh\necho tool 1.0\n").unwrap();
+        // Windows runs a batch file, not a script with a shebang.
+        let (name, script) = if cfg!(windows) {
+            ("tool.cmd", "@echo tool 1.0\r\n")
+        } else {
+            ("tool", "#!/bin/sh\necho tool 1.0\n")
+        };
+        let tool = bin.join(name);
+        std::fs::write(&tool, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -533,13 +549,17 @@ mod tests {
             repo: None,
             kb_mount: None,
         };
-        assert_eq!(resolve_program("{kb}/bin/tool", &roots), Some(tool.clone()));
-        assert_eq!(resolve_program("bin/tool", &roots), Some(tool.clone()));
+        let program = format!("{{kb}}/bin/{name}");
+        assert_eq!(resolve_program(&program, &roots), Some(tool.clone()));
+        assert_eq!(
+            resolve_program(&format!("bin/{name}"), &roots),
+            Some(tool.clone())
+        );
         assert_eq!(resolve_program("{host}/bin/missing", &roots), None);
         let spec = ToolSpec {
             id: "t".into(),
             adapter: AdapterKind::Ripgrep,
-            program: Some("{kb}/bin/tool".into()),
+            program: Some(program),
             ..ToolSpec::default()
         };
         let p = probe(&spec, &roots, true);

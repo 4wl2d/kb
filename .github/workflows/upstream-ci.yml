@@ -73,7 +73,8 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --locked
+        # --no-fail-fast runs every test binary, so one run reports all failing tests.
+        run: cargo test --workspace --locked --no-fail-fast
 
       - name: Shellcheck the installer, the kbw forwarder and the CI glue
         if: runner.os == 'Linux'

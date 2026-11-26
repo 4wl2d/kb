@@ -406,12 +406,13 @@ pub fn map_item(v: &Value, tool: &ToolSpec, kind: &str, roots: &Roots) -> Option
 mod tests {
     use super::*;
     use crate::model::tools::AdapterKind;
+    use crate::tools::tests::abs;
     use serde_json::json;
 
     fn roots() -> Roots {
         Roots {
-            kb: "/kb".into(),
-            code: "/code".into(),
+            kb: abs("/kb").into(),
+            code: abs("/code").into(),
             repo: None,
             kb_mount: None,
         }
@@ -475,6 +476,7 @@ mod tests {
             "{globs}",
             "-n{limit}",
         ]);
+        let root = abs("/code");
         assert_eq!(
             expand(&t, &roots(), &req).unwrap(),
             [
@@ -482,7 +484,7 @@ mod tests {
                 "refresh",
                 "--kind=method",
                 "--root",
-                "/code",
+                root.as_str(),
                 "a b",
                 "--x",
                 "*.kt",
@@ -531,7 +533,7 @@ mod tests {
     #[test]
     fn json_paths_flatten_and_fields_map() {
         let doc = json!({"definitions": [
-            {"callees": [{"name": "run", "kind": "function", "filePath": "/code/src/a.rs", "startLine": 11, "loc": {"end": 20}}]},
+            {"callees": [{"name": "run", "kind": "function", "filePath": abs("/code/src/a.rs"), "startLine": 11, "loc": {"end": 20}}]},
             {"callees": [{"name": "exit", "kind": "function", "filePath": "src/b.rs", "startLine": "4"}]}
         ]});
         let mut t = tool(&[]);
