@@ -447,7 +447,9 @@ token-estimate ceiling, not a delivery receipt; required ids are never dropped t
   mirror (`.cache/git/<16 hex of a hash of the normalized source identity and ref>.git`,
   ref `refs/kb/approved`), using argument arrays,
   `GIT_TERMINAL_PROMPT=0`, `protocol.allow=never` plus the configured allowed protocols,
-  `--no-tags --no-recurse-submodules --no-write-fetch-head`. Failure → `FRESHNESS_UNVERIFIED`.
+  `--no-tags --no-recurse-submodules --no-write-fetch-head`. Fetches into one mirror run one
+  at a time across processes (advisory lock `kb-fetch.lock` in the mirror). Failure →
+  `FRESHNESS_UNVERIFIED`.
   No TTL, no automatic offline fallback. `--offline` uses the last fetched approved revision
   (mirror), else (for `refs/heads/*` approved refs) the KB checkout's remote-tracking ref,
   and reports `freshness = unverified`.

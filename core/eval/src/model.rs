@@ -413,6 +413,10 @@ impl Study {
 mod template_tests {
     use super::*;
     #[test]
+    #[cfg_attr(
+        not(unix),
+        ignore = "the templates name Unix executables; replay runs only on macOS and Linux"
+    )]
     fn shipped_synthetic_templates_follow_the_protocol() {
         let task: Task =
             serde_json::from_str(include_str!("../templates/task.template.json")).unwrap();

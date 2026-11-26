@@ -51,7 +51,12 @@ fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
             if ft.is_dir() {
                 walk(root, &p, out);
             } else if ft.is_file() {
-                let rel = p.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                // `/`-separated on every platform, like the paths the tests name.
+                let rel = p
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
                 out.insert(rel, fs::read(&p).unwrap());
             }
         }

@@ -42,6 +42,11 @@ impl World {
 
     fn commit_host(&self, date: &str) -> String {
         self.sb.git(&self.host, &["add", "-A"]);
+        self.commit_index(date)
+    }
+
+    /// Commit the host index as it is.
+    fn commit_index(&self, date: &str) -> String {
         let mut c = Command::new("git");
         c.arg("-C").arg(&self.host).args([
             "commit",
@@ -622,12 +627,24 @@ fn discovered_paths_past_the_cap_still_add_their_modules_to_a_known_scope() {
 #[test]
 fn unusual_tracked_names_do_not_fail_identifier_discovery() {
     let w = World::new();
-    write(
-        &w.host.join("app/a\\b.txt"),
-        "synthetic Windows-style name\n",
-    );
-    write(&w.host.join("app/Icon\r"), "");
-    w.commit_host("2024-01-02T00:00:00Z");
+    // Tracked through the index only: Windows cannot create these names in a work tree, and
+    // Git for Windows refuses them unless `core.protectNTFS` is off.
+    let blob = w.sb.git(&w.host, &["hash-object", "-w", "--", ".kb.toml"]);
+    for name in ["app/a\\b.txt", "app/Icon\r"] {
+        let entry = format!("100644,{blob},{name}");
+        w.sb.git(
+            &w.host,
+            &[
+                "-c",
+                "core.protectNTFS=false",
+                "update-index",
+                "--add",
+                "--cacheinfo",
+                &entry,
+            ],
+        );
+    }
+    w.commit_index("2024-01-02T00:00:00Z");
     let result = w.run(&[
         "--intent",
         "implement",

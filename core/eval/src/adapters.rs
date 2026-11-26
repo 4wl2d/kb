@@ -175,7 +175,13 @@ mod tests {
         for family in [Family::Codex, Family::Claude, Family::Cursor, Family::Grok] {
             let a = Agent {
                 family,
-                program: "/fixture/agent".into(),
+                // Absolute on this platform (Windows needs a drive).
+                program: if cfg!(windows) {
+                    r"C:\fixture\agent"
+                } else {
+                    "/fixture/agent"
+                }
+                .into(),
                 binary_sha256: "0".repeat(64),
                 version: "fixture-pinned".into(),
                 model: "model-pinned".into(),

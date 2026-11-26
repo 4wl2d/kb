@@ -467,8 +467,12 @@ impl Repos {
         (out, v)
     }
 
+    /// Joined per component, so it compares equal to the path kb reports on every platform.
     fn update_worktree(&self) -> PathBuf {
-        self.downstream.join(".cache/update/kb-update-v0.2.0")
+        self.downstream
+            .join(".cache")
+            .join("update")
+            .join("kb-update-v0.2.0")
     }
 }
 

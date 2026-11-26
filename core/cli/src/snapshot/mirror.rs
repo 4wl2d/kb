@@ -71,9 +71,11 @@ impl Mirror {
         &self.git
     }
 
-    /// `git fetch <url> <refspec>` under an explicit transport policy. Retries briefly when
-    /// another kb process holds a ref lock in the same mirror.
+    /// `git fetch <url> <refspec>` under an explicit transport policy, one fetch at a time per
+    /// mirror (see [`Mirror::fetch_lock`]). Retries briefly when another Git process holds a
+    /// ref lock in the same mirror.
     fn fetch(&self, url: &str, refspec: &str, allowed_protocols: &[String]) -> Result<GitOutput> {
+        let _lock = self.fetch_lock()?;
         let mut cfg = transport_policy(allowed_protocols)?;
         cfg.extend(MIRROR_CONFIG.iter().map(|s| s.to_string()));
         let args = [
@@ -95,6 +97,23 @@ impl Mirror {
             }
             std::thread::sleep(Duration::from_millis(50 * attempt));
         }
+    }
+
+    /// Exclusive advisory lock on `<mirror>/kb-fetch.lock`, held until the returned file is
+    /// dropped. It serializes fetches across threads and kb processes: concurrent fetches
+    /// that write the same loose object fail on Windows, where Git cannot replace a file
+    /// another process holds open.
+    fn fetch_lock(&self) -> Result<fs::File> {
+        let path = self.git.dir.join("kb-fetch.lock");
+        let file = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&path)
+            .map_err(|e| KbError::io(path.display(), e))?;
+        file.lock().map_err(|e| KbError::io(path.display(), e))?;
+        Ok(file)
     }
 
     /// Fetch the approved ref from the remote into [`APPROVED_REF`].

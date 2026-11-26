@@ -443,7 +443,13 @@ mod tests {
     fn fixture() -> (Registration, Vec<Observation>) {
         let a = Agent {
             family: Family::Codex,
-            program: "/synthetic/agent".into(),
+            // Absolute on this platform (Windows needs a drive).
+            program: if cfg!(windows) {
+                r"C:\synthetic\agent"
+            } else {
+                "/synthetic/agent"
+            }
+            .into(),
             binary_sha256: "0".repeat(64),
             version: "fixture-1".into(),
             model: "fixture-model".into(),
