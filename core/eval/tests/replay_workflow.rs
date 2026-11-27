@@ -31,6 +31,10 @@ fn p(path: &Path) -> &str {
 }
 
 #[test]
+#[cfg_attr(
+    not(unix),
+    ignore = "replay runs Git as /usr/bin/git; replay runs only on macOS and Linux"
+)]
 fn frozen_checkout_has_no_future_objects_or_alternates_and_preserves_input() {
     let t = tempfile::tempdir().unwrap();
     let home = t.path().join("home");

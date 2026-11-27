@@ -51,6 +51,6 @@
   "required": [
     "schema"
   ],
-  "title": "Host binding (.kbw.toml in a host repository)",
+  "title": "Host binding (.kb.toml in a host repository)",
   "type": "object"
 }

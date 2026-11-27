@@ -1,5 +1,5 @@
 #!/bin/sh
-# CI glue, run from the downstream KB root after bootstrapping ./kbw.
+# CI glue, run from the downstream KB root with the kb command on PATH.
 set -eu
 kb_hosts=${KB_EVIDENCE_HOSTS:-project/ci/hosts.tsv}
 kb_reports=${KB_REPORT_DIR:-.cache/knowledge-ci}
@@ -33,9 +33,9 @@ run_check() {
     printf '%s\t%s\n' "$kb_name" "$kb_code" >> "$kb_reports/status.tsv"
     if [ "$kb_code" -ne 0 ]; then kb_failed=1; fi
 }
-run_check validate ./kbw validate --strict --on "$kb_day" --json
-run_check routing ./kbw eval routing --strict --json
-run_check anchors ./kbw anchors check "$@" --strict
-run_check drift ./kbw drift "$@" --since verified --check
-run_check ledger ./kbw ledger "$@" --on "$kb_day" --sample 10 --seed "$kb_day" --check
+run_check validate kb validate --strict --on "$kb_day" --json
+run_check routing kb eval routing --strict --json
+run_check anchors kb anchors check "$@" --strict
+run_check drift kb drift "$@" --since verified --check
+run_check ledger kb ledger "$@" --on "$kb_day" --sample 10 --seed "$kb_day" --check
 exit "$kb_failed"

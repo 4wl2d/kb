@@ -13,11 +13,11 @@ KB revision; it does not select host code.
 ## Find the gaps and prepare a draft
 
 ```sh
-.kb/kbw coverage --repo mobile --since 180d --limit 5 --json
-.kb/kbw propose begin --repo mobile --from-change BASE..HEAD --json
-.kb/kbw propose begin --repo mobile --from-change merged-change.json --json
-.kb/kbw propose submit /path/to/draft.md --repo mobile
-.kb/kbw propose submit /path/to/draft.md --repo mobile --apply
+kb coverage --repo mobile --since 180d --limit 5 --json
+kb propose begin --repo mobile --from-change BASE..HEAD --json
+kb propose begin --repo mobile --from-change merged-change.json --json
+kb propose submit /path/to/draft.md --repo mobile
+kb propose submit /path/to/draft.md --repo mobile --apply
 ```
 
 Coverage reports per-module domain records, missing scenarios/consumer lists/checklists/
@@ -51,7 +51,7 @@ provider adds reviewable consumer candidates to a contract draft and retains the
 tool/commit/digest evidence. No commit, branch move or publication is performed.
 
 ```sh
-.kb/kbw capture decision --repo mobile --owner team-mobile \
+kb capture decision --repo mobile --owner team-mobile \
   --title "Keep one refresh attempt" --text "Reuse the in-flight refresh operation." \
   --given "Concurrent callers share an expired token." \
   --reason "A second refresh can invalidate the first result." \
@@ -80,11 +80,11 @@ workflow. Model jobs and publication are opt-in steps with separate credentials/
 ## Stamp, check and review source evidence
 
 ```sh
-.kb/kbw anchors stamp --repo mobile --id example.invariant.single-refresh --at HEAD
-.kb/kbw anchors stamp --repo mobile --id example.invariant.single-refresh --at HEAD --apply
-.kb/kbw anchors check --repo mobile --at HEAD --strict --json
-.kb/kbw drift --repo mobile --since verified --at HEAD --check --json
-.kb/kbw ledger --repo mobile --at HEAD --on 2026-10-07 --stale 90 \
+kb anchors stamp --repo mobile --id example.invariant.single-refresh --at HEAD
+kb anchors stamp --repo mobile --id example.invariant.single-refresh --at HEAD --apply
+kb anchors check --repo mobile --at HEAD --strict --json
+kb drift --repo mobile --since verified --at HEAD --check --json
+kb ledger --repo mobile --at HEAD --on 2026-10-07 --stale 90 \
   --sample 10 --seed weekly-2026-10-07 --check --json
 ```
 
@@ -118,9 +118,9 @@ context requires a consistent `--as-of`/`--on` date. Warnings keep applicable ob
 ## Declarative verification
 
 ```sh
-.kb/kbw verify --repo mobile --diff BASE --head HEAD --json
-.kb/kbw verify --repo mobile --diff HEAD --staged --commit-message .git/COMMIT_EDITMSG
-.kb/kbw verify --repo mobile --diff BASE --head HEAD --branch feature/example \
+kb verify --repo mobile --diff BASE --head HEAD --json
+kb verify --repo mobile --diff HEAD --staged --commit-message .git/COMMIT_EDITMSG
+kb verify --repo mobile --diff BASE --head HEAD --branch feature/example \
   --applicable example.policy.changes#subject --strict --json
 ```
 
@@ -149,9 +149,9 @@ the index Git is committing (also for `commit -a` and pathspec commits), the mes
 Git will commit it (scissors cut, comments stripped as Git would) and, during a rebase,
 the rebased branch.
 
-When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kb.toml`
 declares `selection`, the hook passes `auto` and the engine applies that selection.
-Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kb.toml`
 `pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
 adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
 exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
@@ -164,7 +164,7 @@ and `--allow-empty-message` flags are invisible to hooks; to skip the editor, us
 ## Local delivery observations
 
 ```sh
-.kb/kbw usage report --repo mobile --diff BASE --head HEAD \
+kb usage report --repo mobile --diff BASE --head HEAD \
   --receipt sha256:RECEIPT_FROM_THIS_TASK --json
 ```
 

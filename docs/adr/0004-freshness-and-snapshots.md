@@ -8,7 +8,7 @@ Status: accepted
 bare mirror on every call (no TTL, no automatic offline fallback). Failure is
 `FRESHNESS_UNVERIFIED` unless `--offline` is explicit, in which case the result is labeled
 `freshness = unverified`. Selection is separate from freshness: `latest`, `pinned` (host
-submodule gitlink or `.kbw.toml pin`), an explicit revision, or `working-tree`. With a host
+submodule gitlink or `.kb.toml pin`), an explicit revision, or `working-tree`. With a host
 pin that differs from the approved tip, `auto` returns `UPDATE_REQUIRED` unless the host
 binding declares a selection.
 

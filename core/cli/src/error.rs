@@ -35,16 +35,22 @@ pub enum ErrorCode {
     UpdateConflict,
     MigrationFailed,
     UpdateFailed,
+    RuntimeNotBootstrapped,
+    BootstrapFailed,
+    ToolchainMismatch,
+    ArtifactInvalid,
+    PackageFailed,
     GitError,
     IndexError,
     IoError,
     UnsafePath,
     InvalidInput,
     ToolUnavailable,
+    DownloadFailed,
 }
 
 impl ErrorCode {
-    pub const ALL: [ErrorCode; 31] = [
+    pub const ALL: [ErrorCode; 37] = [
         ErrorCode::Internal,
         ErrorCode::Usage,
         ErrorCode::ProjectNotInitialized,
@@ -70,12 +76,18 @@ impl ErrorCode {
         ErrorCode::UpdateConflict,
         ErrorCode::MigrationFailed,
         ErrorCode::UpdateFailed,
+        ErrorCode::RuntimeNotBootstrapped,
+        ErrorCode::BootstrapFailed,
+        ErrorCode::ToolchainMismatch,
+        ErrorCode::ArtifactInvalid,
+        ErrorCode::PackageFailed,
         ErrorCode::GitError,
         ErrorCode::IndexError,
         ErrorCode::IoError,
         ErrorCode::UnsafePath,
         ErrorCode::InvalidInput,
         ErrorCode::ToolUnavailable,
+        ErrorCode::DownloadFailed,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -105,12 +117,18 @@ impl ErrorCode {
             ErrorCode::UpdateConflict => "UPDATE_CONFLICT",
             ErrorCode::MigrationFailed => "MIGRATION_FAILED",
             ErrorCode::UpdateFailed => "UPDATE_FAILED",
+            ErrorCode::RuntimeNotBootstrapped => "RUNTIME_NOT_BOOTSTRAPPED",
+            ErrorCode::BootstrapFailed => "BOOTSTRAP_FAILED",
+            ErrorCode::ToolchainMismatch => "TOOLCHAIN_MISMATCH",
+            ErrorCode::ArtifactInvalid => "ARTIFACT_INVALID",
+            ErrorCode::PackageFailed => "PACKAGE_FAILED",
             ErrorCode::GitError => "GIT_ERROR",
             ErrorCode::IndexError => "INDEX_ERROR",
             ErrorCode::IoError => "IO_ERROR",
             ErrorCode::UnsafePath => "UNSAFE_PATH",
             ErrorCode::InvalidInput => "INVALID_INPUT",
             ErrorCode::ToolUnavailable => "TOOL_UNAVAILABLE",
+            ErrorCode::DownloadFailed => "DOWNLOAD_FAILED",
         }
     }
 
@@ -146,12 +164,18 @@ impl ErrorCode {
             ErrorCode::UpdateConflict => 51,
             ErrorCode::MigrationFailed => 52,
             ErrorCode::UpdateFailed => 53,
+            ErrorCode::RuntimeNotBootstrapped => 54,
+            ErrorCode::BootstrapFailed => 55,
+            ErrorCode::ToolchainMismatch => 56,
+            ErrorCode::ArtifactInvalid => 57,
+            ErrorCode::PackageFailed => 58,
             ErrorCode::GitError => 60,
             ErrorCode::IndexError => 61,
             ErrorCode::IoError => 62,
             ErrorCode::UnsafePath => 63,
             ErrorCode::InvalidInput => 64,
             ErrorCode::ToolUnavailable => 65,
+            ErrorCode::DownloadFailed => 66,
         }
     }
 }

@@ -25,7 +25,7 @@ repository used as `origin`). The local origin path is shown as `<kb-origin.git>
 ## Command
 
 ```sh
-./kbw context --intent implement \
+kb context --intent implement \
   --task "Retry the token refresh after a network error" \
   --repo mobile --path mobile:app/auth/TokenRefresher.kt
 ```
@@ -88,9 +88,9 @@ appear only in the envelope `meta`.
 ### Early discovery and changed scope
 
 ```sh
-.kb/kbw context --intent diagnose --task "Refresh retries leave checkout pending"
-.kb/kbw context --intent implement --path app/auth/TokenRefresher.kt
-.kb/kbw context --intent review --changed --base origin/main --working-tree
+kb context --intent diagnose --task "Refresh retries leave checkout pending"
+kb context --intent implement --path app/auth/TokenRefresher.kt
+kb context --intent review --changed --base origin/main --working-tree
 ```
 
 Tracked filenames and unambiguous identifier spelling can discover paths before the caller
@@ -122,7 +122,7 @@ reported in `pruned_change_types` and required dependencies remain reachable.
 ### Historical context
 
 ```sh
-.kb/kbw context --intent review --repo mobile --path app/auth/TokenRefresher.kt \
+kb context --intent review --repo mobile --path app/auth/TokenRefresher.kt \
   --snapshot FROZEN_KB_SHA --as-of HOST_BASE_SHA --offline
 ```
 
@@ -188,7 +188,7 @@ status: PARTIAL
 - [partial] UNDETERMINED_OBLIGATIONS: 7 obligation(s) may apply: example.contract.error-envelope, ...
 ```
 
-A host repo named in `.kbw.toml` but missing from the registry produces the warning
+A host repo named in `.kb.toml` but missing from the registry produces the warning
 `HOST_REPO_UNKNOWN` and leaves the repo dimension to other sources.
 
 ## Applicability
@@ -333,7 +333,7 @@ sentence. In the synthetic example the alias `композици*` belongs to bo
 and `object-composition`:
 
 ```sh
-./kbw context --intent explain --task "Как устроена композиция?" --repo mobile
+kb context --intent explain --task "Как устроена композиция?" --repo mobile
 ```
 
 ```text
@@ -488,7 +488,7 @@ sorts object keys recursively and has no whitespace (`kb::context::receipt_id_of
 without `--explain`. With `jq`, this reproduced the id of the example result:
 
 ```sh
-./kbw --json context ... > ctx.json
+kb --json context ... > ctx.json
 jq -r '.result.receipt.id' ctx.json
 jq -S -c '.result | del(.explain) | del(.receipt.id)' ctx.json | tr -d '\n' | shasum -a 256
 ```

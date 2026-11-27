@@ -518,6 +518,7 @@ mod tests {
         #[cfg(unix)]
         std::os::unix::fs::symlink("/etc/hosts", d.path().join("p/k/evil.md")).unwrap();
         let s = WorkingTreeSource::new(d.path());
+        #[cfg_attr(not(unix), allow(unused_variables))]
         let (entries, issues) = s.list(&["p/k".into(), "p/missing".into()]).unwrap();
         let paths: Vec<_> = entries.iter().map(|e| e.path.as_str()).collect();
         assert_eq!(paths, vec!["p/k/b.md", "p/k/sub/a.md"]);

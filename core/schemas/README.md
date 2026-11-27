@@ -5,9 +5,9 @@ in `core/cli/src/model/` (plus `core/cli/src/versions.rs` and the CLI envelope b
 `core/cli/src/schema_export.rs`). Do not edit them by hand:
 
 ```sh
-kbw schema            # report whether the files match the model
-kbw schema --check    # fail with DRIFT_DETECTED (exit 42) on missing/changed/extra files
-kbw schema --write    # regenerate (and remove stale *.schema.json files)
+kb schema             # report whether the files match the model
+kb schema --check     # fail with DRIFT_DETECTED (exit 42) on missing/changed/extra files
+kb schema --write     # regenerate (and remove stale *.schema.json files)
 ```
 
 The test `core/cli/tests/schema_conformance.rs` also fails on drift, checks that every file
@@ -27,7 +27,7 @@ All schemas use draft 2020-12 and identify themselves with a non-resolvable URI 
 | `registry-change-types.v2.schema.json` | schema-2 change-category aliases/path/symbol hints |
 | `routing-test.v1.schema.json` | `project/routing-tests/*.toml` |
 | `skill-config.v1.schema.json` | `project/skill-config/skill.toml` |
-| `host-binding.v1.schema.json` | `.kbw.toml` in a host repository |
+| `host-binding.v1.schema.json` | `.kb.toml` in a host repository |
 | `upstream.v1.schema.json` | `project/upstream.toml` |
 | `release-manifest.v1.schema.json` | `core/release.toml` |
 | `cli-envelope.v1.schema.json` | the `kb.cli.v1` JSON document printed by every command with `--json` |

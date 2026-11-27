@@ -3,7 +3,7 @@
 //! §6), index build or reuse (§7) and a consistent read view.
 //!
 //! Everything noteworthy that is not part of a command's deterministic result (index
-//! recovery, proposal overlay problems, an unknown `.kbw.toml` repo) is reported twice: as a
+//! recovery, proposal overlay problems, an unknown `.kb.toml` repo) is reported twice: as a
 //! progress line on stderr and in the envelope `meta.diagnostics`. Recovery is never silent.
 
 use serde_json::{Value, json};
@@ -190,7 +190,7 @@ impl Session {
 }
 
 /// Problems visible through the view that a command result does not carry: proposal
-/// overlay diagnostics and an unknown `.kbw.toml` repo.
+/// overlay diagnostics and an unknown `.kb.toml` repo.
 fn view_notes(
     view: &IndexView<'_>,
     host: Option<&HostContext>,
@@ -219,7 +219,7 @@ fn view_notes(
         found.push(Diagnostic::warning(
             "HOST_BINDING_REPO_UNKNOWN",
             format!(
-                "`.kbw.toml` names repo `{repo}`, which the registry does not define; the host \
+                "`.kb.toml` names repo `{repo}`, which the registry does not define; the host \
                  repo is identified by its remotes instead, if any"
             ),
         ));
@@ -315,7 +315,7 @@ mod tests {
              status = \"accepted\"\nowner = \"o\"\n\n[scope]\nproduct = true\n\n[[rules]]\n\
              id = \"r\"\nlevel = \"must\"\ntext = \"Do A.\"\n+++\n",
         );
-        let kb_root = dir.canonicalize().unwrap();
+        let kb_root = crate::util::canonicalize(dir).unwrap();
         Ctx {
             env: Env {
                 cwd: kb_root.clone(),

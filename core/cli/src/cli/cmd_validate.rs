@@ -144,7 +144,7 @@ pub(super) fn run_with_context_format(
                     "PROJECT_NOT_INITIALIZED",
                     format!(
                         "`{}` does not exist: only the shipped templates were validated \
-                         (run `kbw init` to create the project)",
+                         (run `kb init` to create the project)",
                         loc.config
                     ),
                 )],

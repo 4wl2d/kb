@@ -6,7 +6,9 @@
 # Code owners only request reviews. Making their approval mandatory requires branch
 # protection / approval rules configured by an administrator.
 
-# Engine-owned paths (core/release.toml `engine_paths`): change them through `kbw update`.
+# Engine-owned paths (core/release.toml `engine_paths`): change them through `kb update`.
+/install.sh                {{engine_owners}}
+/install.ps1               {{engine_owners}}
 /kbw                      {{engine_owners}}
 /Cargo.toml               {{engine_owners}}
 /Cargo.lock               {{engine_owners}}

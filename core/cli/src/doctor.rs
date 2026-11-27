@@ -21,16 +21,18 @@ use crate::index::Index;
 use crate::integrate::generate::{plan_generate, skill_config_path};
 use crate::integrate::{Action, SkillState, skill_status};
 use crate::knowledge::{Freshness, PinSource};
+use crate::launcher::store::BuildInfo;
 use crate::model::{
     Profile, ProfileConfig, ProfileLocation, Registry, SkillSnapshot, UPSTREAM_FILE, UpstreamConfig,
 };
 use crate::output::Format;
 use crate::snapshot::{self, ApprovedSource, GitTreeSource, PinStatus, SyncReport};
 use crate::source::{SourceTree, WorkingTreeSource};
-use crate::util::read_file_limited;
+use crate::util::PathExt;
 use crate::validate::validate_corpus;
 use crate::versions::{
-    CompiledVersions, ENGINE_VERSION, MANIFEST_PATH, ReleaseManifest, check_snapshot_compat,
+    BUILD_FINGERPRINT, CompiledVersions, ENGINE_VERSION, MANIFEST_PATH, ReleaseManifest,
+    check_snapshot_compat,
 };
 
 /// Outcome of one check.
@@ -137,13 +139,11 @@ pub struct DoctorOptions<'a> {
     pub host: Option<&'a Path>,
     /// `--online`: also fetch the approved ref.
     pub online: bool,
-    /// `KBW_FINGERPRINT` as exported by the launcher.
-    pub fingerprint: Option<String>,
 }
 
 /// Run every check. Never fails: problems become `fail` checks.
 pub fn run(env: &Env, loc: &ProfileLocation, opts: &DoctorOptions<'_>) -> DoctorReport {
-    let mut checks = vec![check_git(env), check_kb_root(env), check_runtime(env, opts)];
+    let mut checks = vec![check_git(env), check_kb_root(env), check_runtime(env)];
 
     let wt = WorkingTreeSource::new(&env.kb_root);
     let config = load_config(&wt, loc);
@@ -192,7 +192,7 @@ pub fn run(env: &Env, loc: &ProfileLocation, opts: &DoctorOptions<'_>) -> Doctor
                 };
                 let c = c.details(json!({ "diagnostics": shown }));
                 if r.errors > 0 || r.warnings > 0 {
-                    c.hint("run `kbw validate` for the full report")
+                    c.hint("run `kb validate` for the full report")
                 } else {
                     c
                 }
@@ -330,75 +330,55 @@ fn check_kb_root(env: &Env) -> Check {
     }))
 }
 
-/// The runtime binary: it already matches the manifest (checked before any command runs);
-/// here we report how it was provided (`BUILD-INFO` written by kbw).
-fn check_runtime(env: &Env, opts: &DoctorOptions<'_>) -> Check {
-    let Some(fp) = opts.fingerprint.as_deref().filter(|f| !f.is_empty()) else {
-        return Check::ok(
+/// The running engine already matches the manifest (checked before any command runs); here
+/// we report which binary serves the checkout and whether it was built from the checkout's
+/// own engine sources, as engine selection guarantees (`kb engine info`).
+fn check_runtime(env: &Env) -> Check {
+    let fp = BUILD_FINGERPRINT;
+    let short = |s: &str| s.get(..12).unwrap_or(s).to_string();
+    let exe = std::env::current_exe().ok();
+    let info = exe
+        .as_deref()
+        .and_then(|p| BuildInfo::read(&p.with_file_name("BUILD-INFO")))
+        .filter(|b| b.get("fingerprint") == Some(fp));
+    let source = info
+        .as_ref()
+        .and_then(|b| b.get("source"))
+        .unwrap_or("kb command")
+        .to_string();
+    let details = json!({
+        "build_fingerprint": fp,
+        "binary": exe,
+        "source": source,
+        "target": crate::launcher::platform::BUILD_TARGET,
+    });
+    match crate::launcher::stamp::fingerprint(&env.kb_root) {
+        Ok(checkout) if checkout == fp => Check::ok(
             "runtime",
             format!(
-                "kb {ENGINE_VERSION} matches the engine manifest; not started through kbw \
-                 (KBW_FINGERPRINT is unset), so the runtime source is unknown"
+                "kb {ENGINE_VERSION} build {} ({source}) is the engine of this checkout",
+                short(fp)
             ),
         )
-        .hint(
-            "run the project launcher (`kbw`) so the runtime is selected by the engine fingerprint",
-        );
-    };
-    if fp.len() != 64 || !fp.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Check::warn(
+        .details(details),
+        Ok(checkout) => Check::warn(
             "runtime",
-            "KBW_FINGERPRINT is not a 64-hex engine fingerprint",
-        );
-    }
-    let rel = format!(".cache/runtime/{fp}/BUILD-INFO");
-    let path = env.kb_root.join(&rel);
-    let text = match read_file_limited(&path, 64 * 1024) {
-        Ok(b) => String::from_utf8_lossy(&b).into_owned(),
-        Err(e) => {
-            return Check::warn(
-                "runtime",
-                format!("runtime {} has no readable {rel}: {}", &fp[..12], e.message),
-            );
-        }
-    };
-    let get = |key: &str| {
-        text.lines()
-            .find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))
-            .map(str::trim)
-    };
-    let source = get("source").unwrap_or("unknown");
-    let target = get("target").unwrap_or("unknown");
-    let details = json!({
-        "fingerprint": fp,
-        "build_info": rel,
-        "source": source,
-        "target": target,
-        "engine_version": get("engine_version"),
-        "built_from": get("built_from"),
-    });
-    if get("fingerprint") != Some(fp) {
-        return Check::warn(
-            "runtime",
-            format!("{rel} does not record fingerprint {}", &fp[..12]),
+            format!(
+                "this kb (build {}) was not built from the checkout's engine sources (fingerprint {}): it was started directly instead of through engine selection, or the sources changed",
+                short(fp),
+                short(&checkout)
+            ),
         )
-        .details(details);
-    }
-    if get("engine_version") != Some(ENGINE_VERSION) {
-        return Check::warn(
+        .hint("run the checkout through plain `kb`; `kb engine info` shows which runtime serves it")
+        .details(details),
+        Err(_) => Check::ok(
             "runtime",
-            format!("{rel} records another engine version than {ENGINE_VERSION}"),
+            format!(
+                "kb {ENGINE_VERSION} matches the engine manifest; the checkout has no complete engine sources to select an engine by"
+            ),
         )
-        .details(details);
+        .details(details),
     }
-    Check::ok(
-        "runtime",
-        format!(
-            "runtime {} ({source}, {target}), engine {ENGINE_VERSION}",
-            &fp[..12]
-        ),
-    )
-    .details(details)
 }
 
 fn check_source(
@@ -470,7 +450,7 @@ fn check_source(
                 r.approved_ref, r.remote, r.source
             ),
         )
-        .hint("run `kbw sync` (or `kbw doctor --online`)")
+        .hint("run `kb sync` (or `kb doctor --online`)")
         .details(details),
     }
 }
@@ -519,23 +499,28 @@ fn check_host(h: &HostContext) -> Check {
         Some(p) => format!("; KB submodule at `{p}`"),
         None => "; the KB is not a submodule of this host".into(),
     };
-    let binding = if h.binding.is_some() {
-        "; `.kbw.toml` present"
-    } else {
-        ""
+    let binding = match h.binding_file {
+        Some(name) if h.binding.is_some() => format!("; `{name}` present"),
+        _ => String::new(),
     };
     let head = h.head.as_deref().map(short).unwrap_or("no commits");
-    Check::ok(
-        "host",
-        format!("{}{wt} at {head}{kb}{binding}", h.root.display()),
-    )
-    .details(json!({
+    let details = json!({
         "root": h.root,
         "linked_worktree": h.linked_worktree,
         "head": h.head,
         "kb_submodule_path": h.kb_submodule_path,
         "binding": h.binding,
-    }))
+    });
+    let text = format!("{}{wt} at {head}{kb}{binding}", h.root.display());
+    if h.binding_file == Some(crate::model::LEGACY_HOST_BINDING_FILE) {
+        return Check::warn(
+            "host",
+            format!("{text} (the binding's name before the kb command)"),
+        )
+        .hint("rename .kbw.toml to .kb.toml through review; the content stays the same")
+        .details(details);
+    }
+    Check::ok("host", text).details(details)
 }
 
 fn check_host_repo(host: Option<&HostContext>, registry: Option<&Registry>) -> Check {
@@ -561,15 +546,15 @@ fn check_host_repo(host: Option<&HostContext>, registry: Option<&Registry>) -> C
             };
             Check::warn(
                 "host-repo",
-                format!("`.kbw.toml` names repo `{bad}`, which is not in the registry{fallback}"),
+                format!("`.kb.toml` names repo `{bad}`, which is not in the registry{fallback}"),
             )
-            .hint("fix `repo` in .kbw.toml or add the repo to registry/repos.toml")
+            .hint("fix `repo` in .kb.toml or add the repo to registry/repos.toml")
         }
         (None, None) => Check::warn(
             "host-repo",
-            "the host is not identified: no remote matches registry/repos.toml and `.kbw.toml` has no `repo`; context requests will have an unknown repo scope (partial)",
+            "the host is not identified: no remote matches registry/repos.toml and `.kb.toml` has no `repo`; context requests will have an unknown repo scope (partial)",
         )
-        .hint("add the host remote to registry/repos.toml `remotes`, or `repo = \"<id>\"` to .kbw.toml"),
+        .hint("add the host remote to registry/repos.toml `remotes`, or `repo = \"<id>\"` to .kb.toml"),
     }
 }
 
@@ -581,7 +566,7 @@ fn tip_word(r: &SyncReport) -> &'static str {
     }
 }
 
-/// The `.kbw.toml selection` that `--snapshot auto` follows (`None` = no explicit choice).
+/// The `.kb.toml selection` that `--snapshot auto` follows (`None` = no explicit choice).
 fn binding_selection(h: &HostContext) -> Option<SkillSnapshot> {
     h.binding
         .as_ref()
@@ -606,7 +591,7 @@ fn check_host_pin(
     let from = match (pin.source, &pin.path) {
         (PinSource::Submodule, Some(p)) => format!("submodule `{p}`"),
         (PinSource::Submodule, None) => "submodule".into(),
-        (PinSource::BindingFile, _) => "`.kbw.toml` pin".into(),
+        (PinSource::BindingFile, _) => "`.kb.toml` pin".into(),
     };
     let rev = short(&pin.revision);
     let (Some(r), Some(status)) = (sync, sync.and_then(|r| r.host.as_ref())) else {
@@ -614,7 +599,7 @@ fn check_host_pin(
             "host-pin",
             format!("pin {rev} ({from}): relation to the approved tip is unknown"),
         )
-        .hint("run `kbw sync`");
+        .hint("run `kb sync`");
     };
     let tip = tip_word(r);
     let details = json!({ "pin": pin, "status": status.status, "ahead": status.ahead, "behind": status.behind });
@@ -622,10 +607,10 @@ fn check_host_pin(
     let selection = binding_selection(h);
     let auto = match selection {
         Some(SkillSnapshot::Pinned) => {
-            "; `.kbw.toml` selection = \"pinned\": `--snapshot auto` reads the pin".to_string()
+            "; `.kb.toml` selection = \"pinned\": `--snapshot auto` reads the pin".to_string()
         }
         Some(_) => {
-            format!("; `.kbw.toml` selection = \"latest\": `--snapshot auto` reads the {tip}")
+            format!("; `.kb.toml` selection = \"latest\": `--snapshot auto` reads the {tip}")
         }
         None => "; `--snapshot auto` returns UPDATE_REQUIRED".to_string(),
     };
@@ -638,7 +623,7 @@ fn check_host_pin(
     };
     let pin_hint = match selection {
         None => format!(
-            "update the host pin through review, {explicit}, or set `selection` in .kbw.toml"
+            "update the host pin through review, {explicit}, or set `selection` in .kb.toml"
         ),
         Some(_) => "update the host pin through review".to_string(),
     };
@@ -675,7 +660,7 @@ fn check_host_pin(
             "host-pin",
             format!("pin {rev} ({from}): the pin or the approved tip is not available locally"),
         )
-        .hint("run `kbw sync`"),
+        .hint("run `kb sync`"),
     }
     .details(details)
 }
@@ -695,7 +680,7 @@ enum Compat {
 #[derive(Debug)]
 struct SnapshotCompat {
     /// Revision `--snapshot auto` selects; `None` when auto fails with UPDATE_REQUIRED
-    /// (a pin that differs from the approved tip without `.kbw.toml selection`) or when
+    /// (a pin that differs from the approved tip without `.kb.toml selection`) or when
     /// nothing is known.
     auto: Option<String>,
     /// `(role, revision, compatibility)` for the approved tip and a differing pin.
@@ -770,7 +755,7 @@ fn check_snapshot_engine(config_ok: bool, kb_git: bool, compat: Option<&Snapshot
             ID,
             "not checked: no approved tip or host pin is known locally",
         )
-        .hint("run `kbw sync` (or `kbw doctor --online`)");
+        .hint("run `kb sync` (or `kb doctor --online`)");
     };
     let role_word = |role: &str| {
         if role == "latest" {
@@ -828,8 +813,8 @@ fn check_snapshot_engine(config_ok: bool, kb_git: bool, compat: Option<&Snapshot
         None => "`--snapshot auto` returns UPDATE_REQUIRED (the pin differs from the approved tip)"
             .to_string(),
     };
-    let update_hint = "update the KB checkout to that revision through review, then bootstrap its \
-                       engine explicitly (`./kbw --kbw-bootstrap` or `./kbw --kbw-install-artifact`)";
+    let update_hint = "update the KB checkout to that revision through review, then get the runtime \
+                       of its engine explicitly (`kb engine install` or `kb engine bootstrap`)";
     if let Some((role, rev, Compat::Incompatible(e))) = auto {
         return Check::fail(
             ID,
@@ -883,7 +868,7 @@ fn check_snapshot_engine(config_ok: bool, kb_git: bool, compat: Option<&Snapshot
         unchecked,
         served.is_empty() || matches!(auto, Some((_, _, Compat::Unknown(_)))),
     ) {
-        return Check::warn(ID, u).hint("run `kbw sync`").details(details);
+        return Check::warn(ID, u).hint("run `kb sync`").details(details);
     }
     Check::ok(
         ID,
@@ -966,7 +951,7 @@ fn check_index(env: &Env, profile: Profile) -> Check {
             "index",
             format!("{summary}; integrity check failed: {problem}"),
         )
-        .hint("the index is a disposable cache: run `kbw index --rebuild`")
+        .hint("the index is a disposable cache: run `kb index --rebuild`")
         .details(details),
     }
 }
@@ -1034,7 +1019,7 @@ fn check_integration(
                         "skill",
                         format!("the host integration lock is invalid: {}", st.message),
                     )
-                    .hint("inspect .kbw/integration.lock in the host, then run `kbw integrate --apply`"),
+                    .hint("inspect .kbw/integration.lock in the host, then run `kb integrate --apply`"),
                 }
                 .details(details)
             }
@@ -1063,7 +1048,7 @@ fn check_integration(
                     changed.len()
                 ),
             )
-            .hint("run `kbw integrate --generate --apply` and commit the result")
+            .hint("run `kb integrate --generate --apply` and commit the result")
             .details(json!({ "changes": changed }))
         }
     };
@@ -1105,7 +1090,7 @@ fn check_engine(env: &Env) -> Check {
             });
             match r.failure() {
                 Some(f) => Check::warn("engine", f.message)
-                    .hint("engine changes belong upstream; declare intended local patches in project/upstream.toml `engine_patches` (see `kbw update divergence`)")
+                    .hint("engine changes belong upstream; declare intended local patches in project/upstream.toml `engine_patches` (see `kb update divergence`)")
                     .details(details),
                 None => Check::ok(
                     "engine",
@@ -1170,7 +1155,7 @@ fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> 
     };
     let kb = env
         .kb_root
-        .canonicalize()
+        .canonical()
         .unwrap_or_else(|_| env.kb_root.clone());
     let roots = Roots {
         code: host.map(|h| h.root.clone()).unwrap_or_else(|| kb.clone()),
@@ -1242,7 +1227,7 @@ fn check_tools(env: &Env, loc: &ProfileLocation, host: Option<&HostContext>) -> 
             "tools",
             format!("{msg}; nothing available answers {}", missing.join(", ")),
         )
-        .hint("install a tool of the route or change `routes` in tools.toml (see `kbw tools`)")
+        .hint("install a tool of the route or change `routes` in tools.toml (see `kb tools`)")
     } else if !lexical.is_empty() || !commands.is_empty() {
         let c = Check::warn("tools", msg);
         if lexical.is_empty() {

@@ -1,7 +1,7 @@
 # Tool registry: the code tools kb connects and the route of each request
-# (docs/agent-cli.md#tool-registry). Agents never choose tools themselves: `kbw sym`,
+# (docs/agent-cli.md#tool-registry). Agents never choose tools themselves: `kb sym`,
 # `callers`, `impact <symbol>` and `find` go to the first available tool of their route,
-# and `kbw check` runs every command tool whose `paths` match a changed file.
+# and `kb check` runs every command tool whose `paths` match a changed file.
 #
 # This file is trusted configuration, reviewed like code: kb runs the argv of `command`
 # tools exactly as written (no shell), in the host repository. Knowledge records never
@@ -37,7 +37,7 @@ adapter = "git-grep"
 
 # Any other command-line tool: an exec entry with an argv template and an output mapping
 # (docs/agent-cli.md#connecting-any-tool-exec). It can answer a built-in request (add its id to
-# that route) or add a project capability agents call with `kbw run <capability> [args]`.
+# that route) or add a project capability agents call with `kb run <capability> [args]`.
 # [[tool]]
 # id = "affected-tests"
 # adapter = "exec"

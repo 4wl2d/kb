@@ -1,7 +1,7 @@
 # Optional replay kit
 
 `kb-eval` is a separate Rust executable. It is not linked into `kb`, installed by
-`kbw init`, or run when knowledge is queried. It runs frozen coding tasks, checks patches
+`kb init`, or run when knowledge is queried. It runs frozen coding tasks, checks patches
 in separate sandboxes, prepares blinded judgments and analyzes preregistered comparisons.
 Private product tasks, credentials, raw agent output and study results belong outside
 engine-owned paths. The shipped examples and `kb-eval-fixture` are synthetic.

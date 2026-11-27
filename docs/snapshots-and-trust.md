@@ -13,7 +13,7 @@ in [format.md](format.md).
 
 Examples were captured with scratch repositories: a KB with the synthetic example published
 to a local bare `origin` (shown as `<kb-origin.git>`), and a host repository that mounts the
-KB as a submodule at `.kb` and declares `repo = "mobile"` in `.kbw.toml`.
+KB as a submodule at `.kb` and declares `repo = "mobile"` in `.kb.toml`.
 
 ## Freshness: one remote check per call
 
@@ -83,9 +83,9 @@ separate. `--snapshot` chooses:
 
 | `--snapshot` | Reads | `approved` |
 |---|---|---|
-| `auto` (default) | `.kbw.toml selection` when set; otherwise, when the host pins a KB revision that differs from the approved tip, fails with `UPDATE_REQUIRED`; otherwise `latest` | as below |
+| `auto` (default) | `.kb.toml selection` when set; otherwise, when the host pins a KB revision that differs from the approved tip, fails with `UPDATE_REQUIRED`; otherwise `latest` | as below |
 | `latest` | the approved tip | yes |
-| `pinned` | the host pin: the KB submodule gitlink in the host `HEAD`, else `.kbw.toml pin`; the approved tip is still fetched and reported | yes if the pin is the tip or an ancestor of it, else no |
+| `pinned` | the host pin: the KB submodule gitlink in the host `HEAD`, else `.kb.toml pin`; the approved tip is still fetched and reported | yes if the pin is the tip or an ancestor of it, else no |
 | `<revision>` | a commit that resolves in the KB checkout or the mirror | yes if reachable from the tip |
 | `working-tree` | the KB working tree | never (`WORKING_TREE` reason) |
 
@@ -111,13 +111,13 @@ host: repo=mobile (binding-file); head=f1e239d3b197; versions=mobile=2.1.0
 
 Choose explicitly: `pinned` when the host code must be checked against the knowledge it was
 reviewed with (an older release branch, the shipped host CI templates, which run
-`kbw impact --snapshot pinned --check`), `latest` when the newest approved knowledge should
+`kb impact --snapshot pinned --check`), `latest` when the newest approved knowledge should
 apply. A host can make the choice permanent with `selection = "pinned"` or `"latest"` in
-`.kbw.toml`; the generated skill passes an explicit `--snapshot` when the skill setting
+`.kb.toml`; the generated skill passes an explicit `--snapshot` when the skill setting
 `snapshot` is `latest` or `pinned` and nothing for `auto`.
 
 `kb doctor` reports the pin relation as the `host-pin` check, worded for the host's
-`.kbw.toml selection`: with `pinned`, `--snapshot auto` reads the pin; with `latest`, it reads
+`.kb.toml selection`: with `pinned`, `--snapshot auto` reads the pin; with `latest`, it reads
 the approved tip (`last known approved tip` when the run did not fetch it); without a
 selection it returns `UPDATE_REQUIRED` for a pin that is behind, ahead or diverged. Its hint
 suggests `--snapshot latest` only when this engine can read the approved tip.
@@ -147,9 +147,9 @@ the pin is read from the linked worktree's own `HEAD`:
   host pin:       8541b350d6b6 (submodule .kb): 1 commits behind approved
 ```
 
-Without a submodule gitlink, `.kbw.toml pin` is used (`source: binding-file`).
+Without a submodule gitlink, `.kb.toml pin` is used (`source: binding-file`).
 
-**`.kbw.toml`** (optional, host root, strict TOML, at most 64 KiB, never read through a
+**`.kb.toml`** (optional, host root, strict TOML, at most 64 KiB, never read through a
 symlink):
 
 ```toml
@@ -162,10 +162,10 @@ selection = "pinned"     # default for --snapshot auto: auto, latest or pinned
 Invalid content is `CONFIG_INVALID` (exit 11), another `schema` is
 `UNSUPPORTED_SCHEMA_VERSION` (exit 13).
 
-**Host repo id.** `.kbw.toml repo` when the registry defines it; otherwise the first host
+**Host repo id.** `.kb.toml repo` when the registry defines it; otherwise the first host
 remote (sorted by name) whose URL matches a `remotes` entry in `registry/repos.toml` after
 normalization (scheme, user info and a trailing `.git` or `/` removed, `host:path` scp syntax
-rewritten to `host/path`, the host name lowercased). A `.kbw.toml repo` that the registry does
+rewritten to `host/path`, the host name lowercased). A `.kb.toml repo` that the registry does
 not define produces `HOST_BINDING_REPO_UNKNOWN` (in `meta.diagnostics`) and `HOST_REPO_UNKNOWN`
 (in context `issues`). Without an identified repo and without `--repo`, context reports
 `REPO_UNKNOWN` (`partial`).
@@ -184,7 +184,7 @@ with the running engine. A mismatch, or a missing or invalid manifest, is `UPDAT
 ```text
 error[UPDATE_REQUIRED]: snapshot 99aad8466361f209c68b4f19340275d7c0adeb7f requires a different engine than the running runtime
   details: {"mismatches":[{"field":"engine_version","runtime":"0.1.0","snapshot":"0.2.0"}],"revision":"99aad8466361f209c68b4f19340275d7c0adeb7f"}
-  hint: update the KB checkout to that revision through review, then bootstrap its engine explicitly with `./kbw --kbw-bootstrap` or `./kbw --kbw-install-artifact` (kbw never builds implicitly), or select --snapshot pinned
+  hint: update the KB checkout to that revision through review, then bootstrap its engine explicitly with `kb engine bootstrap` or `kb engine install` (kb never builds implicitly), or select --snapshot pinned
 ```
 
 Reading commands never build, install or switch engines and never regenerate skills. A
@@ -215,7 +215,8 @@ KB repository is written. `kb sync` states this and checks it:
   index/<profile>.sqlite.lock             lock for index initialization and recovery
   index/<profile>.sqlite.corrupt-<pid>-<nanos>   damaged index kept for inspection
   wt-stat-<profile>.json                  working-tree stat cache
-<KB root>/.cache/runtime/<fingerprint>/   engine runtime managed by kbw
+<KB root>/.cache/engine-stamp              warm-path stamp of the engine fingerprint (engine runtimes
+                                          live in the per-user store: `kb engine info`)
 ```
 
 The mirror name is the first 16 hex characters of a SHA-256 over the normalized source
@@ -314,18 +315,18 @@ The index is a rebuildable cache; Git-tracked text is the source of truth.
 | Situation | What happens | What to do |
 |---|---|---|
 | No network, remote down, credentials or transport refused | `FRESHNESS_UNVERIFIED` (20) | fix access or `source.allowed_protocols`; or decide to work with `--offline` (results are at best `partial`) |
-| `--offline` and nothing was ever fetched | `SNAPSHOT_NOT_FOUND` (22) | run `./kbw sync` once while online, or read local files with `--offline --snapshot working-tree` (never approved) |
-| Host pin differs from the approved tip | `UPDATE_REQUIRED` (21) under `auto` | choose `--snapshot pinned` or `--snapshot latest`, set `.kbw.toml selection`, or update the pin through review |
-| Selected snapshot needs another engine | `UPDATE_REQUIRED` (21) | update the KB checkout through review, then `./kbw --kbw-bootstrap` (or `--kbw-install-artifact`) explicitly |
-| Runtime for this checkout not built | `KBW_RUNTIME_NOT_BOOTSTRAPPED` (50, from `kbw`) | `./kbw --kbw-bootstrap` |
+| `--offline` and nothing was ever fetched | `SNAPSHOT_NOT_FOUND` (22) | run `kb sync` once while online, or read local files with `--offline --snapshot working-tree` (never approved) |
+| Host pin differs from the approved tip | `UPDATE_REQUIRED` (21) under `auto` | choose `--snapshot pinned` or `--snapshot latest`, set `.kb.toml selection`, or update the pin through review |
+| Selected snapshot needs another engine | `UPDATE_REQUIRED` (21) | update the KB checkout through review, then get the runtime of its engine explicitly (`kb engine install` or `kb engine bootstrap`) |
+| Runtime for this checkout not built | `RUNTIME_NOT_BOOTSTRAPPED` (50, from `kb`) | `kb engine bootstrap` |
 | Files changed while a working-tree call was reading them | `IO_ERROR` (62) | run the command again |
-| Damaged index | `INDEX_RECOVERED` warning; rebuilt automatically | nothing; the damaged file is kept for inspection. `./kbw index --rebuild` forces a rebuild |
+| Damaged index | `INDEX_RECOVERED` warning; rebuilt automatically | nothing; the damaged file is kept for inspection. `kb index --rebuild` forces a rebuild |
 | Unusable mirror directory | moved aside and recreated | nothing; the next online call fetches again |
 
-`./kbw sync` fetches and reports the approved tip, the local KB checkout (ahead, behind, dirty)
+`kb sync` fetches and reports the approved tip, the local KB checkout (ahead, behind, dirty)
 and the host pin (`current`, `behind`, `ahead`, `diverged`, `no-pin`, `unknown`) without
-changing anything. `./kbw doctor --online` also checks the remote (it cannot be combined
-with `--offline`), and `./kbw doctor` reports the `host-pin` and `snapshot-engine` checks
+changing anything. `kb doctor --online` also checks the remote (it cannot be combined
+with `--offline`), and `kb doctor` reports the `host-pin` and `snapshot-engine` checks
 described above.
 
 ## Trust model

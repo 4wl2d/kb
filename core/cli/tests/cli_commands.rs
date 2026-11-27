@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 use common::{Sandbox, json, repo_root, stderr, stdout, write, write_min_project};
+use kb::util::PathExt;
 use serde_json::Value;
 
 const SESSION_REFRESH: &str = "project/knowledge/invariants/session-refresh.md";
@@ -160,7 +161,7 @@ impl World {
         sb.commit_all(&host, "host code");
         sb.git(&host, &["submodule", "add", "-q", s(&origin), ".kb"]);
         sb.commit_all(&host, "add kb submodule");
-        let kb = host.join(".kb").canonicalize().unwrap();
+        let kb = host.join(".kb").canonical().unwrap();
         World {
             sb,
             origin,
@@ -453,13 +454,13 @@ fn pinned_host_behind_approved_requires_explicit_selection() {
 
     // A host binding may make `pinned` the default for `auto`.
     write(
-        &w.host.join(".kbw.toml"),
+        &w.host.join(".kb.toml"),
         "schema = 1\nselection = \"pinned\"\n",
     );
     let (o, v) = context_json(&w, &w.host, &["--path", MOBILE_PATH]);
     assert_exit(&o, 0);
     assert_eq!(v["result"]["snapshot"]["selection"], "pinned");
-    fs::remove_file(w.host.join(".kbw.toml")).unwrap();
+    fs::remove_file(w.host.join(".kb.toml")).unwrap();
 
     // doctor reports the stale pin as a warning, not a failure.
     let o = w.kb(&["--json", "doctor", "--online"]);
@@ -1021,15 +1022,7 @@ fn impact_links_changes_and_checks_the_statement() {
 #[test]
 fn doctor_reports_healthy_and_uninitialized_setups() {
     let w = World::new();
-    let fp = "ab".repeat(32);
-    write(
-        &w.kb.join(format!(".cache/runtime/{fp}/BUILD-INFO")),
-        &format!(
-            "engine_version={}\nfingerprint={fp}\ntarget=test-target\nsource=source-build\n",
-            kb::versions::ENGINE_VERSION
-        ),
-    );
-    let o = w.kb_in(&w.host, &["--json", "doctor"], &[("KBW_FINGERPRINT", &fp)]);
+    let o = w.kb_in(&w.host, &["--json", "doctor"], &[]);
     assert_exit(&o, 0);
     let v = json(&o);
     let checks = v["result"]["checks"].as_array().unwrap();
@@ -1078,8 +1071,13 @@ fn doctor_reports_healthy_and_uninitialized_setups() {
         assert_eq!(status(id), "ok", "{id}: {:#}", v["result"]);
     }
     assert_eq!(status("freshness"), "skip");
+    // A KB without complete engine sources is served by any kb whose versions match.
     let runtime = checks.iter().find(|c| c["id"] == "runtime").unwrap();
-    assert_eq!(runtime["details"]["source"], "source-build");
+    assert_eq!(runtime["details"]["source"], "kb command");
+    assert_eq!(
+        runtime["details"]["build_fingerprint"],
+        kb::versions::BUILD_FINGERPRINT
+    );
 
     let o = w.kb(&["--json", "doctor", "--online"]);
     assert_exit(&o, 0);
@@ -1163,7 +1161,7 @@ fn doctor_reports_healthy_and_uninitialized_setups() {
 #[test]
 fn host_binding_with_an_unknown_repo_is_reported() {
     let w = World::new();
-    write(&w.host.join(".kbw.toml"), "schema = 1\nrepo = \"nope\"\n");
+    write(&w.host.join(".kb.toml"), "schema = 1\nrepo = \"nope\"\n");
     let (o, v) = context_json(&w, &w.host, &["--path", MOBILE_PATH]);
     assert_exit(&o, 0);
     // The remote still identifies the host; the bad binding is a warning on stderr/meta.
@@ -1464,7 +1462,7 @@ fn doctor_checks_snapshot_engines_source_and_pin_selection() {
     );
     assert_eq!(source["details"]["local"]["behind"], 1, "{source:#}");
     assert!(text(&source, "message").contains(&format!("approved tip {}", short(&c2))));
-    // No `.kbw.toml selection`: auto fails on the stale pin; the incompatible tip is a
+    // No `.kb.toml selection`: auto fails on the stale pin; the incompatible tip is a
     // warning, and the pin hint does not recommend reading it.
     let engine = check(&v, "snapshot-engine");
     assert_eq!(engine["status"], "warn", "{engine:#}");
@@ -1482,7 +1480,7 @@ fn doctor_checks_snapshot_engines_source_and_pin_selection() {
 
     // `selection = "latest"`: auto reads the incompatible tip, so every read fails.
     write(
-        &w.host.join(".kbw.toml"),
+        &w.host.join(".kb.toml"),
         "schema = 1\nselection = \"latest\"\n",
     );
     let (o, v) = context_json(&w, &w.host, &["--path", MOBILE_PATH]);
@@ -1507,7 +1505,7 @@ fn doctor_checks_snapshot_engines_source_and_pin_selection() {
 
     // `selection = "pinned"`: auto reads the compatible pin and succeeds.
     write(
-        &w.host.join(".kbw.toml"),
+        &w.host.join(".kb.toml"),
         "schema = 1\nselection = \"pinned\"\n",
     );
     let (o, _) = context_json(&w, &w.host, &["--path", MOBILE_PATH]);

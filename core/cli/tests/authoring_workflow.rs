@@ -33,7 +33,7 @@ impl World {
         let commit = sb.commit_all(&kb, "synthetic knowledge");
         sb.git(&kb, &["update-ref", "refs/remotes/origin/main", &commit]);
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(
             &host.join("app/auth/Client.rs"),
             "// Synthetic fixture\nstruct Client;\n",

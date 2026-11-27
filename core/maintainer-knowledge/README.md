@@ -5,8 +5,8 @@ It is **never** part of a project's context: normal indexing reads only `project
 Use it explicitly with `--profile maintainer`, for example:
 
 ```sh
-./kbw validate --profile maintainer
-./kbw context --profile maintainer --snapshot working-tree --offline \
+kb validate --profile maintainer
+kb context --profile maintainer --snapshot working-tree --offline \
   --intent implement --path core/cli/src/index/mod.rs --repo kb
 ```
 

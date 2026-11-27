@@ -59,7 +59,7 @@ pub fn load_config(source: &dyn SourceTree, loc: &ProfileLocation) -> Result<Pro
                 ),
             )
             .with_hint(
-                "run `kbw init --name <name> --namespace <ns>` (dry-run) and then with `--apply`",
+                "run `kb init --name <name> --namespace <ns>` (dry-run) and then with `--apply`",
             ),
             crate::model::Profile::Maintainer => KbError::new(
                 ErrorCode::ConfigInvalid,
@@ -83,7 +83,7 @@ pub fn parse_config(path: &str, bytes: &[u8]) -> Result<ProfileConfig> {
                 crate::versions::DOCUMENT_SCHEMA
             ),
         )
-        .with_hint("run `kbw migrate` to see available migrations"));
+        .with_hint("run `kb migrate` to see available migrations"));
     }
     let cfg: ProfileConfig = toml::from_str(text)
         .map_err(|e| KbError::new(ErrorCode::ConfigInvalid, format!("`{path}`: {e}")))?;

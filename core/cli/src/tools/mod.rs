@@ -27,6 +27,7 @@ use crate::model::tools::{
 };
 use crate::process::{Limits, capture};
 use crate::source::{SourceTree, WorkingTreeSource};
+use crate::util::PathExt;
 
 /// Where the tools run and what they read.
 #[derive(Debug, Clone)]
@@ -115,11 +116,29 @@ pub fn resolve_program(program: &str, roots: &Roots) -> Option<PathBuf> {
     is_executable(&candidate).then_some(candidate)
 }
 
-fn search_path(name: &str) -> Option<PathBuf> {
+/// The first executable `name` on `PATH`. On Windows a name without an extension is also
+/// tried with each extension of `PATHEXT` (default `.COM;.EXE;.BAT;.CMD`).
+pub fn search_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path)
-        .map(|dir| dir.join(name))
-        .find(|p| is_executable(p))
+    let exts: Vec<String> = if cfg!(windows) && Path::new(name).extension().is_none() {
+        std::env::var("PATHEXT")
+            .unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".into())
+            .split(';')
+            .filter(|e| !e.is_empty())
+            .map(str::to_string)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    std::env::split_paths(&path).find_map(|dir| {
+        let plain = dir.join(name);
+        if is_executable(&plain) {
+            return Some(plain);
+        }
+        exts.iter()
+            .map(|e| dir.join(format!("{name}{e}")))
+            .find(|p| is_executable(p))
+    })
 }
 
 fn is_executable(p: &Path) -> bool {
@@ -433,7 +452,7 @@ pub fn unavailable(request: &str, attempts: Vec<String>) -> KbError {
     )
     .with_details(json!({ "capability": request, "attempts": attempts }))
     .with_hint(
-        "run `kbw tools` to see the registry and what is installed; `kbw doctor` checks the setup",
+        "run `kb tools` to see the registry and what is installed; `kb doctor` checks the setup",
     )
 }
 
@@ -483,7 +502,7 @@ pub fn rel_to_code(roots: &Roots, path: &str) -> String {
         if let Some(rel) = crate::util::rel_string(&roots.code, p) {
             return rel;
         }
-        if let Ok(canonical) = roots.code.canonicalize()
+        if let Ok(canonical) = roots.code.canonical()
             && let Some(rel) = crate::util::rel_string(&canonical, p)
         {
             return rel;
@@ -496,13 +515,29 @@ pub fn rel_to_code(roots: &Roots, path: &str) -> String {
 mod tests {
     use super::*;
 
+    /// `path` (written `/code/...`) as an absolute path on this platform, where Windows
+    /// needs a drive.
+    pub(super) fn abs(path: &str) -> String {
+        if cfg!(windows) {
+            format!("C:{path}")
+        } else {
+            path.to_string()
+        }
+    }
+
     #[test]
     fn programs_resolve_by_placeholder() {
         let dir = tempfile::tempdir().unwrap();
         let bin = dir.path().join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        let tool = bin.join("tool");
-        std::fs::write(&tool, "#!/bin/sh\necho tool 1.0\n").unwrap();
+        // Windows runs a batch file, not a script with a shebang.
+        let (name, script) = if cfg!(windows) {
+            ("tool.cmd", "@echo tool 1.0\r\n")
+        } else {
+            ("tool", "#!/bin/sh\necho tool 1.0\n")
+        };
+        let tool = bin.join(name);
+        std::fs::write(&tool, script).unwrap();
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -514,13 +549,17 @@ mod tests {
             repo: None,
             kb_mount: None,
         };
-        assert_eq!(resolve_program("{kb}/bin/tool", &roots), Some(tool.clone()));
-        assert_eq!(resolve_program("bin/tool", &roots), Some(tool.clone()));
+        let program = format!("{{kb}}/bin/{name}");
+        assert_eq!(resolve_program(&program, &roots), Some(tool.clone()));
+        assert_eq!(
+            resolve_program(&format!("bin/{name}"), &roots),
+            Some(tool.clone())
+        );
         assert_eq!(resolve_program("{host}/bin/missing", &roots), None);
         let spec = ToolSpec {
             id: "t".into(),
             adapter: AdapterKind::Ripgrep,
-            program: Some("{kb}/bin/tool".into()),
+            program: Some(program),
             ..ToolSpec::default()
         };
         let p = probe(&spec, &roots, true);

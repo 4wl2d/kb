@@ -9,39 +9,37 @@ operation is covered in [downstream.md](downstream.md).
 
 | requirement | source of truth | notes |
 |---|---|---|
-| Rust `1.98.1` with `rustfmt`, `clippy` | `rust-toolchain.toml`, `core/release.toml` `rust_toolchain` | rustup selects it automatically; without rustup, the `rustc` on `PATH` must report exactly this version or `./kbw --kbw-bootstrap` fails with `KBW_TOOLCHAIN_MISMATCH` |
+| Rust `1.98.1` with `rustfmt`, `clippy` | `rust-toolchain.toml`, `core/release.toml` `rust_toolchain` | rustup selects it automatically; without rustup, the `rustc` on `PATH` must report exactly this version or `kb engine bootstrap` fails with `TOOLCHAIN_MISMATCH` |
 | Git ≥ `2.38.0` | `core/release.toml` `min_git` | `kb update check` predicts conflicts with `git merge-tree --write-tree`; `kb doctor` checks the version |
-| `shellcheck` | CI | lints the POSIX launcher `kbw` and the shipped CI and hook shell templates |
-| macOS SDK headers | — | the bundled SQLite is compiled from source; if headers are not found, `export SDKROOT="$(xcrun --show-sdk-path)"` (the launcher does this for its own builds) |
+| `shellcheck` | CI | lints `install.sh`, the deprecated `kbw` forwarder and the shipped CI and hook shell templates |
+| macOS SDK headers | — | the bundled SQLite is compiled from source; if headers are not found, `export SDKROOT="$(xcrun --show-sdk-path)"` (`kb engine bootstrap` and `package` do this for their builds) |
 
 ```sh
 cargo build --workspace --locked      # the first build downloads crates; tests never use the network
 cargo test --workspace --locked
-./kbw --kbw-bootstrap                 # release runtime for the launcher (.cache/runtime/<fingerprint>/)
-./kbw version
+cargo run -q -p kb -- engine info   # a fresh build serves this working tree in-process
 ```
 
-Two ways to run the engine while developing:
+Every build compiles in the engine fingerprint of the sources it was built from
+(`core/cli/build.rs`; `kb version`: `build <fp>`), and engine selection runs a binary for a
+checkout only when that fingerprint matches. Ways to run the engine while developing:
 
-* `target/debug/kb --root . <command>` runs the debug build directly (`kb version` prints
-  `build unknown` and `build_fingerprint` is `unknown`; `doctor` notes that it was not
-  started through `kbw`).
-* `./kbw <command>` runs the runtime of the current engine fingerprint. Any edit of a build
-  input (`Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `core/release.toml`,
-  `core/cli/Cargo.toml`, `core/cli/src/**`) changes the fingerprint, so the next call fails
-  with `KBW_RUNTIME_NOT_BOOTSTRAPPED` until you run `./kbw --kbw-bootstrap` again (or set
-  `KBW_AUTO_BOOTSTRAP=1`). The fingerprint is compiled into the runtime
-  (`KBW_BUILD_FINGERPRINT`, a tracked Cargo input) and reported by `./kbw version`
-  (`build <fp>`). `KBW_CARGO_TARGET_DIR` points source bootstraps at a shared target
-  directory (default `<root>/.cache/cargo-target`; a relative value is resolved against the
-  directory you run `kbw` from, not against the root). Sharing it with a plain
-  `cargo build --release` costs one recompilation of the `kb` crate whenever the two
-  alternate, because that build embeds `unknown` instead of the fingerprint.
+* `cargo run -q -p kb -- <command>` or `target/debug/kb <command>` after a build: the binary
+  matches the working tree, so it serves this checkout in-process.
+* An installed `kb` (another version, or built before your edits) needs a runtime for the
+  current fingerprint. Any edit of a build input (`Cargo.toml`, `Cargo.lock`,
+  `rust-toolchain.toml`, `core/release.toml`, `core/cli/Cargo.toml`, `core/cli/build.rs`,
+  `core/cli/src/**`) changes it, so the next call fails with `RUNTIME_NOT_BOOTSTRAPPED` until
+  you run `kb engine bootstrap` (or set `KB_AUTO_BOOTSTRAP=1`); each bootstrap adds a runtime
+  to the store (`kb engine info` shows where; delete old ones freely). `KB_CARGO_TARGET_DIR`
+  points source bootstraps at a shared target directory (default `<root>/.cache/cargo-target`;
+  a relative value is resolved against the current directory); pointing it at the workspace
+  `target/` lets bootstraps reuse your builds.
 
 Code layout rules (from AGENTS.md): pure logic (`model`, `parse`, `validate`, `scope`,
 `normalize`, `glob`, `context`) has no Git or filesystem side effects; adapters live in
 `git`, `host`, `snapshot`, `overlay`, `source`, `index`, `integrate`, `update`. No Python
-anywhere; shell only for `kbw` and CI glue.
+anywhere; shell only for `kb` and CI glue.
 
 ## Test suites
 
@@ -58,11 +56,11 @@ modules) and the integration suites in `core/cli/tests/`:
 | `snapshot_git.rs` | freshness, snapshot selection, frozen working-tree snapshots, engine compatibility of snapshots, proposal overlays, host detection and `kb sync` against real local Git repositories |
 | `impact_analysis.rs` | impact analysis against temporary Git repositories and corpora |
 | `init_integrate.rs` | `kb init` and `kb integrate` through the executable, plus consistency of shipped templates, skills and the synthetic example |
-| `migrate_update.rs` | `kb migrate` on the synthetic legacy fixtures and `kb update` scenarios (check, prepare, divergence, abandon) with synthetic upstream/downstream repositories; the engine steps run through an injected test runner or a stub `kbw`, never a real build |
+| `migrate_update.rs` | `kb migrate` on the synthetic legacy fixtures and `kb update` scenarios (check, prepare, divergence, abandon) with synthetic upstream/downstream repositories; the engine steps run through an injected test runner, or through the production runner up to a fake `cargo`, never a real build |
 | `cli_commands.rs` | `context`, `search`, `show`, `index`, `validate`, `impact`, `doctor` end to end: KB pushed to a local bare origin, host mounting it as a submodule; also usage and protocol errors in JSON mode, the snapshot line of text output, absolute `--path` values through a symlinked host directory, the `doctor` checks `source`, `host-pin` and `snapshot-engine`, and that reading commands leave the checkouts untouched |
-| `launcher.rs` | the real `kbw` script: fingerprint definition, warm path, invalidation, toolchain mismatch, the build fingerprint compiled into source builds, a relative `KBW_CARGO_TARGET_DIR`, packaging (including rebuilding a runtime that does not report its fingerprint), artifact installation, reinstalling with the runtime resolvable at every step, rejection of invalid archives with the active runtime kept (fake runtimes and a fake `cargo`), running under `dash`, one real source bootstrap, shellcheck |
-| `e2e_workflow.rs` | the specification's end-to-end scenario (unix only): synthetic upstream → downstream init → multi-repository context → proposal → approved-origin update → pin refresh → upstream-format update, through `kbw` |
-| `update_production.rs` | production launcher/update worktree: synthetic 0 → 1 → 2 migration to `v2-expected`, validation and unchanged main checkout |
+| `engine_selection.rs` | the `kb` command: in-process service of a matching checkout found through a `.kb` mount, `RUNTIME_NOT_BOOTSTRAPPED` with JSON and text output, refusal of a runtime that reports another build, `engine install` verification (digest, `BUILD-INFO`, names, tampered `SHA256SUMS`) and activation, `self update` (check, tampered digest, forced reinstall by rename), and on Unix runtimes run in place (store and kbw-era locations), source bootstrap with a fake toolchain (pinned toolchain, failures and concurrent edits leave runtimes intact, `KB_AUTO_BOOTSTRAP`), the `kbw` forwarder (flag mapping, loop, missing kb) and `install.sh` |
+| `e2e_workflow.rs` | the specification's end-to-end scenario (unix only): synthetic upstream → downstream init → multi-repository context → proposal → approved-origin update → pin refresh → upstream-format update, through `kb` |
+| `update_production.rs` | production runner in an update worktree whose engine differs from the running kb (a real source bootstrap): synthetic 0 → 1 → 2 migration to `v2-expected`, validation and unchanged main checkout |
 | `schema_evolution.rs`, `retrieval_upgrade.rs` | schema-2 strictness, compatibility, tracked identifiers, change categories and historical slices |
 | `authoring_workflow.rs`, `knowledge_ci.rs` | validated drafts/capture and offline merged-change/CI glue |
 | `code_provider.rs`, `process_limits.rs` | immutable provider evidence, deleted symbols, uncertainty, bounded output and deadlines; a non-UTF-8 code unit is omitted with a limitation, a pinned response's `similar` candidates are not replayed into context, and validation reads files with a constant number of Git processes (counted through a `PATH` Git shim) |
@@ -92,17 +90,16 @@ Shared helpers are in `core/cli/tests/common/`. Rules for every test:
 
 Notes:
 
-* `launcher.rs` (real bootstrap), `e2e_workflow.rs` and `update_production.rs` build with the
-  pinned toolchain and `CARGO_NET_OFFLINE=true`, so they need a warm Cargo registry cache
-  (any earlier `cargo build --locked` provides it). They share compiled dependencies through
-  one directory under Cargo's test tmpdir (`kbw-cargo-target`). The e2e test performs two
-  release builds of the `kb` crate (the downstream runtime and the update worktree), so it is
-  the slowest suite; `update_production.rs` performs one. The e2e "upstream-format update"
-  leg has no format change; `update_production.rs` covers a real schema migration through the
-  production launcher.
-* `kbw_is_shellcheck_clean` prints `skipping` and passes when `shellcheck` is not installed;
-  CI runs `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`
-  explicitly.
+* `e2e_workflow.rs` and `update_production.rs` build a real engine with the pinned toolchain
+  and `CARGO_NET_OFFLINE=true`, so they need a warm Cargo registry cache (any earlier
+  `cargo build --locked` provides it). They share compiled dependencies through one directory
+  under Cargo's test tmpdir (`kb-cargo-target`). Each performs one release build of the `kb`
+  crate (their synthetic upstreams carry a marker comment, so the kb under test is not their
+  engine); the e2e update worktree reuses the downstream's runtime from the store, and
+  `update_production.rs` covers a real schema migration by the bootstrapped target engine.
+* CI runs `shellcheck install.sh kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`,
+  the installers and `kb self update` against locally packaged archives on Linux, macOS and
+  Windows.
 * Regenerate golden context output only intentionally, then review the diff:
   `KB_UPDATE_GOLDEN=1 cargo test -p kb --test context_golden`.
 * One suite: `cargo test -p kb --test cli_commands`.
@@ -115,27 +112,27 @@ Run before finishing any change (the same list is in AGENTS.md):
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
-shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
-./kbw schema --check
-./kbw validate --profile maintainer --templates
+shellcheck install.sh kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
+kb schema --check
+kb validate --profile maintainer --templates
 ```
 
-`./kbw schema --check` fails with `DRIFT_DETECTED` (42) when `core/schemas/` differs from the
-model. `./kbw validate --profile maintainer --templates` validates the maintainer knowledge
+`kb schema --check` fails with `DRIFT_DETECTED` (42) when `core/schemas/` differs from the
+model. `kb validate --profile maintainer --templates` validates the maintainer knowledge
 with its routing fixtures and every shipped template and example; on a clean upstream (no
 `project/project.toml`) it reports the missing project as info and exits 0.
 
 The same checks are configured as `command` tools in `core/maintainer-knowledge/tools.toml`,
-each triggered by the files it covers. `./kbw --profile maintainer check` runs those whose
+each triggered by the files it covers. `kb --profile maintainer check` runs those whose
 globs match the work tree's changes against `HEAD`, and
-`./kbw --profile maintainer check --base main` those matching the changes against `main`;
+`kb --profile maintainer check --base main` those matching the changes against `main`;
 changed maintainer knowledge is validated too, while declared probes need a host repository
 and are skipped here. `--plan` lists what would run without running it. The selection
 follows the changed files, so the full list above still applies before finishing.
 
 ## Engine and project ownership
 
-* `core/release.toml` `engine_paths` lists what the engine owns: `kbw`, the Cargo files,
+* `core/release.toml` `engine_paths` lists what the engine owns: `kb`, the Cargo files,
   `rust-toolchain.toml`, `core`, `docs`, the top-level Markdown files, `LICENSE`,
   `.gitignore` and the two upstream workflows. `project_paths = ["project"]` is owned by each
   downstream. The root `SECURITY.md` covers the engine only; downstreams publish their own
@@ -154,7 +151,7 @@ follows the changed files, so the full list above still applies before finishing
 
 ## Versions
 
-All versions live in `core/release.toml` (read line by line by `kbw` and strictly by the
+All versions live in `core/release.toml` (read line by line by `kb` and strictly by the
 engine) and are compiled into the binary from `core/cli/src/versions.rs`.
 
 | version | kind | bump when | effect of a mismatch |
@@ -167,7 +164,7 @@ engine) and are compiled into the binary from `core/cli/src/versions.rs`.
 | `skill_protocol` | integer | generated skills change the calls or interpretation agents rely on (not for wording) | `--skill-protocol` → `SKILL_OUTDATED` |
 | `manifest` | integer (`1`) | format of `core/release.toml` itself | `RUNTIME_INCOMPATIBLE` |
 | `PARSER_VERSION` | integer, code only (currently `6`) | parsing output for identical bytes changes, including diagnostic messages | cached parses are invalidated: the index is rebuilt in place (`INDEX_REBUILT`) |
-| `rust_toolchain` | toolchain | toolchain upgrade (together with `rust-toolchain.toml`) | `KBW_TOOLCHAIN_MISMATCH` |
+| `rust_toolchain` | toolchain | toolchain upgrade (together with `rust-toolchain.toml`) | `TOOLCHAIN_MISMATCH` |
 
 Unit tests in `versions.rs` fail when `core/release.toml` and the compiled constants disagree
 or when `rust_toolchain` differs from `rust-toolchain.toml`. Changing `core/release.toml` or
@@ -202,9 +199,9 @@ The files in `core/schemas/` are generated from the Rust model (`core/cli/src/mo
 [core/schemas/README.md](../core/schemas/README.md). After changing model types:
 
 ```sh
-./kbw --kbw-bootstrap            # the model change altered the fingerprint
-./kbw schema --write             # regenerate; removes stale *.schema.json files
-./kbw schema --check             # DRIFT_DETECTED (42) if anything still differs
+kb engine bootstrap            # the model change altered the fingerprint
+kb schema --write             # regenerate; removes stale *.schema.json files
+kb schema --check             # DRIFT_DETECTED (42) if anything still differs
 ```
 
 Without a runtime, the debug build does the same: `target/debug/kb --root . schema --write`.
@@ -232,7 +229,7 @@ freshness handling, like `codegraph.rs`) and is an engine change:
    capabilities, whether it needs a `program`, and its default rank; dispatch it in
    `answer_code` (`core/cli/src/tools/mod.rs`). Keep validation of the new fields in the
    pure model.
-3. Regenerate the schemas (`./kbw schema --write`; `tools.v1.schema.json` changes) and
+3. Regenerate the schemas (`kb schema --write`; `tools.v1.schema.json` changes) and
    document the adapter in [agent-cli.md](agent-cli.md#tool-registry).
 4. Test it with a synthetic, labeled stand-in executable as `core/cli/tests/agent_cli.rs`
    does for CodeGraph: routing, fallback notes, not-found answers and bounded output,
@@ -250,8 +247,8 @@ procedures such as `kb.procedure.add-migration` and `kb.procedure.cut-release`, 
 and a gap) and routing fixtures. It is opt-in and never part of a project's context.
 
 ```sh
-./kbw validate --profile maintainer
-./kbw context --profile maintainer --snapshot working-tree --offline \
+kb validate --profile maintainer
+kb context --profile maintainer --snapshot working-tree --offline \
   --intent implement --repo kb --path core/cli/src/index/mod.rs
 ```
 
@@ -304,25 +301,28 @@ Steps:
 3. The owner tags and pushes: `git tag -s v<engine_version> <commit>` and
    `git push origin v<engine_version>`.
 4. The workflow runs `verify` (the tag must equal `v` + `engine_version`, and the crate
-   version must match), `build` on `macos-15` (`aarch64-apple-darwin`) and `ubuntu-latest`
-   (`x86_64-unknown-linux-gnu`) with `./kbw --kbw-package dist`, verifies each archive by
-   installing it with `--kbw-install-artifact`, then `publish` writes `SHA256SUMS` and creates
+   version must match), `build` on `macos-15` (`aarch64-apple-darwin`), `ubuntu-latest`
+   (`x86_64-unknown-linux-musl`), `ubuntu-24.04-arm` (`aarch64-unknown-linux-musl`) and
+   `windows-latest` (`x86_64-pc-windows-msvc`) with `kb engine package dist --target <triple>`,
+   verifies each archive with its installer (`install.sh`, `install.ps1`), `kb self update`
+   and `kb engine install` against a local copy of the release layout, then `publish` writes
+   `SHA256SUMS` and creates
    the GitHub release with `kb-<version>-<target>.tar.gz`, their `.sha256` files and
    `SHA256SUMS`. `workflow_dispatch` with an existing tag rebuilds it; it never creates tags.
-5. Check the result as in `kb.procedure.cut-release`: download an archive, compare its digest
-   with `SHA256SUMS`, and install it on a clean checkout of the same tag:
+5. Check the result as in `kb.procedure.cut-release`: install it with the installer on a clean
+   machine, then in a clean checkout of the same tag:
 
    ```sh
-   ./kbw --kbw-install-artifact <archive-path-or-https-url> --sha256 <digest from SHA256SUMS>
-   ./kbw --kbw-runtime-info
+   kb engine info        # the installed kb serves the checkout itself
+   kb self update --check
    ```
 
-An archive activates only for a checkout whose engine fingerprint equals its `BUILD-INFO`
-(same engine inputs, same target) and whose binary reports that fingerprint in its smoke test
-(`kb --json version`). The Linux binary needs a glibc at least as new as the build runner's.
-Other platforms are not built. `./kbw --kbw-package <out-dir>` produces the same archive and
-`.sha256` locally; it packages the active source-built runtime, and builds from source instead
-when the active runtime is an installed artifact or does not report the current fingerprint.
+As an engine runtime (`kb engine install`), an archive activates only for a checkout whose
+engine fingerprint equals its `BUILD-INFO` (same engine inputs, same target) and whose binary
+reports that fingerprint in its smoke test (`kb --json version`). The Linux binaries are
+static (musl). Other platforms install from source (`cargo install --locked --git ...`).
+`kb engine package <out-dir> [--target <triple>]` produces the same archive and `.sha256`
+locally; it always builds the checkout's engine (incrementally, in `KB_CARGO_TARGET_DIR`).
 
 Every downstream inherits `release.yml`. A downstream that does not publish runtime archives
 sets the repository variable `KB_RELEASE` to `disabled`: `verify`, `build` and `publish` are
@@ -333,29 +333,36 @@ then skipped and a `v*` tag publishes nothing (see
 
 `.github/workflows/upstream-ci.yml` runs on pull requests (once, on the merge commit), on
 pushes to `main` and on demand (`workflow_dispatch`), with `contents: read` and no secrets,
-on `ubuntu-latest` (x86_64 Linux) and `macos-15` (arm64 macOS). A newer push to a pull
+on `ubuntu-latest` (x86_64 Linux), `macos-15` (arm64 macOS) and `windows-latest` (x86_64
+Windows, glue steps in Git Bash, kb itself also from PowerShell and cmd). A newer push to a pull
 request cancels its running checks; runs on `main` always finish. After a checkout without persisted credentials it runs:
 
 1. install the pinned toolchain (`rustup toolchain install`);
 2. `cargo fmt --all --check`;
 3. `cargo clippy --workspace --all-targets --locked -- -D warnings`;
 4. `cargo test --workspace --locked`;
-5. `shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg` (Linux only);
-6. `./kbw --kbw-bootstrap`, `./kbw --kbw-runtime-info`, `./kbw version` (with
-   `KBW_CARGO_TARGET_DIR` set to the workspace `target/`);
-7. `./kbw schema --check`;
-8. `./kbw validate --profile maintainer --templates`;
-9. Tier A routing on both corpora: `./kbw eval routing --profile maintainer --json` and
-   `./kbw eval routing --example synthetic-multirepo --json`;
-10. `cargo run -p kb-bench --release --locked -- smoke`;
-11. install the Linux replay isolation backend (Linux only): bubblewrap, probed with
+5. `shellcheck install.sh kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg`
+   (Linux only);
+6. `cargo build --release --locked -p kb` with `target/release` put on `PATH`, then
+   `kb engine info` and `kb version` (the built kb serves this checkout itself; on Windows
+   also from cmd);
+7. `kb schema --check`;
+8. `kb validate --profile maintainer --templates`;
+9. Tier A routing on both corpora: `kb eval routing --profile maintainer --json` and
+   `kb eval routing --example synthetic-multirepo --json`;
+10. `kb engine package` into a local copy of the release layout, then the installer
+    (`install.sh`, or `install.ps1` on Windows), `kb self update --check` and `--force`, and
+    `kb engine install` against it (`KB_RELEASES_URL`, `KB_RUNTIME_DIR`);
+11. `cargo run -p kb-bench --release --locked -- smoke`;
+12. install the Linux replay isolation backend (Linux only): bubblewrap, probed with
     `bwrap --unshare-all`. When Ubuntu's AppArmor restriction
     (`kernel.apparmor_restrict_unprivileged_userns = 1`) blocks the probe, a binary-scoped
     AppArmor profile (`kb-eval-bwrap`) grants `userns` to `/usr/bin/bwrap` alone; the
     host-wide setting is never lowered, and a backend that still cannot create its
     namespaces fails the step;
-12. the replay isolation smoke `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`
-    (Seatbelt on macOS, bubblewrap on Linux; synthetic, offline, no model credentials).
+13. the replay isolation smoke `cargo test -p kb-eval --locked --test replay_workflow -- --ignored`
+    (Seatbelt on macOS, bubblewrap on Linux; not on Windows, which has no isolation backend;
+    synthetic, offline, no model credentials).
 
 The replay steps run last, so a runner that cannot sandbox does not skip the checks before
 them.
@@ -368,11 +375,8 @@ limits can cause) fails `ci` as well; re-run the failed jobs once capacity retur
 
 Making these checks required for merging is a repository setting. Downstream forks inherit
 this workflow; setting the repository variable `KB_ENGINE_CI` to `disabled` skips its job
-(`check`) without editing the engine-owned file. With `KBW_CARGO_TARGET_DIR` pointing at the
-workspace `target/`, the launcher's release build (which embeds the engine fingerprint) and
-plain Cargo release builds such as the benchmark smoke run (which embed `unknown`) share one
-directory, so the `kb` crate may be recompiled when they alternate; this costs time only.
-`release.yml` builds with `./kbw --kbw-package`, so its archives carry the fingerprint.
+(`check`) without editing the engine-owned file. With `KB_CARGO_TARGET_DIR` pointing at the
+workspace `target/`, `kb engine package` reuses the release build of step 6.
 
 CI and merge request templates for downstream KBs and host repositories live in
 `core/templates/ci/` and `core/templates/mr/` (see [downstream.md](downstream.md)).

@@ -70,7 +70,7 @@
     "snapshot": {
       "$ref": "#/$defs/SkillSnapshot",
       "default": "auto",
-      "description": "Snapshot selection written as `--snapshot` into every generated kbw command; `latest`\nand `pinned` override a host `.kbw.toml` `selection`, `auto` defers to it."
+      "description": "Snapshot selection written as `--snapshot` into every generated kb command; `latest`\nand `pinned` override a host `.kb.toml` `selection`, `auto` defers to it."
     }
   },
   "required": [

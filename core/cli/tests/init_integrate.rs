@@ -1,6 +1,9 @@
 //! `kb init` and `kb integrate` through the real executable (temporary KB roots and host
 //! directories), plus consistency checks of the shipped templates, skills and the synthetic
 //! example.
+// Helpers of the Unix-only tests (shell hooks, process groups) are unused elsewhere.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 mod common;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -48,7 +51,12 @@ fn snapshot(dir: &Path) -> BTreeMap<String, Vec<u8>> {
             if ft.is_dir() {
                 walk(root, &p, out);
             } else if ft.is_file() {
-                let rel = p.strip_prefix(root).unwrap().to_string_lossy().into_owned();
+                // `/`-separated on every platform, like the paths the tests name.
+                let rel = p
+                    .strip_prefix(root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
                 out.insert(rel, fs::read(&p).unwrap());
             }
         }
@@ -442,7 +450,7 @@ fn init_next_hint_names_every_written_path_outside_project() {
         next,
         "next: review and commit project/, .github/workflows/kb-knowledge.yml, \
          .gitlab/ci/kb-knowledge.yml and .gitlab/merge_request_templates/Knowledge.md, \
-         then run `./kbw validate`"
+         then run `kb validate`"
     );
 }
 
@@ -537,6 +545,7 @@ fn templates_use_only_documented_placeholders() {
         "remote",
         "approved_ref",
         "kb_path",
+        "kb",
         "harnesses",
         "upstream_url_line",
         "upstream_revision_line",
@@ -616,7 +625,7 @@ fn generated_skill_front_matter_is_valid_for_every_harness() {
         assert!(text.contains(&format!("references/{r}.md")));
         assert!(skill_dir.join(format!("references/{r}.md")).is_file());
     }
-    assert!(text.contains(".kb/kbw context --intent implement"));
+    assert!(text.contains("`kb context --intent implement"));
     assert!(text.contains(&format!(
         "--skill-protocol {}",
         kb::versions::SKILL_PROTOCOL
@@ -1005,15 +1014,19 @@ fn skill_status_reports_installed_protocol() {
     );
 }
 
-/// Every snapshot-reading `kbw` command (`context`, `impact`, `show`, `search`) shown in a
-/// generated text, up to its closing backtick or the end of the line.
+/// Every snapshot-reading `kb` command (`context`, `impact`, `show`, `search`) shown in a
+/// generated text, from its opening backtick to its closing one or the end of the line.
 fn snapshot_reading_commands(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     for line in text.lines() {
-        for (i, _) in line.match_indices("/kbw ") {
+        for (i, _) in line.match_indices("`kb ") {
             let cmd = &line[i + 1..];
             let cmd = &cmd[..cmd.find('`').unwrap_or(cmd.len())];
-            let sub = cmd["kbw ".len()..].split(' ').next().unwrap_or("");
+            let mut words = cmd["kb ".len()..].split(' ');
+            let mut sub = words.next().unwrap_or("");
+            if sub == "--root" {
+                sub = words.nth(1).unwrap_or("");
+            }
             if ["context", "impact", "show", "search"].contains(&sub) {
                 out.push(cmd.to_string());
             }
@@ -1167,7 +1180,6 @@ fn ci_command(yaml: &str, needle: &str) -> String {
 #[cfg(unix)]
 #[test]
 fn host_ci_impact_step_passes_for_a_filled_template_while_the_pin_lags() {
-    use std::os::unix::fs::PermissionsExt;
     use std::process::Command;
     let sb = Sandbox::new();
     let p = |p: &Path| p.to_str().unwrap().to_string();
@@ -1198,7 +1210,7 @@ fn host_ci_impact_step_passes_for_a_filled_template_while_the_pin_lags() {
     sb.commit_all(&seed, "merged knowledge change");
     sb.git(&seed, &["push", "-q", &p(&origin), "main"]);
 
-    let kb_root = host.join(".kb").canonicalize().unwrap();
+    let kb_root = kb::util::canonicalize(&host.join(".kb")).unwrap();
     let auto = sb.kb(
         &host,
         &[
@@ -1213,17 +1225,8 @@ fn host_ci_impact_step_passes_for_a_filled_template_while_the_pin_lags() {
     );
     assert_code(&auto, "UPDATE_REQUIRED", 21);
 
-    // `$KB_PATH/kbw` stands in for the bootstrapped launcher of the pinned KB checkout.
-    let shim = sb.path().join("shim");
-    write(
-        &shim.join("kbw"),
-        &format!(
-            "#!/bin/sh\nexec '{}' --root '{}' \"$@\"\n",
-            common::kb_bin().display(),
-            kb_root.display()
-        ),
-    );
-    fs::set_permissions(shim.join("kbw"), fs::Permissions::from_mode(0o755)).unwrap();
+    // The built kb on PATH stands in for the kb that install-kb.sh installs.
+    let path = common::path_with_kb(&sb.path());
     let ci = [
         (
             "core/templates/ci/github/host-kb-impact.yml",
@@ -1244,13 +1247,14 @@ fn host_ci_impact_step_passes_for_a_filled_template_while_the_pin_lags() {
         fs::create_dir_all(&tmp).unwrap();
         for step in [
             ci_command(&yaml, "printf "),
-            ci_command(&yaml, "kbw\" impact"),
+            ci_command(&yaml, "\" impact --base"),
         ] {
             let mut c = Command::new("sh");
             c.current_dir(&host).arg("-c").arg(&step);
             common::isolated_env(&mut c, &sb.home());
             let o = c
-                .env("KB_PATH", &shim)
+                .env("KB_PATH", &kb_root)
+                .env("PATH", &path)
                 .env(body_var, &description)
                 .env("RUNNER_TEMP", &tmp)
                 .env("TMPDIR", &tmp)

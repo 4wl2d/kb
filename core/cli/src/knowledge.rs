@@ -130,7 +130,7 @@ pub enum Freshness {
 pub enum Selection {
     /// Tip of the approved ref.
     Latest,
-    /// Host pin (submodule gitlink or `.kbw.toml pin`).
+    /// Host pin (submodule gitlink or `.kb.toml pin`).
     Pinned,
     /// Explicit revision given by the user.
     Revision,

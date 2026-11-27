@@ -3,8 +3,8 @@
 Symptom → cause → fix for the errors people and agents actually hit. Every failure prints a
 stable code and a hint; read the hint first. In JSON mode the same information is in
 `error.code`, `error.details` and `error.hint` (see [protocol.md](protocol.md) for the
-envelope and the complete code table). Commands below use `./kbw` from the KB checkout; in a
-host repository use the mounted launcher, for example `.kb/kbw`.
+envelope and the complete code table). Commands below use `kb` inside the KB checkout or in a host
+repository that mounts it at `.kb` (elsewhere add `--root <dir>`).
 
 Never "fix" an error by silently switching to `--offline`, another `--snapshot` or a smaller
 scope: each of those changes what the answer means, so say so when you do it.
@@ -30,7 +30,7 @@ scope: each of those changes what the answer means, so say so when you do it.
 | `RUNTIME_INCOMPATIBLE` (50) | [runtime mismatch](#runtime_incompatible) |
 | `UPDATE_CONFLICT` (51), `UPDATE_FAILED` (53) | [upstream update](#update_conflict-and-update_failed) |
 | `INDEX_ERROR` (61), `INDEX_RECOVERED`, `IO_ERROR` (62) | [index](#index_error-and-index-recovery) |
-| `kbw: error[KBW_...]` (exit 50) | [launcher](#launcher-errors) |
+| `RUNTIME_NOT_BOOTSTRAPPED` (54), `BOOTSTRAP_FAILED` (55), `TOOLCHAIN_MISMATCH` (56), `ARTIFACT_INVALID` (57), `PACKAGE_FAILED` (58), `DOWNLOAD_FAILED` (66); installing kb | [runtime and installation](#runtime-and-installation) |
 | bundled SQLite fails to compile on macOS | [SDKROOT](#macos-bundled-sqlite-build-cannot-find-system-headers) |
 | `kb-eval` replay: `isolation canary failed` on Linux | [replay isolation](#kb-eval-isolation-canary-failed-on-linux) |
 | no network | [offline recovery](#offline-recovery) |
@@ -43,14 +43,14 @@ scope: each of those changes what the answer means, so say so when you do it.
 * **Fix**: initializing is a maintainer decision. Preview, then write:
 
   ```sh
-  ./kbw init --name "<Product>" --namespace <ns>            # dry-run: lists every file
-  ./kbw init --name "<Product>" --namespace <ns> --apply
-  ./kbw validate
+  kb init --name "<Product>" --namespace <ns>            # dry-run: lists every file
+  kb init --name "<Product>" --namespace <ns> --apply
+  kb validate
   ```
 
   Review and commit `project/` (see [downstream.md](downstream.md)). `init` on an
   initialized KB fails with `ALREADY_INITIALIZED` (14): edit `project/` instead. On a clean
-  upstream, `./kbw validate --templates` still succeeds and reports the missing project as an
+  upstream, `kb validate --templates` still succeeds and reports the missing project as an
   info diagnostic.
 
 ## Bad input (UNKNOWN_SCOPE, UNSAFE_PATH, INVALID_INPUT)
@@ -97,7 +97,7 @@ scope: each of those changes what the answer means, so say so when you do it.
      `git`, `file`, `http`).
   3. If the user accepts unverified knowledge, re-run with `--offline` and report
      `freshness = unverified` (see [offline recovery](#offline-recovery)).
-  4. `./kbw doctor --online` checks the same fetch and reports the other checks too.
+  4. `kb doctor --online` checks the same fetch and reports the other checks too.
 
 ## UPDATE_REQUIRED
 
@@ -107,19 +107,19 @@ Two different causes share this code; `details` tells them apart.
 
 * **Symptom**: `error[UPDATE_REQUIRED]: the host pins KB revision b76e8729980c but the latest approved revision is 8b74dcf3fcfd` (exit 21), with the default `--snapshot auto`.
 * **Cause**: knowledge was merged into the approved ref after the host's KB submodule pointer
-  (or `.kbw.toml pin`) was last updated. This is the normal state between a knowledge merge
+  (or `.kb.toml pin`) was last updated. This is the normal state between a knowledge merge
   and the host pin update. A pin that is ahead of or diverged from the approved tip (KB
   commits that are not merged) gives the same error. `--snapshot auto` fails this way only
-  when the host has no `.kbw.toml selection`. `./kbw doctor` shows the relation as the
+  when the host has no `.kb.toml selection`. `kb doctor` shows the relation as the
   `host-pin` check and says what `--snapshot auto` does under the host's `selection`.
 * **Fix**, choose explicitly:
   * `--snapshot pinned`: the knowledge the host code was written against (still verifies
     freshness and reports the approved tip). The shipped host CI templates use this.
   * `--snapshot latest`: the approved tip, e.g. when implementing new work.
   * Update the pin through review: `git -C .kb fetch`, `git -C .kb checkout --detach <latest_approved>`,
-    then commit the new gitlink in the host. `kbw sync` shows `host.status` (`current`,
+    then commit the new gitlink in the host. `kb sync` shows `host.status` (`current`,
     `behind`, `ahead`, `diverged`) without changing anything.
-  * A host can set a default in `.kbw.toml` (`selection = "pinned"` or `"latest"`).
+  * A host can set a default in `.kb.toml` (`selection = "pinned"` or `"latest"`).
 
 **The snapshot needs another engine** (`details.revision`, `details.mismatches[]` of
 `{field, snapshot, runtime}`):
@@ -127,15 +127,15 @@ Two different causes share this code; `details` tells them apart.
 * **Cause**: the selected revision's `core/release.toml` has a different `engine_version`,
   `document_schema`, `index_schema` or `protocol` than the running runtime.
 * **Fix**: update the KB checkout to that revision through review, then bootstrap its engine
-  explicitly (`./kbw --kbw-bootstrap` or `./kbw --kbw-install-artifact ...`), or select
-  `--snapshot pinned`. `./kbw doctor` reports this ahead of time as the `snapshot-engine`
+  explicitly (`kb engine bootstrap` or `kb engine install ...`), or select
+  `--snapshot pinned`. `kb doctor` reports this ahead of time as the `snapshot-engine`
   check (`fail` when the revision `--snapshot auto` selects needs another engine, `warn` for
   the other of approved tip and host pin).
 
 ## SNAPSHOT_NOT_FOUND
 
 * **Symptom** (exit 22): `revision <rev> does not resolve to a commit in the KB checkout or mirror`, `no approved revision is known (offline, and nothing was fetched before)`, or `the host has no KB pin` / `no host repository was detected, so there is no KB pin`.
-* **Fix**: fetch the revision in the KB checkout; run once online (`./kbw sync`); run
+* **Fix**: fetch the revision in the KB checkout; run once online (`kb sync`); run
   `--snapshot pinned` from inside the host (or pass `--host <dir>`); or choose another
   `--snapshot`.
 
@@ -145,8 +145,8 @@ Two different causes share this code; `details` tells them apart.
 * **Cause**: generated skills pass `--skill-protocol <n>`; the KB's engine changed the skill
   protocol since the agent loaded its instructions.
 * **Fix**: re-read the installed `SKILL.md` (or start a new session so the harness reloads
-  it). If the installed skill itself is old, regenerate it: `./kbw integrate --generate
-  --apply` in the KB, then `<kb_path>/kbw integrate --apply` in the host, and commit through
+  it). If the installed skill itself is old, regenerate it: `kb integrate --generate
+  --apply` in the KB, then `kb integrate --apply` in the host, and commit through
   review.
 
 ## CONTEXT_INCOMPLETE
@@ -160,8 +160,8 @@ Two different causes share this code; `details` tells them apart.
 | `FRESHNESS_UNVERIFIED` | you ran `--offline`; re-run online when possible (then exit 0 if nothing else is missing) |
 | `WORKING_TREE` | `--snapshot working-tree` is for authoring; use an approved snapshot for final answers |
 | `NOT_APPROVED` | the selected revision is not reachable from the approved tip; merge it through review or select `latest`/`pinned` |
-| `APPROVAL_UNKNOWN` | no approved tip is known to compare with; run once online (`./kbw sync`) |
-| `REPO_UNKNOWN` | pass `--repo <id>`, or make the host identifiable: a registry `remotes` entry matching the host's remote URL, or `repo = "<id>"` in the host's `.kbw.toml` |
+| `APPROVAL_UNKNOWN` | no approved tip is known to compare with; run once online (`kb sync`) |
+| `REPO_UNKNOWN` | pass `--repo <id>`, or make the host identifiable: a registry `remotes` entry matching the host's remote URL, or `repo = "<id>"` in the host's `.kb.toml` |
 | `DIAGNOSE_SCOPE_PROVISIONAL` | path-free diagnosis only proposes candidate knowledge; confirm the files involved and re-run `context` with `--path`/`--module` or `--changed` before editing |
 | `AS_OF_UNDATED` | `--as-of` withheld accepted records without an `introduced` bound (`--explain` lists them); add `introduced` dates or commits through review, or treat the slice as partial |
 | `AS_OF_BOUND_UNRESOLVED` | `--as-of` withheld accepted records scoped to other repositories, because their commit bounds cannot be resolved in this host (`--explain` lists the temporal exclusions); replay from the repository those records name, or give cross-repository knowledge date bounds in the KB through review |
@@ -170,7 +170,7 @@ Two different causes share this code; `details` tells them apart.
 | `SETTING_CONFLICT` | the most specific applicable overrides of one setting (none strictly more specific than another) disagree; narrow the scope, and fix the overrides in the KB through review (`validate` reports them as `OVERRIDE_AMBIGUOUS`) |
 | `INCOMPATIBLE_DEPENDENCY` | a required record does not apply to the host version; check `--host-version`, then fix `applicability` or `requires` in the KB |
 | `REQUIRES_MISSING`, `REQUIRES_NOT_ACCEPTED` | a required record is missing, `draft` or `superseded`: the knowledge base is defective; report it; maintainers fix it and `validate` catches it. A `deprecated` required record is delivered with label `deprecated` and the warning `REQUIRES_DEPRECATED` in `issues` and does not lower completeness |
-| `SNAPSHOT_INVALID` | the snapshot has validation errors; run `./kbw validate` (add `--snapshot <rev>` to check that revision) and fix them through review |
+| `SNAPSHOT_INVALID` | the snapshot has validation errors; run `kb validate` (add `--snapshot <rev>` to check that revision) and fix them through review |
 
 Discovery from `--task` and from the host diff reports these entries in `issues`; they do
 not change the status by themselves and replace the former `INVALID_INPUT` errors for a
@@ -206,7 +206,7 @@ task that names too many files and for a host patch over a Git adapter bound:
 
 ### Doctor checks
 
-`./kbw doctor` runs these checks in this order and prints `ok`, `warn`, `fail` or `skip` for
+`kb doctor` runs these checks in this order and prints `ok`, `warn`, `fail` or `skip` for
 each; any `fail` makes it exit 40. It only reads the checkout and the host (plus kb's own
 caches) and contacts the remote only with `--online`; `--online` together with `--offline`
 is `INVALID_INPUT` (64) and fetches nothing.
@@ -215,15 +215,15 @@ is `INVALID_INPUT` (64) and fetches nothing.
 |---|---|---|
 | `git` | Git version against `min_git` | install a newer Git |
 | `kb-root` | KB root and `core/release.toml` versions | — |
-| `runtime` | the runtime `kbw` selected (`BUILD-INFO`) | run through `./kbw`, not a copied binary |
+| `runtime` | the runtime `kb` selected (`BUILD-INFO`) | run through `kb`, not a copied binary |
 | `profile` | the profile config (`fail` before `init`) | [initialize](#project_not_initialized) or fix `project/project.toml` |
-| `knowledge` | working-tree validation counts | `./kbw validate` |
-| `source` | the remote and the approved tip: `approved tip <rev>` when this run fetched it (`--online`), else `last known approved tip <rev>`; local `HEAD` ahead/behind | add the remote; `./kbw sync` when the tip was never fetched |
+| `knowledge` | working-tree validation counts | `kb validate` |
+| `source` | the remote and the approved tip: `approved tip <rev>` when this run fetched it (`--online`), else `last known approved tip <rev>`; local `HEAD` ahead/behind | add the remote; `kb sync` when the tip was never fetched |
 | `freshness` | only with `--online`: the fetch of the approved ref | [FRESHNESS_UNVERIFIED](#freshness_unverified) |
-| `host`, `host-repo` | host detection and its registry repo | run from the host or pass `--host`; add `remotes` or `.kbw.toml repo` |
-| `host-pin` | the pin against the (last known) approved tip and what `--snapshot auto` then does: with `.kbw.toml selection = "pinned"` it reads the pin, with `"latest"` the approved tip, without a selection (or with `"auto"`) it returns `UPDATE_REQUIRED` (pin behind, ahead or diverged) | update the pin through review, pass `--snapshot pinned` (or `latest`, suggested only when this engine can read the approved tip), or set `selection` |
-| `snapshot-engine` | `core/release.toml` of the approved tip and of the host pin, read from the mirror, against this engine | `fail`: the revision `--snapshot auto` selects needs another engine, so every reading command returns `UPDATE_REQUIRED` ([fix](#update_required)); `warn`: only the other revision does; `skip`: no tip or pin is known yet (`./kbw sync`) |
-| `index` | cache statistics and `PRAGMA quick_check` | `warn` after a rebuild or recovery; `fail`: `./kbw index --rebuild` |
+| `host`, `host-repo` | host detection and its registry repo | run from the host or pass `--host`; add `remotes` or `.kb.toml repo` |
+| `host-pin` | the pin against the (last known) approved tip and what `--snapshot auto` then does: with `.kb.toml selection = "pinned"` it reads the pin, with `"latest"` the approved tip, without a selection (or with `"auto"`) it returns `UPDATE_REQUIRED` (pin behind, ahead or diverged) | update the pin through review, pass `--snapshot pinned` (or `latest`, suggested only when this engine can read the approved tip), or set `selection` |
+| `snapshot-engine` | `core/release.toml` of the approved tip and of the host pin, read from the mirror, against this engine | `fail`: the revision `--snapshot auto` selects needs another engine, so every reading command returns `UPDATE_REQUIRED` ([fix](#update_required)); `warn`: only the other revision does; `skip`: no tip or pin is known yet (`kb sync`) |
+| `index` | cache statistics and `PRAGMA quick_check` | `warn` after a rebuild or recovery; `fail`: `kb index --rebuild` |
 | `tools` | the tool registry (`<profile>/tools.toml` or the built-in defaults) and which tool would answer each routed request here | `fail`: the registry is invalid or nothing available answers a request; `warn`: symbol requests answer only lexically (git grep) or a check program is missing ([tools](#tool_unavailable-and-toolstoml)) |
 | `code-index` | the live CodeGraph index of the code root, when a routed `codegraph` tool is available | `warn`: no index (`codegraph init --yes <root>`) or an incomplete one (`codegraph index <root>`); `skip`: no routed codegraph tool is available |
 | `skill`, `bundle` | installed skill protocol in the host; generated bundle drift | [DRIFT_DETECTED](#drift_detected) |
@@ -243,9 +243,9 @@ is `INVALID_INPUT` (64) and fetches nothing.
 
 | where | meaning | fix |
 |---|---|---|
-| `./kbw schema --check` | `core/schemas/*.schema.json` differ from the Rust model | maintainers: `./kbw schema --write`, review, commit |
-| `./kbw integrate --generate --check` (KB) | `project/skill-config/generated/` differs from `core/skills` + `project/skill-config/skill.toml` | `./kbw integrate --generate --apply` in the KB, commit through review |
-| `<kb_path>/kbw integrate --check` (host) | installed skill files or managed blocks differ from the committed bundle | `<kb_path>/kbw integrate --apply` in the host, commit |
+| `kb schema --check` | `core/schemas/*.schema.json` differ from the Rust model | maintainers: `kb schema --write`, review, commit |
+| `kb integrate --generate --check` (KB) | `project/skill-config/generated/` differs from `core/skills` + `project/skill-config/skill.toml` | `kb integrate --generate --apply` in the KB, commit through review |
+| `kb integrate --check` (host) | installed skill files or managed blocks differ from the committed bundle | `kb integrate --apply` in the host, commit |
 
 `doctor` reports the same states as warnings (`bundle`, `skill`).
 
@@ -325,7 +325,7 @@ nothing is written:
 
 ## CHECKS_FAILED
 
-* **Symptom**: `kbw check` prints its answer and exits 46:
+* **Symptom**: `kb check` prints its answer and exits 46:
   `error[CHECKS_FAILED]: 2 check(s) failed: lint, knowledge`; `details.failed[]` names each
   failed check (a registry tool id, `knowledge` or `probes`).
 * **Cause**, one or more of:
@@ -334,11 +334,11 @@ nothing is written:
     executable file on this machine (`not run: ...`);
   * knowledge files of this profile changed and validating them found errors;
   * with `--base` in a host repository, a probe declared by a record failed (the same
-    evaluation as `kbw verify --diff <base>`).
+    evaluation as `kb verify --diff <base>`).
 * **Fix**: read the `output` lines under the failed check (the last lines of its output),
-  fix the code or the knowledge and run `kbw check` again. `--plan` lists what would run
-  without running anything. For knowledge errors run `./kbw validate`; for probes,
-  `./kbw verify --diff <base>`. A missing program is installed by the user or removed from
+  fix the code or the knowledge and run `kb check` again. `--plan` lists what would run
+  without running anything. For knowledge errors run `kb validate`; for probes,
+  `kb verify --diff <base>`. A missing program is installed by the user or removed from
   the registry through review. Never weaken a check or edit `tools.toml` to make it pass.
 
 ## TOOL_UNAVAILABLE and tools.toml
@@ -353,8 +353,8 @@ nothing is written:
   unavailable tools gives the same error; `--tool <id>` limits the route to one tool.
 * **Not this error**: a tool that runs but does not find the symbol hands over to the next
   one, and when none finds it the command prints its best answer and exits 16 (`NOT_FOUND`).
-* **Fix**: run `kbw tools` (each tool, its program, version and why it is unavailable) and
-  `kbw doctor` (checks `tools` and `code-index`). Installing a tool or creating its index is
+* **Fix**: run `kb tools` (each tool, its program, version and why it is unavailable) and
+  `kb doctor` (checks `tools` and `code-index`). Installing a tool or creating its index is
   the user's decision; kb never creates a tool index. For CodeGraph, create the index once
   per checkout with `codegraph init --yes <host root>` and keep `.codegraph/` out of Git
   (for example in `.git/info/exclude`). Meanwhile read the source directly.
@@ -362,8 +362,8 @@ nothing is written:
 An invalid `<profile>/tools.toml` (unknown field, unknown adapter, duplicate id, a route
 naming an undeclared tool or one whose adapter cannot answer it, a `timeout_seconds`
 outside 1..3600, or a file that is not UTF-8) stops every agent command with
-`CONFIG_INVALID` (exit 11); `details.problems[]` lists each problem. `kbw validate` reports
-the same file as the error diagnostic `TOOLS_INVALID`, and `kbw doctor` fails its `tools`
+`CONFIG_INVALID` (exit 11); `details.problems[]` lists each problem. `kb validate` reports
+the same file as the error diagnostic `TOOLS_INVALID`, and `kb doctor` fails its `tools`
 check. Fix the file through review; the format is in
 [agent-cli.md](agent-cli.md#tool-registry).
 
@@ -375,15 +375,15 @@ commit-message --only branch-name` on the index Git is committing and the pendin
 and exits with verify's code.
 
 * **Which KB revision it reads**: `KB_SNAPSHOT`, when set, is passed as-is. Otherwise, if
-  `.kbw.toml` at the host root declares a `selection` key, the hook passes `auto` (the
+  `.kb.toml` at the host root declares a `selection` key, the hook passes `auto` (the
   engine honors that selection). Otherwise, if the host pins the KB (`HEAD` has a gitlink,
-  mode `160000`, at the KB path, or `.kbw.toml` declares `pin`), the hook passes `pinned`.
+  mode `160000`, at the KB path, or `.kb.toml` declares `pin`), the hook passes `pinned`.
   Otherwise it passes `auto` (the approved tip). `KB_OFFLINE=1` adds `--offline`.
 * **`FRESHNESS_UNVERIFIED` (20) while offline**: set `KB_OFFLINE=1`; host CI still verifies
   freshness.
 * **`UPDATE_REQUIRED` (21), `SNAPSHOT_NOT_FOUND` (22)**: the same causes as for any reading
   command ([update required](#update_required), [snapshot not found](#snapshot_not_found)).
-  Without `KB_SNAPSHOT` or a `.kbw.toml` `selection`, the rule above never asks for a pin
+  Without `KB_SNAPSHOT` or a `.kb.toml` `selection`, the rule above never asks for a pin
   the host lacks, nor for `auto` while a pin exists.
 * **A message rejected although CI accepts it**: Git runs the hook before it cleans the
   message up, so the hook cleans it as Git will (scissors cut, comments stripped when Git
@@ -402,8 +402,8 @@ and exits with verify's code.
 
 * `UNSUPPORTED_SCHEMA_VERSION` (13): a config, registry or record uses a document schema this
   engine does not serve, `migrate --to` names an unsupported target, or `update check`
-  finds project schemas the upstream cannot migrate. Run `./kbw migrate` (dry-run with a
-  diff) and `./kbw migrate --apply`; for upstream updates, go through an intermediate
+  finds project schemas the upstream cannot migrate. Run `kb migrate` (dry-run with a
+  diff) and `kb migrate --apply`; for upstream updates, go through an intermediate
   release whose `migrates_from` covers the project schema. See
   [core/migrations/README.md](../core/migrations/README.md).
 * `MIGRATION_FAILED` (52): a transform or the verification of its output failed; nothing was
@@ -412,10 +412,11 @@ and exits with verify's code.
 ## RUNTIME_INCOMPATIBLE
 
 * **Symptom** (exit 50, with a JSON envelope): `the running kb binary does not match the local engine manifest`, `details.mismatches[]` = `{field, manifest, runtime}`.
-* **Cause**: a `kb` binary other than the runtime built for this checkout was used (a stale
-  copy, another checkout's build, a `kb` on `PATH`).
-* **Fix**: always run through the checkout's launcher (`./kbw` or `<kb_path>/kbw`); if the
-  runtime is missing it says so ([KBW_RUNTIME_NOT_BOOTSTRAPPED](#kbw_runtime_not_bootstrapped)).
+* **Cause**: a runtime binary was started directly for a checkout whose engine it is not (engine
+  selection never does that), or a kbw-era runtime built from other sources.
+* **Fix**: run plain `kb`, which selects the engine built from the checkout's own engine
+  sources; `kb engine info` shows which runtime serves it. If that runtime is missing, `kb`
+  says so ([RUNTIME_NOT_BOOTSTRAPPED](#runtime_not_bootstrapped)).
 
 ## UPDATE_CONFLICT and UPDATE_FAILED
 
@@ -427,11 +428,11 @@ and exits with verify's code.
   `exit_code` and the tail of the `output` (for conflicts: `conflicts` and `next_steps`).
   The worktree is kept for inspection and the main checkout is not modified.
 * **Fix**: resolve in the worktree (kb never resolves semantic conflicts), commit, run
-  `./kbw migrate --apply`, `./kbw integrate --generate --apply` and `./kbw validate` there,
+  `kb migrate --apply`, `kb integrate --generate --apply` and `kb validate` there,
   and set `revision`/`ref` in `project/upstream.toml`; or discard the attempt:
-  `./kbw update abandon <branch>` is a dry-run that shows the commit, the worktree, how many
+  `kb update abandon <branch>` is a dry-run that shows the commit, the worktree, how many
   files in it are uncommitted (`dirty`) and how many commits are not in `HEAD`;
-  `./kbw update abandon <branch> --apply` removes the worktree and deletes the branch. A
+  `kb update abandon <branch> --apply` removes the worktree and deletes the branch. A
   worktree with uncommitted, untracked or conflicted files (for example right after an
   `UPDATE_CONFLICT`) is refused with `CONFLICT` (45) unless you add `--force`
   (`--apply --force`). Only `kb-update/*` branches with a worktree under `.cache/update/` are
@@ -452,59 +453,88 @@ the source of truth.
   `meta.diagnostics`. The moved-aside files may be deleted after inspection.
 * **`INDEX_ERROR` (61)**: recovery did not help, or the database is locked longer than the
   30 s busy timeout, or the cache directory is not writable. Retry once; then
-  `./kbw index --rebuild`; check permissions of `.cache/`. Deleting `.cache/index/` is safe.
+  `kb index --rebuild`; check permissions of `.cache/`. Deleting `.cache/index/` is safe.
 * **`IO_ERROR` (62) "`<path>` changed while it was being read"**: a working-tree file changed
   during the call; nothing was stored. Run the command again.
 
-## Launcher errors
+## Runtime and installation
 
-The launcher prints `kbw: error[<CODE>]: <message>` on stderr, exits 50 (2 for `KBW_USAGE`)
-and prints nothing on stdout, even with `--json`. `./kbw --kbw-runtime-info` shows the
-fingerprint, runtime path, status (`active`/`missing`), source (`source-build`/`artifact`),
-engine version and target.
+`kb engine info` shows the installed `kb` (version, target, path), the runtime store, the
+checkout it found (and how: `--root`, `KB_ROOT`, the checkout itself or a `.kb` mount), the
+checkout's engine fingerprint and which runtime serves it (`this-binary`, `store`, `legacy`
+for one the retired `kbw` built, or `missing`). These errors are ordinary protocol errors:
+an envelope in JSON mode, `error[<CODE>]: ...` on stderr otherwise.
 
-### KBW_RUNTIME_NOT_BOOTSTRAPPED
+### RUNTIME_NOT_BOOTSTRAPPED
 
-* **Symptom**: `kbw: error[KBW_RUNTIME_NOT_BOOTSTRAPPED]: no runtime for engine 0.1.0 (fingerprint <fp>) in this checkout; bootstrap it explicitly ...`
-* **Cause**: no `.cache/runtime/<fingerprint>/kb` exists for this checkout's engine inputs:
-  first use, an edit of an engine build input, or a KB checkout moved to another engine
-  revision (for example a submodule update). Normal commands never build or install an
-  engine implicitly.
+* **Symptom** (exit 54): `no runtime for engine 0.1.0 (fingerprint <fp>) of the KB checkout <root>; normal commands never build or download an engine`.
+* **Cause**: the installed `kb` was not built from the checkout's engine sources and no
+  runtime for their fingerprint exists in the store: first use of a checkout whose engine
+  differs from the installed `kb`, an edit of an engine build input, or a KB checkout moved
+  to another engine revision (for example a submodule update). Normal commands never build or
+  install an engine implicitly.
 * **Fix** (an explicit decision, not something an agent does unasked):
-  * `./kbw --kbw-bootstrap`: builds from source with the pinned toolchain
-    (`cargo build --release --locked -p kb`), smoke-tests and activates it;
-  * or install a verified release archive: `./kbw --kbw-install-artifact <archive-path|https-url> --sha256 <hex>`
-    (or `--sha256-file <SHA256SUMS>`);
-  * CI may set `KBW_AUTO_BOOTSTRAP=1` to allow implicit builds.
+  * `kb engine install`: the release archive of the checkout's `engine_version`, verified
+    against that release's `SHA256SUMS` (works when the checkout's engine is that release
+    unmodified; an explicit archive is `kb engine install <archive|https-url> --sha256 <hex>`);
+  * `kb engine bootstrap`: builds the checkout's engine from source with the pinned toolchain
+    (`cargo build --release --locked -p kb`), smoke-tests and activates it (the only way for
+    engine patches or local engine edits);
+  * or install a `kb` of the checkout's engine version (`kb self update --version <x.y.z>`),
+    which then serves the checkout itself;
+  * CI may set `KB_AUTO_BOOTSTRAP=1` to allow implicit source builds.
 
-### KBW_TOOLCHAIN_MISMATCH
+### TOOLCHAIN_MISMATCH
 
-* **Symptom**: `rustc <x> is not the pinned toolchain 1.98.1 (core/release.toml rust_toolchain) ...`
+* **Symptom** (exit 56): `rustc <x> is not the pinned toolchain 1.98.1 (core/release.toml rust_toolchain) ...`
 * **Cause**: the `rustc` selected in the KB root is not `rust_toolchain` from
   `core/release.toml` (which equals `rust-toolchain.toml`).
 * **Fix**: install the pinned toolchain (rustup reads `rust-toolchain.toml` automatically), or
-  install a release archive instead. `KBW_ALLOW_TOOLCHAIN_MISMATCH=1` builds anyway and prints
-  `kbw: warning[KBW_TOOLCHAIN_MISMATCH]`; such a runtime is not the reproducible build.
+  install a release runtime instead. `KB_ALLOW_TOOLCHAIN_MISMATCH=1` builds anyway and prints
+  `warning[TOOLCHAIN_MISMATCH]`; such a runtime is not the reproducible build.
 
-### KBW_ARTIFACT_INVALID
+### ARTIFACT_INVALID
 
-* **Symptom**: `kbw: error[KBW_ARTIFACT_INVALID]: ...; the active runtime is unchanged`.
+* **Symptom** (exit 57): `...; the active runtime is unchanged` (`engine install`) or `...; the installed kb is unchanged` (`self update`).
 * **Causes** (from the message): `sha256 mismatch ... (nothing was extracted)`; a checksum file
   without exactly one entry for the archive name; an unsafe entry (absolute, `..`, link,
   device) or entries outside `kb-<version>-<target>/`; a missing `kb` or `BUILD-INFO`;
-  `BUILD-INFO engine_version/target/fingerprint is '...' but this checkout needs '...'` (the
-  archive was built from other engine inputs or for another platform); a failed smoke test;
-  an `http://` or other non-https URL; `curl` missing for downloads.
+  `BUILD-INFO engine_version/target/fingerprint is '...' but '...' is needed` (the archive
+  was built from other engine sources or for another platform); a failed smoke test; no
+  archive for this platform in the release.
 * **Fix**: get the archive and digest for exactly this engine version and target from the
   same release; never bypass digest verification. If no matching archive exists (for
   example a downstream with engine patches, whose fingerprint differs), bootstrap from
   source.
 
-Other launcher codes: `KBW_BOOTSTRAP_FAILED` (cargo missing or failed, inputs changed during
-the build, smoke test failed: the built binary must report this engine version and build
-fingerprint through `kb --json version`; an earlier runtime is intact; do not retry in a loop),
-`KBW_PACKAGE_FAILED`, `KBW_MANIFEST_INVALID` (`core/release.toml` missing or malformed; is
-this a kb checkout?), `KBW_USAGE`.
+### Other runtime errors
+
+* `BOOTSTRAP_FAILED` (55): cargo missing or failed, the engine inputs changed during the
+  build, or the built binary failed the smoke test (it must report this engine version and
+  fingerprint through `kb --json version`). An earlier runtime is intact; do not retry in a
+  loop.
+* `PACKAGE_FAILED` (58): `kb engine package` could not build, smoke-test or write the archive.
+* `DOWNLOAD_FAILED` (66): `curl` is missing (it ships with Windows 10 and later and macOS),
+  there is no network, or the release or asset does not exist. Pass a downloaded archive
+  explicitly, or point `KB_RELEASES_URL` at a mirror or a local directory with the release
+  layout (`download/v<version>/<file>`, `latest/download/<file>`).
+* `RUNTIME_INCOMPATIBLE` (50) naming a runtime "selected for engine fingerprint ...": the
+  store holds a wrong binary under that fingerprint. Remove that runtime directory and run
+  `kb engine bootstrap` or `kb engine install` again.
+
+### Installing and updating kb
+
+* `install.sh` / `install.ps1` refuse to replace an existing `kb` that is not a kb binary (a
+  wrapper script, say): move it away or pass `--force` / `-Force`. A personal wrapper named
+  `kb` that runs `<checkout>/kbw` makes the deprecated forwarder stop with `KBW_LOOP`;
+  replace the wrapper with the real `kb`.
+* `kb self update` needs write access to the directory of the installed binary; installs
+  managed by a package manager are refused (update them there). On Windows the replaced
+  `kb.exe` is renamed aside (`.kb.exe.old.N`) and removed by the next update.
+* The runtime store can be deleted at any time; runtimes come back with `kb engine install`
+  or `kb engine bootstrap`. Its location: `KB_RUNTIME_DIR`, else `%LOCALAPPDATA%\kb\runtime`,
+  `$XDG_DATA_HOME/kb/runtime`, `~/Library/Application Support/kb/runtime` (macOS) or
+  `~/.local/share/kb/runtime`.
 
 ## macOS: bundled SQLite build cannot find system headers
 
@@ -517,7 +547,7 @@ export SDKROOT="$(xcrun --show-sdk-path)"
 cargo test --workspace --locked
 ```
 
-`./kbw --kbw-bootstrap` (and `--kbw-package`) sets `SDKROOT` this way automatically on macOS
+`kb engine bootstrap` (and `kb engine package`) sets `SDKROOT` this way automatically on macOS
 when it is unset and `xcrun` is available.
 
 ## kb-eval: isolation canary failed on Linux
@@ -550,14 +580,14 @@ What works without network access, and what it means:
 | need | command | result |
 |---|---|---|
 | context from the last verified state | `--offline` (any reading command) | uses the approved revision last fetched into the mirror (`.cache/git/<hash>.git`, ref `refs/kb/approved`), else the KB checkout's remote-tracking ref; `freshness = unverified`, so `context` is at best `partial` (exit 30, full result printed) |
-| the knowledge the host pins | `--offline --snapshot pinned` | the host's gitlink or `.kbw.toml pin`; still `freshness = unverified` |
+| the knowledge the host pins | `--offline --snapshot pinned` | the host's gitlink or `.kb.toml pin`; still `freshness = unverified` |
 | authoring before a push | `--offline --snapshot working-tree` | the KB working tree; `WORKING_TREE` and `FRESHNESS_UNVERIFIED` reasons |
-| validation | `./kbw validate` | reads the working tree; never fetches |
-| index maintenance | `./kbw index` | never contacts the remote |
-| diagnosis | `./kbw doctor` | fetches only with `--online` |
-| runtime | `./kbw --kbw-install-artifact <local-archive> --sha256 <hex>` | works offline; a source bootstrap needs the crates in the Cargo cache (build once online, or set `CARGO_NET_OFFLINE=true` with a warm cache) |
+| validation | `kb validate` | reads the working tree; never fetches |
+| index maintenance | `kb index` | never contacts the remote |
+| diagnosis | `kb doctor` | fetches only with `--online` |
+| runtime | `kb engine install <local-archive> --sha256 <hex>` | works offline; a source bootstrap needs the crates in the Cargo cache (build once online, or set `CARGO_NET_OFFLINE=true` with a warm cache) |
 
-* Prime the mirror while online with `./kbw sync` (or any reading command). When neither the
+* Prime the mirror while online with `kb sync` (or any reading command). When neither the
   mirror nor the KB checkout's remote-tracking ref knows the approved tip, `--offline` with
   `latest` fails with `SNAPSHOT_NOT_FOUND`.
 * Report unverified freshness to the user; it is never upgraded to `complete`.
@@ -566,17 +596,19 @@ What works without network access, and what it means:
 * Operational detail: [snapshots-and-trust.md](snapshots-and-trust.md#offline-work-and-recovery)
   and [downstream.md](downstream.md#10-offline-and-failure-recovery).
 
-Cache contents (under `$KB_CACHE_DIR`, default `<kb>/.cache/`; the launcher's `runtime/` and
-`cargo-target/` are always under `<kb>/.cache/`; all git-ignored, never part of review):
+Cache contents (under `$KB_CACHE_DIR`, default `<kb>/.cache/`; `engine-stamp` and
+`cargo-target/` are always under `<kb>/.cache/`; all git-ignored, never part of review;
+runtimes live in the per-user store, see [runtime and installation](#runtime-and-installation)):
 
 | path | content | removal |
 |---|---|---|
-| `runtime/<fingerprint>/` (`kb`, `BUILD-INFO`), `runtime/stamp` | active runtimes; warm-path stamp | requires a new bootstrap or install; the stamp only costs one re-hash |
+| `engine-stamp` | warm-path stamp of the engine fingerprint | costs one re-hash |
+| `runtime/<fingerprint>/` (`kb`, `BUILD-INFO`) | runtimes the retired `kbw` built; still used for their fingerprint | then that fingerprint needs `kb engine bootstrap` or `kb engine install` (into the store) |
 | `git/<16 hex>.git` | isolated mirrors of the approved ref | the offline fallback is lost until the next online call |
 | `index/<profile>.sqlite` (+ `-wal`, `-shm`, `.lock`, `.corrupt-*`) | derived index | rebuilt on the next read |
 | `wt-stat-<profile>.json` | working-tree stat cache | harmless |
-| `update/<branch with / replaced>/` (e.g. `update/kb-update-v0.1.1/`) | `update prepare` worktrees | use `./kbw update abandon <branch> --apply` instead (a dry-run without `--apply`) |
-| `cargo-target/` | default Cargo target dir of source bootstraps (override with `KBW_CARGO_TARGET_DIR`; a relative value is resolved against the directory `kbw` is run from) | the next bootstrap rebuilds all dependencies |
+| `update/<branch with / replaced>/` (e.g. `update/kb-update-v0.1.1/`) | `update prepare` worktrees | use `kb update abandon <branch> --apply` instead (a dry-run without `--apply`) |
+| `cargo-target/` | default Cargo target dir of source bootstraps (override with `KB_CARGO_TARGET_DIR`; a relative value is resolved against the current directory) | the next bootstrap rebuilds all dependencies |
 
 ## Reporting bugs
 
@@ -584,14 +616,14 @@ Security issues: follow [SECURITY.md](../SECURITY.md) (private reporting, not a 
 issue). For other bugs, open an issue in the tracker of the upstream repository your KB was
 forked from and include:
 
-1. `./kbw --kbw-runtime-info` and `./kbw --json version` (engine, contract versions, build
+1. `kb engine info` and `kb --json version` (engine, contract versions, build
    fingerprint, target);
 2. `git --version`, the OS and, for build problems, `rustc --version`;
 3. the exact command and its complete output: the stdout envelope from `--json` plus stderr
    (the `kb:` progress and diagnostic lines matter);
-4. `./kbw --json doctor` from the same directory;
+4. `kb --json doctor` from the same directory;
 5. for context or routing problems, a minimal synthetic reproduction: the synthetic example
-   (`./kbw init --example synthetic-multirepo --apply` in a scratch checkout) or
+   (`kb init --example synthetic-multirepo --apply` in a scratch checkout) or
    `kb-bench gen` output is ideal.
 
 Before sharing, remove product knowledge and internal URLs. kb redacts credentials in Git

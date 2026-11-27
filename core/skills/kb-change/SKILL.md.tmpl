@@ -9,20 +9,20 @@ A short universal procedure. The project's architecture, rules and limits live i
 knowledge base and reach you through kb, not through this skill. Command details are in
 `{{skills_dir}}/kb/SKILL.md`.
 
-1. **Locate the code.** `{{kb_path}}/kbw sym <name>` for a named symbol, `{{kb_path}}/kbw find "<text>"` for text
+1. **Locate the code.** `{{kb}} sym <name>` for a named symbol, `{{kb}} find "<text>"` for text
    from the task, an error message or a log line.
-2. **Read the feature documentation.** `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` lists the ids and
+2. **Read the feature documentation.** `{{kb}} doc <path-or-symbol>{{snapshot_arg}}` lists the ids and
    titles of the records that apply to or cite the path; read their statements with
-   `{{kb_path}}/kbw show <id>{{snapshot_arg}}`. With `--format human`, `doc` prints the feature's purpose, entry
+   `{{kb}} show <id>{{snapshot_arg}}`. With `--format human`, `doc` prints the feature's purpose, entry
    points, invariant statements, contracts, known limits and gaps. Invariants and
    contracts are binding. A gap is an open question: report it, do not guess an answer.
-3. **Analyse dependencies.** `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and `{{kb_path}}/kbw callers <symbol>` show the
+3. **Analyse dependencies.** `{{kb}} impact <symbol>{{snapshot_arg}}` and `{{kb}} callers <symbol>` show the
    code that depends on what you change, the likely regression points and the features
    and records that govern the affected files.
 4. **Get the complete obligations before the first edit.**
 
    ```sh
-   {{kb_path}}/kbw context --intent {{default_intent}} --task "<task>" --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
+   {{kb}} context --intent {{default_intent}} --task "<task>" --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
    ```
 
    Repeat `--path` for every file you will touch (`repo:path` for another repository).
@@ -30,12 +30,12 @@ knowledge base and reach you through kb, not through this skill. Command details
    resolve or report the listed reasons before editing.
 5. **Change the implementation** with that context, respecting the invariants. Read the
    source for the details kb does not supply; confirm decisive facts there.
-6. **Verify.** `{{kb_path}}/kbw check --base <target>{{snapshot_arg}}` runs the checks the configuration provides for
+6. **Verify.** `{{kb}} check --base <target>{{snapshot_arg}}` runs the checks the configuration provides for
    the changed files, validates changed knowledge and evaluates the probes records
    declare. Fix every failure (exit 46); never weaken a check or a rule to pass it.
 7. **Update the documentation in the same change** when behaviour, entry points,
    invariants or limits changed: follow `{{skills_dir}}/kb-document/SKILL.md`. Then
-   `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}` lists the knowledge the diff
+   `{{kb}} impact --base <target> --working-tree{{snapshot_arg}}` lists the knowledge the diff
    touches; address it or acknowledge it in the merge request's `kb-impact` block.
 8. **Finish** with the outcome, relevant verification and any gap that affects the change.
    Run usage reports or measure tool savings only when requested.

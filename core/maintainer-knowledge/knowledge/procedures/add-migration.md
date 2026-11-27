@@ -28,5 +28,5 @@ text = "Register the transform in core/cli/src/migrate.rs and add fixtures under
 
 [[steps]]
 id = "schemas"
-text = "Regenerate JSON Schemas with `./kbw schema --write` and update templates and examples."
+text = "Regenerate JSON Schemas with `kb schema --write` and update templates and examples."
 +++

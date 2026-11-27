@@ -1,15 +1,16 @@
 #!/bin/sh
 # Host-repository template. Connect to an existing hook rather than overwriting it.
-# KB_PATH is the host-relative KB checkout. KB_SNAPSHOT, when set, is passed as-is.
-# Otherwise the hook passes `auto` if .kbw.toml declares `selection` (the engine honors
-# it), `pinned` if the host pins the KB (a gitlink at KB_PATH in HEAD, or a .kbw.toml
-# `pin`), else `auto` (the approved tip). KB_OFFLINE=1 skips the remote freshness check,
-# which host CI still performs. The hook checks the index Git is committing and the
-# message as Git will commit it. With GIT_EDITOR=: it cannot tell whether Git strips
-# comments, so it rejects only a message that fails both with and without them, or that
-# is all comments and fails with them (CI on the committed message stays authoritative);
-# to skip the editor use GIT_EDITOR=true. A `git commit --cleanup=<mode>` flag is
-# invisible to hooks. No record text is executed.
+# KB_PATH is the host-relative KB checkout (KB_ROOT, when set, wins as for any kb
+# command); the kb command must be on PATH. KB_SNAPSHOT, when set, is passed as-is.
+# Otherwise the hook passes `auto` if the host binding (.kb.toml, or the legacy .kbw.toml)
+# declares `selection` (the engine honors it), `pinned` if the host pins the KB (a gitlink
+# at KB_PATH in HEAD, or a binding `pin`), else `auto` (the approved tip). KB_OFFLINE=1
+# skips the remote freshness check, which host CI still performs. The hook checks the
+# index Git is committing and the message as Git will commit it. With GIT_EDITOR=: it
+# cannot tell whether Git strips comments, so it rejects only a message that fails both
+# with and without them, or that is all comments and fails with them (CI on the committed
+# message stays authoritative); to skip the editor use GIT_EDITOR=true. A
+# `git commit --cleanup=<mode>` flag is invisible to hooks. No record text is executed.
 set -eu
 
 if [ "$#" -ne 1 ]; then
@@ -96,10 +97,12 @@ if [ "$kb_hook_cleanup" = either ]; then
     fi
 fi
 
-# Whether the host's .kbw.toml declares the top-level key $1 (its keys are all top-level).
+# Whether the host binding declares the top-level key $1 (its keys are all top-level).
+kb_hook_binding=.kb.toml
+[ -f "$kb_hook_binding" ] || kb_hook_binding=.kbw.toml
 kb_hook_declares() {
-    [ -f .kbw.toml ] &&
-        grep -Eq "^[[:space:]]*($1|\"$1\"|'$1')[[:space:]]*=" .kbw.toml
+    [ -f "$kb_hook_binding" ] &&
+        grep -Eq "^[[:space:]]*($1|\"$1\"|'$1')[[:space:]]*=" "$kb_hook_binding"
 }
 kb_hook_snapshot=${KB_SNAPSHOT:-}
 if [ -z "$kb_hook_snapshot" ]; then
@@ -115,6 +118,8 @@ if [ -z "$kb_hook_snapshot" ]; then
     fi
 fi
 
+# The KB checkout: KB_ROOT when set (as for any kb command), else KB_PATH.
+kb_hook_kb=${KB_ROOT:-$kb_hook_root/$kb_hook_path}
 set -- verify --diff HEAD --staged --only commit-message --only branch-name \
     --snapshot "$kb_hook_snapshot" --quiet
 if [ "${KB_OFFLINE:-}" = 1 ]; then
@@ -130,7 +135,7 @@ kb_hook_status=0
 if [ "$kb_hook_cleanup" = either ]; then
     # A failed check (exit 40) of the whitespace-cleaned message is retried without
     # comment lines; any other outcome is final.
-    "$kb_hook_path/kbw" "$@" --commit-message "$kb_hook_tmp/message" \
+    KB_ROOT=$kb_hook_kb kb "$@" --commit-message "$kb_hook_tmp/message" \
         2>"$kb_hook_tmp/stderr" || kb_hook_status=$?
     if [ "$kb_hook_status" -ne 40 ]; then
         cat "$kb_hook_tmp/stderr" >&2
@@ -139,5 +144,5 @@ if [ "$kb_hook_cleanup" = either ]; then
     kb_hook_status=0
     cp "$kb_hook_tmp/stripped" "$kb_hook_tmp/message"
 fi
-"$kb_hook_path/kbw" "$@" --commit-message "$kb_hook_tmp/message" || kb_hook_status=$?
+KB_ROOT=$kb_hook_kb kb "$@" --commit-message "$kb_hook_tmp/message" || kb_hook_status=$?
 exit "$kb_hook_status"

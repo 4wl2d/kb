@@ -10,7 +10,7 @@ index schema `2`, skill protocol `3`, tool registry schema `1`, bootstrap manife
 
 ## 1. Distribution model and ownership
 
-* One **upstream** repository contains the engine (`core/`, `kbw`, Cargo files),
+* One **upstream** repository contains the engine (`core/`, `kb`, Cargo files),
   schemas, migrations, templates, shared skills, adaptation instructions and release
   machinery. It contains no real third-party project data; `project/` holds only a
   README explaining the uninitialized state.
@@ -18,7 +18,7 @@ index schema `2`, skill protocol `3`, tool registry schema `1`, bootstrap manife
   Git history. The downstream holds the engine *and* the product knowledge
   (`project/`). One downstream may describe many host repositories.
 * The downstream is mounted into each host repository as a Git submodule (conventional
-  path `.kb`) or used as a separate checkout. Users run `<kb>/kbw`; there is no global
+  path `.kb`) or used as a separate checkout. Users run `kb`; there is no global
   `kb` binary to manage.
 * Engine-owned paths are listed in `core/release.toml` (`engine_paths`). Project-owned
   paths: `project/`. Engine changes flow through upstream; project adaptation flows
@@ -31,10 +31,12 @@ index schema `2`, skill protocol `3`, tool registry schema `1`, bootstrap manife
 ## 2. Repository layout
 
 ```
-kbw                       POSIX sh launcher (runtime selection, source bootstrap, artifact install)
+install.sh, install.ps1   installers of the kb command from a GitHub release (macOS/Linux, Windows)
+kbw                       deprecated POSIX forwarder to `kb` (removed in a later release)
 Cargo.toml / Cargo.lock   workspace (core/cli, core/benchmarks, core/providers, core/eval)
 rust-toolchain.toml       pinned toolchain
-core/cli/                 crate `kb`: library + `kb` executable
+core/cli/                 crate `kb`: library + `kb` executable (engine selection in src/launcher/,
+                          build.rs compiles the engine fingerprint in)
 core/schemas/             generated JSON Schemas (drift-checked by tests and `kb schema --check`)
 core/migrations/          migration docs + synthetic legacy fixtures (code lives in core/cli/src/migrate.rs)
 core/templates/           project skeleton, record templates, CI/MR templates, synthetic example
@@ -44,9 +46,9 @@ core/tests/               shared fixtures + routing evaluations used by core/cli
 core/benchmarks/          crate `kb-bench`: corpus generator + measurements
 core/providers/           optional out-of-process ast-index / CodeGraph reference adapters
 core/eval/                optional isolated, preregistered agent replay kit
-core/release.toml         bootstrap/compatibility manifest (line-parseable by kbw)
+core/release.toml         bootstrap/compatibility manifest (line-parseable)
 project/                  project-owned knowledge (created by `kb init`)
-.cache/                   generated (runtime binaries, git mirror, SQLite index); git-ignored
+.cache/                   generated (engine stamp, git mirror, SQLite index, Cargo builds); git-ignored
 ```
 
 After `kb init --apply`:
@@ -445,14 +447,16 @@ token-estimate ceiling, not a delivery receipt; required ids are never dropped t
   mirror (`.cache/git/<16 hex of a hash of the normalized source identity and ref>.git`,
   ref `refs/kb/approved`), using argument arrays,
   `GIT_TERMINAL_PROMPT=0`, `protocol.allow=never` plus the configured allowed protocols,
-  `--no-tags --no-recurse-submodules --no-write-fetch-head`. Failure → `FRESHNESS_UNVERIFIED`.
+  `--no-tags --no-recurse-submodules --no-write-fetch-head`. Fetches into one mirror run one
+  at a time across processes (advisory lock `kb-fetch.lock` in the mirror). Failure →
+  `FRESHNESS_UNVERIFIED`.
   No TTL, no automatic offline fallback. `--offline` uses the last fetched approved revision
   (mirror), else (for `refs/heads/*` approved refs) the KB checkout's remote-tracking ref,
   and reports `freshness = unverified`.
 * **Selection** (`--snapshot`): `auto` (default), `latest`, `pinned`, `working-tree`, or a
-  revision. `auto`: host binding `selection` (`.kbw.toml`) if set; else if a host pin exists and
+  revision. `auto`: host binding `selection` (`.kb.toml`) if set; else if a host pin exists and
   differs from the approved tip → `UPDATE_REQUIRED` (both revisions reported); else latest.
-  `pinned` uses the host pin (submodule gitlink in host `HEAD`, or `.kbw.toml pin`) and still
+  `pinned` uses the host pin (submodule gitlink in host `HEAD`, or `.kb.toml pin`) and still
   reports the approved tip. A pin is never called latest. Revisions not reachable from the
   approved tip are `approved = false` and make completeness at best `partial`.
 * The KB working tree, index, HEAD, branches and submodule pointers are never modified by
@@ -473,7 +477,7 @@ token-estimate ceiling, not a delivery receipt; required ids are never dropped t
   paths that differ between `merge-base(HEAD, approved)` and the KB working tree (committed,
   staged, unstaged, untracked). Overlay records are labeled `proposal` (`new`, `modifies <id>`,
   `removes <id>`), never override accepted records and never count as mandatory.
-* Host binding file `.kbw.toml` in the host root (optional): `repo`, `pin`, `selection`.
+* Host binding file `.kb.toml` in the host root (optional): `repo`, `pin`, `selection`.
 
 ## 7. Index
 
@@ -514,7 +518,8 @@ Commands: the agent surface `sym`, `callers`, `impact`, `doc`, `read`, `find`, `
 `show`, `sync`, `coverage`, `propose {begin,submit}`, `capture`, `anchors {stamp,check}`,
 `drift`, `ledger`, `verify`, `usage report`, `eval {routing,history}`, `integrate`, `migrate`,
 `update {check,prepare,divergence,abandon}`, `schema`,
-`version`. Mutating commands are dry-run by default and write only with `--apply`
+`version`, and `engine {info,fingerprint,bootstrap,install,package}` and `self update` (§9).
+Mutating commands are dry-run by default and write only with `--apply`
 (`update prepare` writes only to its own branch/worktree; `update abandon <branch>` reports
 what it would remove and removes the worktree and branch only with `--apply`, refusing a
 worktree with uncommitted, untracked or conflicted files with `CONFLICT` unless
@@ -547,9 +552,11 @@ invalid records are `validate` diagnostics and the context reason `SNAPSHOT_INVA
 `SKILL_OUTDATED`=23); 30–39 context (`CONTEXT_INCOMPLETE`=30, `CONTEXT_BUDGET_EXCEEDED`=31);
 40–49 checks (`VALIDATION_FAILED`=40, `ROUTING_TESTS_FAILED`=41, `DRIFT_DETECTED`=42,
 `ENGINE_DIVERGED`=43, `IMPACT_UNACKNOWLEDGED`=44, `CONFLICT`=45, `CHECKS_FAILED`=46); 50–59 runtime/update
-(`RUNTIME_INCOMPATIBLE`=50, `UPDATE_CONFLICT`=51, `MIGRATION_FAILED`=52, `UPDATE_FAILED`=53);
-60–69 environment (`GIT_ERROR`=60, `INDEX_ERROR`=61, `IO_ERROR`=62, `UNSAFE_PATH`=63,
-`INVALID_INPUT`=64, `TOOL_UNAVAILABLE`=65).
+(`RUNTIME_INCOMPATIBLE`=50, `UPDATE_CONFLICT`=51, `MIGRATION_FAILED`=52, `UPDATE_FAILED`=53,
+`RUNTIME_NOT_BOOTSTRAPPED`=54, `BOOTSTRAP_FAILED`=55, `TOOLCHAIN_MISMATCH`=56,
+`ARTIFACT_INVALID`=57, `PACKAGE_FAILED`=58); 60–69 environment (`GIT_ERROR`=60,
+`INDEX_ERROR`=61, `IO_ERROR`=62, `UNSAFE_PATH`=63, `INVALID_INPUT`=64, `TOOL_UNAVAILABLE`=65,
+`DOWNLOAD_FAILED`=66).
 
 `context` exits 0 only when completeness is `complete`; otherwise it prints the full result
 and exits 30 (`CONTEXT_INCOMPLETE`).
@@ -560,43 +567,78 @@ The agent commands print one bounded answer in every text format and `kb.answer.
 the answer still printed, unless the text of the checkout answers in another reading (§13,
 Misses).
 
-## 9. Launcher and runtime
+## 9. The kb command: engine selection and runtimes
 
-`kbw` (POSIX sh) reads `core/release.toml` with line-based parsing, computes the engine
-fingerprint = sha256 over sorted `sha256  path` lines of the build inputs (`Cargo.toml`,
-`Cargo.lock`, `rust-toolchain.toml`, `core/release.toml`, `core/cli/Cargo.toml`,
-`core/cli/src/**`), and executes `.cache/runtime/<fingerprint>/kb` with `KB_ROOT` set.
-A stamp file + `find -newer`/`-cnewer` avoids re-hashing on warm runs.
+`kb` is one native binary per user (macOS, Linux, Windows; [ADR 0017](adr/0017-kb-command.md)).
+It is both the engine and the engine selector (`core/cli/src/launcher/`, an adapter). Every
+invocation first selects the engine that reads the checkout:
 
-The runtime of a checkout is created only by explicit, documented actions:
+* **Checkout.** `--root <dir>`, else `KB_ROOT`, else the nearest directory from the current
+  directory upwards (then from `--host` upwards) that has `core/release.toml` or mounts a
+  checkout at `.kb` (`.kb/core/release.toml`). `kb engine ...`, `kb self ...`, top-level
+  `--help`/`--version` and invocations outside any checkout run in the started binary.
+* **Fingerprint.** SHA-256 over the byte-sorted lines `<sha256>  <path>\n` of the engine
+  build inputs: `Cargo.toml`, `Cargo.lock`, `rust-toolchain.toml`, `core/release.toml`,
+  `core/cli/Cargo.toml`, `core/cli/build.rs` (when present) and the regular files under
+  `core/cli/src` (root-relative `/` paths; names starting with `.` or ending in `~` ignored;
+  symlinks not followed; CRLF hashed as LF). For an LF tree without `build.rs` this equals
+  what the retired `kbw` computed. `build.rs` computes the same value at compile time, so
+  every build reports the fingerprint of its sources (`kb version`: `build <fp>`,
+  `kb --json version`: `build_fingerprint`). A stamp `<root>/.cache/engine-stamp` (the
+  fingerprint plus size, mtime and, on Unix, ctime and inode of each input) avoids hashing on
+  warm runs; metadata is taken before hashing, so concurrent edits invalidate it.
+* **Selection.** When the fingerprint equals the running binary's, the command runs
+  in-process. Otherwise `kb` runs `<store>/<fingerprint>/kb` (`kb.exe` on Windows), else a
+  runtime the retired launcher built in the checkout (`<root>/.cache/runtime/<fp>/kb`), in
+  place of the process: `exec` on Unix; on Windows a child with inherited standard streams
+  whose exit status is passed on (Ctrl+C reaches the child; the parent outlives it). The
+  child gets `KB_ROOT` and `KB_SELECTED_FINGERPRINT`; a runtime that does not report the
+  fingerprint it was selected for fails with `RUNTIME_INCOMPATIBLE` instead of selecting
+  again. A checkout without complete engine sources is pinned only by its manifest's
+  versions, which the engine checks (`RUNTIME_INCOMPATIBLE`), and runs in-process.
+* **Store.** `KB_RUNTIME_DIR`, else `%LOCALAPPDATA%\kb\runtime` (Windows),
+  `$XDG_DATA_HOME/kb/runtime` when set, `~/Library/Application Support/kb/runtime` (macOS)
+  or `~/.local/share/kb/runtime`. Runtimes are content-addressed (`<fp>/{kb,BUILD-INFO}`),
+  so one store serves every checkout of the user.
 
-* `kbw --kbw-bootstrap` builds from source (`cargo build --release --locked -p kb`, pinned
-  toolchain) and activates it by atomic rename. The fingerprint is passed to Cargo as
-  `KBW_BUILD_FINGERPRINT` and compiled in (`option_env!`, a tracked Cargo input, so a changed
-  fingerprint always recompiles the engine even when file mtimes look fresh). `kb version`
-  prints it as `build <fp>` and `kb --json version` as `build_fingerprint` (`unknown` for a
-  build made outside `kbw`). The smoke test (`kb --json version`) requires
-  `build_fingerprint` and `engine_version` to match, and the build fails
-  (`KBW_BOOTSTRAP_FAILED`) if the engine inputs changed while it ran. Cargo builds into
-  `KBW_CARGO_TARGET_DIR` (default `<root>/.cache/cargo-target`; a relative value is resolved
-  against the directory `kbw` is run from, as `kb update prepare` does, not against the root);
-* `kbw --kbw-install-artifact <archive|https-url> --sha256 <hex>` (or `--sha256-file`)
-  verifies the digest before listing/extracting, rejects unsafe entries (absolute, `..`,
-  links, devices), checks `BUILD-INFO` (engine version, target, fingerprint must equal the
-  local engine), smoke-runs the binary (it must report the same build fingerprint), and
-  activates atomically: a new runtime directory by one rename, a reinstall of the same
-  fingerprint by renaming `BUILD-INFO` and `kb` over the old files, so `<fp>/kb` resolves at
-  every moment and running processes keep their binary; failures leave the previous runtime
-  intact;
-* `kbw --kbw-package <out-dir>` archives the active source-built runtime of this fingerprint
-  (smoke-tested the same way); when the active runtime is an installed artifact or does not
-  report this fingerprint, it builds from source instead.
+Runtimes are created only by explicit actions, always handled by the started `kb`:
 
-Normal commands never build or install an engine: when the runtime for the current
-fingerprint is missing (first use, an engine edit, or a KB checkout moved to another engine),
-they fail with `KBW_RUNTIME_NOT_BOOTSTRAPPED` (exit 50). `KBW_AUTO_BOOTSTRAP=1` opts in to
-implicit builds (CI). `kb update prepare` bootstraps the target engine inside its own update
-worktree as an explicit, reported step.
+* `kb engine bootstrap` builds from source (`cargo build --release --locked -p kb` in the
+  checkout, pinned toolchain checked through `rustc -vV` in the checkout, `SDKROOT` set on
+  macOS) into `KB_CARGO_TARGET_DIR` (default `<root>/.cache/cargo-target`; a relative value
+  is resolved against the current directory). It sets `KBW_BUILD_FINGERPRINT` for kbw-era
+  sources, fails (`BOOTSTRAP_FAILED`) if the inputs changed during the build, smoke-runs
+  `kb --root <empty dir> --json version` (it must report this `engine_version` and
+  fingerprint), writes `BUILD-INFO` and activates by rename.
+* `kb engine install [<archive|https-url> --sha256 <hex> | --sha256-file <file>]` takes the
+  release archive of the checkout's `engine_version` (digest from that release's
+  `SHA256SUMS`) or an explicit one, verifies the digest before reading it, rejects unsafe
+  entries (absolute, `..`, links, devices, anything outside `kb-<version>-<target>/`), checks
+  `BUILD-INFO` (engine version, target, fingerprint must equal the checkout's engine),
+  smoke-runs the binary and activates: a new runtime directory by one rename, a reinstall
+  by renaming `BUILD-INFO` and `kb` over the old files, so `<fp>/kb` resolves at every moment
+  and running processes keep their binary; failures leave the previous runtime intact.
+* `kb engine package <out-dir> [--target <triple>]` builds the checkout's engine (same
+  checks), smoke-runs it and writes `kb-<version>-<target>.tar.gz` (reproducible: fixed
+  order, owners and times from `SOURCE_DATE_EPOCH` or 0) and its `.sha256`.
+
+Normal commands never build or install an engine: when no runtime serves the fingerprint
+(first use, an engine edit, or a checkout moved to another engine) they fail with
+`RUNTIME_NOT_BOOTSTRAPPED` (exit 54). `KB_AUTO_BOOTSTRAP=1` opts in to implicit source
+builds (CI). `kb update prepare` bootstraps the target engine of its update worktree as an
+explicit, reported step (this `kb` with the worktree as root).
+
+Releases (`.github/workflows/release.yml`) carry `kb-<version>-<target>.tar.gz` for
+`aarch64-apple-darwin`, `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl` and
+`x86_64-pc-windows-msvc` plus `SHA256SUMS`. `install.sh` and `install.ps1` install `kb`
+from a release; `kb self update` replaces the installed binary after the same verification
+(on Windows the running executable is renamed aside first). `KB_RELEASES_URL` (an
+`https://` URL or a local directory with the `download/v<version>/` layout) selects another
+release location. Downloads use `curl`.
+
+`kbw` remains for one release as a deprecated POSIX forwarder: `KB_ROOT=<its dir> kb ...`,
+`--kbw-bootstrap|--kbw-install-artifact|--kbw-package|--kbw-fingerprint|--kbw-runtime-info`
+mapped to `kb engine ...`, `KBW_*` variables passed on as `KB_*`.
 
 The engine-owned workflows `.github/workflows/upstream-ci.yml` and `release.yml` are
 inherited by every downstream; a fork disables them without editing them (which would be
@@ -627,9 +669,9 @@ estimated tokens; overflow fails instead of truncating. Native file caps are che
 writing. `integrate --probe` verifies installation and emits a load challenge; it always
 distinguishes that result from unperformed real harness consultation (ADR 0013).
 The skill setting `snapshot` (`auto|latest|pinned`) is written as an explicit `--snapshot`
-into every generated kbw command; `auto` passes nothing, so a host `.kbw.toml selection`
+into every generated kb command; `auto` passes nothing, so a host `.kb.toml selection`
 decides, while `latest`/`pinned` override it. The shipped host CI templates run
-`kbw impact --snapshot pinned --check`, which checks against the host pin (freshness is still
+`kb impact --snapshot pinned --check`, which checks against the host pin (freshness is still
 verified) and therefore does not fail with `UPDATE_REQUIRED` while a merged knowledge change
 waits for the host pin update.
 
@@ -693,7 +735,7 @@ speak to them; one **answer** format (`core/cli/src/answer.rs`) carries every re
   (`CONFIG_INVALID` at run time, `TOOLS_INVALID` in `validate`). Absent file: defaults
   `codegraph` → `rg` → `git-grep`.
 * **Code root**: the detected host repository, else the KB checkout. Answer paths are
-  relative to it; its registry repo id (from `.kbw.toml` or remotes) qualifies globs.
+  relative to it; its registry repo id (from `.kb.toml` or remotes) qualifies globs.
 * **Routing** (`sym`, `callers`, `impact <symbol>`, and `doc` for symbols): `--tool`, else the
   route; a tool is skipped when its program does not resolve or `--version` fails; a tool
   that fails or does not find the symbol hands over to the next; each hand-over is a note.

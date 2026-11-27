@@ -648,7 +648,7 @@ is an implicit alias. An alias shared by several concepts produces an
 drift-checked (`kb schema --check`, exit 42 `DRIFT_DETECTED` on drift; `kb schema --write`
 regenerates). `record.v1.schema.json` and `record.v2.schema.json` describe the respective
 front-matter vocabularies; the others describe
-`project.toml`, the registries, routing fixtures, `skill.toml`, `.kbw.toml`, `upstream.toml`,
+`project.toml`, the registries, routing fixtures, `skill.toml`, `.kb.toml`, `upstream.toml`,
 `tools.toml` (`tools.v1.schema.json`),
 `core/release.toml`, the `kb.cli.v1` envelope and `kb.code.v1` provider requests/responses.
 Routing fixtures, host bindings and skill configuration retain their independent schema 1.
@@ -664,12 +664,12 @@ links, cycles, lifecycle, overrides) and the `--base` checks. The complete list 
 ## Validating
 
 ```sh
-./kbw validate                  # working tree: records, registries, links, policies, tools.toml, routing fixtures
-./kbw validate --strict         # warnings count as errors
-./kbw validate --base <rev>     # also check that ids at <rev> still exist with the same kind
-./kbw validate --no-routing     # skip routing fixtures
-./kbw validate --templates      # also check core/templates (upstream check)
-./kbw validate --stale 90 --on 2026-10-07  # explicit calendar reference for an audit
+kb validate                  # working tree: records, registries, links, policies, tools.toml, routing fixtures
+kb validate --strict         # warnings count as errors
+kb validate --base <rev>     # also check that ids at <rev> still exist with the same kind
+kb validate --no-routing     # skip routing fixtures
+kb validate --templates      # also check core/templates (upstream check)
+kb validate --stale 90 --on 2026-10-07  # explicit calendar reference for an audit
 ```
 
 `--templates` parses every project template as its destination file. Registry templates

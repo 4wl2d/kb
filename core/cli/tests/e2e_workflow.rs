@@ -1,5 +1,5 @@
 //! The end-to-end workflow of the specification (section 13), through the real `kb`
-//! executable and the production `kbw` launcher, entirely offline:
+//! executable and its engine selection, entirely offline:
 //!
 //! synthetic upstream -> downstream init -> multi-repository context -> proposal ->
 //! update of the approved origin -> host pin refresh -> upstream-format update.
@@ -8,10 +8,11 @@
 //! bare `upstream.git`, a downstream clone that keeps the upstream history and publishes to
 //! a bare `product-origin.git`, and two host repositories (`mobile`, `backend`) that mount
 //! the downstream as a submodule at `.kb`. Their `origin` URLs only identify the registry
-//! repos (`.invalid` hosts); nothing is ever fetched from them. The only compilation is the
-//! explicit source bootstrap of the downstream runtime and of the update worktree, with the
-//! pinned toolchain, offline, sharing compiled dependencies through a directory under
-//! Cargo's test tmpdir.
+//! repos (`.invalid` hosts); nothing is ever fetched from them. The synthetic upstream's
+//! engine sources carry a marker, so the `kb` under test is not their engine: the only
+//! compilation is the explicit source bootstrap of that engine (`kb engine bootstrap`), with
+//! the pinned toolchain, offline, sharing compiled dependencies through a directory under
+//! Cargo's test tmpdir; the update worktree reuses the runtime from the store.
 #![cfg(unix)]
 
 mod common;
@@ -227,10 +228,10 @@ fn rule_text(u: &Value, id: &str) -> String {
         .to_string()
 }
 
-/// Cargo target directory shared by source builds across test runs (and with the launcher
-/// test), so a bootstrap recompiles only the `kb` crate.
+/// Cargo target directory shared by source builds across test runs (and with the engine
+/// selection tests), so a bootstrap recompiles only the `kb` crate.
 fn shared_target_dir() -> PathBuf {
-    Path::new(env!("CARGO_TARGET_TMPDIR")).join("kbw-cargo-target")
+    Path::new(env!("CARGO_TARGET_TMPDIR")).join("kb-cargo-target")
 }
 
 fn real_home() -> PathBuf {
@@ -264,12 +265,11 @@ fn toolchain_env(c: &mut Command) {
     c.env("PATH", path)
         .env("CARGO_HOME", cargo_home())
         .env("CARGO_NET_OFFLINE", "true")
-        .env("KBW_CARGO_TARGET_DIR", shared_target_dir())
+        .env("KB_CARGO_TARGET_DIR", shared_target_dir())
         .env_remove("CARGO_TARGET_DIR")
         .env_remove("CARGO_BUILD_TARGET")
-        .env_remove("KBW_AUTO_BOOTSTRAP")
-        .env_remove("KBW_FINGERPRINT")
-        .env_remove("KBW_ALLOW_TOOLCHAIN_MISMATCH");
+        .env_remove("KB_AUTO_BOOTSTRAP")
+        .env_remove("KB_ALLOW_TOOLCHAIN_MISMATCH");
     if let Some(r) = rustup_home() {
         c.env("RUSTUP_HOME", r);
     }
@@ -415,7 +415,7 @@ impl World {
         let mut c = Command::new(kb_bin());
         c.current_dir(cwd).args(args);
         isolated_env(&mut c, &self.sb.home());
-        c.env_remove("KBW_AUTO_BOOTSTRAP");
+        c.env_remove("KB_AUTO_BOOTSTRAP");
         c.output().unwrap()
     }
 
@@ -437,10 +437,10 @@ impl World {
         c.output().unwrap()
     }
 
-    /// The downstream's own launcher, as its maintainers run it.
-    fn kbw(&self, args: &[&str]) -> Output {
-        let mut c = Command::new(self.down.join("kbw"));
-        c.current_dir(self.sb.path()).args(args);
+    /// `kb` inside the downstream checkout, as its maintainers run it.
+    fn kb_down(&self, args: &[&str]) -> Output {
+        let mut c = Command::new(kb_bin());
+        c.current_dir(&self.down).args(args);
         isolated_env(&mut c, &self.sb.home());
         toolchain_env(&mut c);
         c.output().unwrap()
@@ -557,6 +557,11 @@ fn synthetic_upstream(w: &World) -> String {
         !w.upstream.join("project/project.toml").exists(),
         "upstream holds no project data"
     );
+    // A different engine than the kb under test: the same sources plus a marker comment.
+    let lib = w.upstream.join("core/cli/src/lib.rs");
+    let mut text = fs::read_to_string(&lib).unwrap();
+    text.push_str("\n// Synthetic upstream engine of the end-to-end test.\n");
+    fs::write(&lib, text).unwrap();
     w.git(&w.upstream, &["init", "-q", "-b", "main"]);
     let v010 = w.commit_all(&w.upstream, "kb engine 0.1.0 (synthetic upstream)");
     w.git(&w.upstream, &["tag", "-a", "v0.1.0", "-m", "kb 0.1.0"]);
@@ -576,7 +581,7 @@ fn synthetic_upstream(w: &World) -> String {
 
 /// Step 2: the product downstream keeps the upstream history, publishes to its own bare
 /// origin, bootstraps its runtime explicitly and is initialized from the synthetic
-/// multi-repository example through its launcher. Returns the approved commit and the
+/// multi-repository example through kb. Returns the approved commit and the
 /// engine fingerprint of the bootstrapped runtime.
 fn downstream(w: &World, v010: &str) -> (String, String) {
     let d = &w.down;
@@ -595,22 +600,34 @@ fn downstream(w: &World, v010: &str) -> (String, String) {
     symlink(shared_target_dir(), d.join(".cache/cargo-target")).unwrap();
     fs::create_dir_all(shared_target_dir()).unwrap();
 
-    // Normal commands never build a runtime implicitly; the bootstrap is explicit.
-    let o = w.kbw(&["version"]);
-    assert_exit(&o, 50);
+    // The downstream's engine is not the kb under test, and normal commands never build a
+    // runtime implicitly: the bootstrap is explicit.
+    let o = w.kb_down(&["version"]);
+    assert_exit(&o, 54);
     assert!(
-        stderr(&o).contains("KBW_RUNTIME_NOT_BOOTSTRAPPED"),
+        stderr(&o).contains("RUNTIME_NOT_BOOTSTRAPPED")
+            && stderr(&o).contains("kb engine bootstrap"),
         "{}",
         show(&o)
     );
-    let o = w.kbw(&["--kbw-bootstrap"]);
+    let o = w.kb_down(&["engine", "bootstrap"]);
     assert_exit(&o, 0);
-    let fp = stdout(&w.kbw(&["--kbw-fingerprint"])).trim().to_string();
-    let runtime = d.join(".cache/runtime").join(&fp);
+    let fp = stdout(&w.kb_down(&["engine", "fingerprint"]))
+        .trim()
+        .to_string();
+    assert_ne!(fp, kb::versions::BUILD_FINGERPRINT);
+    let runtime = w.sb.home().join("kb-runtime").join(&fp);
     assert_eq!(stdout(&o).trim(), s(&runtime), "{}", show(&o));
     let info = fs::read_to_string(runtime.join("BUILD-INFO")).unwrap();
     assert_eq!(kv(&info, "fingerprint"), Some(fp.as_str()), "{info}");
     assert_eq!(kv(&info, "source"), Some("source-build"), "{info}");
+    // From now on kb runs that engine for the downstream, from any directory.
+    let o = w.kb_down(&["--json", "version"]);
+    assert_exit(&o, 0);
+    assert_eq!(
+        envelope(&o, "version")["result"]["build_fingerprint"],
+        fp.as_str()
+    );
 
     // Before init the project context does not exist.
     let (o, v) = w.kb_json(&w.sb.path(), s(d), "context", &["--intent", "implement"]);
@@ -618,12 +635,12 @@ fn downstream(w: &World, v010: &str) -> (String, String) {
     assert_eq!(v["error"]["code"], "PROJECT_NOT_INITIALIZED");
 
     // init: dry-run first (nothing written), then --apply.
-    let o = w.kbw(&["--json", "init", "--example", "synthetic-multirepo"]);
+    let o = w.kb_down(&["--json", "init", "--example", "synthetic-multirepo"]);
     let v = envelope(&o, "init");
     assert_eq!(v["result"]["mode"], "dry-run");
     assert_eq!(v["result"]["written"], 0);
     assert_eq!(w.git(d, &["status", "--porcelain"]), "");
-    let o = w.kbw(&[
+    let o = w.kb_down(&[
         "--json",
         "init",
         "--example",
@@ -639,8 +656,8 @@ fn downstream(w: &World, v010: &str) -> (String, String) {
         "{upstream_toml}"
     );
 
-    // validate (records, links, policies, routing fixtures) through the launcher.
-    let o = w.kbw(&["--json", "validate"]);
+    // validate (records, links, policies, routing fixtures) through kb.
+    let o = w.kb_down(&["--json", "validate"]);
     let v = envelope(&o, "validate");
     assert_exit(&o, 0);
     let r = &v["result"];
@@ -1053,7 +1070,7 @@ fn refs(w: &World, dir: &Path) -> BTreeSet<String> {
 
 /// Step 7: upstream publishes an engine-side change (a skill template; no Rust sources)
 /// as v0.1.1; the downstream checks it and prepares a reviewable update branch with the
-/// production runner (`<worktree>/kbw`).
+/// production runner (this kb with the worktree as root).
 fn upstream_format_update(w: &World, fp: &str) {
     let tmpl = w.upstream.join(SKILL_TEMPLATE);
     let mut text = fs::read_to_string(&tmpl).unwrap();
@@ -1076,7 +1093,8 @@ fn upstream_format_update(w: &World, fp: &str) {
     let head = w.git(d, &["rev-parse", "HEAD"]);
     let state = main_checkout_state(w);
     let refs_before = refs(w, d);
-    let runtime_before = tree_digest(&d.join(".cache/runtime"));
+    let store = w.sb.home().join("kb-runtime");
+    let runtime_before = tree_digest(&store);
     assert!(!runtime_before.is_empty(), "bootstrapped in step 2");
     let upstream = s(&w.upstream_bare);
 
@@ -1191,12 +1209,17 @@ fn upstream_format_update(w: &World, fp: &str) {
         w.git(&wt, &["status", "--porcelain", "--untracked-files=all"]),
         ""
     );
-    // Unchanged engine build inputs give the same fingerprint, but the target engine was
-    // bootstrapped inside the worktree's own cache.
-    let info = fs::read_to_string(wt.join(".cache/runtime").join(fp).join("BUILD-INFO"))
-        .unwrap_or_else(|e| panic!("worktree runtime {fp}: {e}"));
-    assert_eq!(kv(&info, "fingerprint"), Some(fp), "{info}");
-    assert_eq!(kv(&info, "source"), Some("source-build"), "{info}");
+    // Unchanged engine build inputs give the same fingerprint: the runtime bootstrapped in
+    // step 2 serves the worktree too, so the explicit bootstrap step built nothing.
+    let (o, v) = w.kb_json(&w.sb.path(), s(&wt), "engine", &["info"]);
+    assert_exit(&o, 0);
+    let checkout = &v["result"]["checkout"];
+    assert_eq!(checkout["fingerprint"], fp, "{checkout:#}");
+    assert_eq!(checkout["runtime"]["status"], "store", "{checkout:#}");
+    assert_eq!(
+        checkout["runtime"]["source"], "source-build",
+        "{checkout:#}"
+    );
     let (o, v) = w.kb_json(&w.sb.path(), s(&wt), "validate", &[]);
     assert_exit(&o, 0);
     assert_eq!(v["result"]["validation"]["errors"], 0);
@@ -1205,7 +1228,7 @@ fn upstream_format_update(w: &World, fp: &str) {
     // The maintainer checkout: HEAD, branch, index, work tree and runtime cache unchanged;
     // the only new refs are the update branch and its namespaced upstream ref.
     assert_eq!(main_checkout_state(w), state);
-    assert_eq!(tree_digest(&d.join(".cache/runtime")), runtime_before);
+    assert_eq!(tree_digest(&store), runtime_before);
     let added: BTreeSet<String> = refs(w, d)
         .difference(&refs_before)
         .map(|l| l.split(' ').next().unwrap().to_string())

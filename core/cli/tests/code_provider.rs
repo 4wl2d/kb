@@ -55,7 +55,7 @@ impl World {
         sb.git(&kb, &["remote", "add", "origin", kb.to_str().unwrap()]);
         sb.git(&kb, &["update-ref", "refs/remotes/origin/main", &accepted]);
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(&host.join("app/auth/Core.rs"), "pub fn save() {}\n");
         write(
             &host.join("app/auth/Client.rs"),
@@ -447,6 +447,8 @@ fn pinned_response_does_not_replay_task_specific_similar_candidates() {
     assert!(pinned.load_for_brief(&request).unwrap().similar.is_empty());
 }
 
+// Counts Git processes through a POSIX shell shim on PATH.
+#[cfg(unix)]
 #[test]
 fn validation_reads_files_with_a_constant_number_of_git_processes() {
     let name = "validation_reads_files_with_a_constant_number_of_git_processes";

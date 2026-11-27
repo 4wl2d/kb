@@ -369,12 +369,13 @@ fn impact(outcome: &mut Outcome, v: &Value, roots: &Roots) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tools::tests::abs;
     use serde_json::json;
 
     fn roots() -> Roots {
         Roots {
-            kb: "/kb".into(),
-            code: "/code".into(),
+            kb: abs("/kb").into(),
+            code: abs("/code").into(),
             repo: None,
             kb_mount: None,
         }
@@ -412,9 +413,9 @@ mod tests {
             limit: 10,
         };
         let v = json!([
-            {"node": {"name": "refreshAll", "kind": "function", "filePath": "/code/a.kt", "startLine": 3, "endLine": 9}},
-            {"node": {"name": "pkg.refresh", "qualifiedName": "Source::pkg.refresh", "kind": "import", "filePath": "/code/a.kt", "startLine": 1}},
-            {"node": {"name": "refresh", "qualifiedName": "TokenRefresher::refresh", "kind": "method", "filePath": "/code/b.kt", "startLine": 40, "endLine": 80, "signature": "(): Token"}}
+            {"node": {"name": "refreshAll", "kind": "function", "filePath": abs("/code/a.kt"), "startLine": 3, "endLine": 9}},
+            {"node": {"name": "pkg.refresh", "qualifiedName": "Source::pkg.refresh", "kind": "import", "filePath": abs("/code/a.kt"), "startLine": 1}},
+            {"node": {"name": "refresh", "qualifiedName": "TokenRefresher::refresh", "kind": "method", "filePath": abs("/code/b.kt"), "startLine": 40, "endLine": 80, "signature": "(): Token"}}
         ]);
         let mut o = outcome();
         definitions(&mut o, &v, &roots(), &q);

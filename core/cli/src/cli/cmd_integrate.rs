@@ -116,7 +116,9 @@ fn generate_output(ctx: &Ctx, mode: Mode, plan: GeneratePlan) -> Result<CommandO
                 ErrorCode::DriftDetected,
                 "the committed skill bundle differs from the rendered one",
             )
-            .with_hint("run `./kbw integrate --generate --apply` and commit project/skill-config/generated/"),
+            .with_hint(
+                "run `kb integrate --generate --apply` and commit project/skill-config/generated/",
+            ),
         ));
     }
     Ok(out)
@@ -160,9 +162,7 @@ fn install_output(ctx: &Ctx, mode: Mode, plan: InstallPlan) -> Result<CommandOut
                     ErrorCode::DriftDetected,
                     "the host integration differs from the committed skill bundle",
                 )
-                .with_hint(
-                    "run `<kb_path>/kbw integrate --apply` in the host and commit the result",
-                ),
+                .with_hint("run `kb integrate --apply` in the host and commit the result"),
             ));
         }
         text.push_str("host integration is up to date\n");

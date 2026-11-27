@@ -22,7 +22,7 @@ kb:  routing · tool registry · adapters · bounded answers
 
 ## Commands
 
-Run them as `<kb_path>/kbw <command>` (`./kbw` in the KB checkout itself). Paths are
+Run them as `kb <command>` (`kb` in the KB checkout itself). Paths are
 relative to the host repository root; `repo:path` names a file of another repository the KB
 describes.
 
@@ -60,7 +60,7 @@ Routed lookups and `doc` return the common bounded answer. `read` returns a sour
 with its resolved path and line range.
 
 ```text
-$ .kb/kbw impact refresh
+$ kb impact refresh
 kb impact refresh · codegraph 1.6.2 (index synced, complete); knowledge 4aa0f99cd4c2 (verified, complete)
 feature  login  Sign-in and session refresh [example.feature.login]  <knowledge>
 invariant  example.mobile.single-refresh  At most one refresh in flight  <knowledge>
@@ -184,13 +184,13 @@ lookup that is still worth making, if there is one:
     `` `<name>` is used in N file(s) and no line of the M file(s) of this checkout reads
     as its declaration ``, the error ``no declaration of `<name>` was found in this
     checkout`` and the hint ``it is declared in a dependency, in generated code or in a
-    form the text scan does not recognise; the uses above are what the files `kbw find`
-    and `kbw read` cover hold of it, so cite them``. When more files use the name,
+    form the text scan does not recognise; the uses above are what the files `kb find`
+    and `kb read` cover hold of it, so cite them``. When more files use the name,
     `next:` names `kb callers <name>`;
   * a name that occurs nowhere is reported as `` `<name>` does not occur in the N
     file(s) of this checkout ``, with at most three similar names and the hint ``check
     the spelling: the name was looked for as a whole word, as written, in the files
-    `kbw find` and `kbw read` cover``;
+    `kb find` and `kb read` cover``;
   * a dotted name `Type.member` that no line writes while `member` occurs is not a final
     miss: `NOT_FOUND` with the message ``no line writes `Type.member` ``, the note ``no
     line of this checkout writes `Type.member`; `member` occurs in it``, the follow-ups
@@ -284,7 +284,7 @@ knowledge codes for `doc` and the knowledge part of `impact`. Full table:
 ## Tool registry
 
 The registry is `<profile>/tools.toml`: `project/tools.toml` in a downstream (created by
-`kbw init`), `core/maintainer-knowledge/tools.toml` for `--profile maintainer`. It is
+`kb init`), `core/maintainer-knowledge/tools.toml` for `--profile maintainer`. It is
 trusted configuration of the KB checkout that supplies the engine and is reviewed like
 code. Schema: [core/schemas/tools.v1.schema.json](../core/schemas/tools.v1.schema.json).
 
@@ -557,7 +557,7 @@ procedures, commit messages and tool output are never executed ([SECURITY.md](..
 
 ## Skills
 
-`kbw integrate` installs four skills side by side ([core/skills/README.md](../core/skills/README.md)):
+`kb integrate` installs four skills side by side ([core/skills/README.md](../core/skills/README.md)):
 
 | skill | use |
 |---|---|

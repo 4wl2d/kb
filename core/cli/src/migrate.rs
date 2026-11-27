@@ -382,7 +382,7 @@ pub fn plan(kb_root: &Path, loc: &ProfileLocation, to: Option<u32>) -> Result<Mi
             "files": unsupported,
         }))
         .with_hint(
-            "files newer than the engine need an engine update (`kbw update check`); \
+            "files newer than the engine need an engine update (`kb update check`); \
              nothing was written",
         ));
     }
@@ -462,7 +462,7 @@ pub fn preview(plan: &MigrationPlan) -> Result<Vec<FileChange>> {
         )
         .with_details(json!({"target": plan.target, "files": failures}))
         .with_diagnostics(diagnostics)
-        .with_hint("fix the listed legacy files and re-run `kbw migrate`"));
+        .with_hint("fix the listed legacy files and re-run `kb migrate`"));
     }
     Ok(changes)
 }
@@ -480,7 +480,7 @@ pub fn apply(plan: &MigrationPlan) -> Result<ApplyReport> {
                 ErrorCode::MigrationFailed,
                 format!("`{}` changed while migrating; nothing was written", c.path),
             )
-            .with_hint("re-run `kbw migrate --apply`"));
+            .with_hint("re-run `kb migrate --apply`"));
         }
         targets.push(path);
     }
@@ -570,7 +570,7 @@ fn not_initialized(loc: &ProfileLocation) -> KbError {
             ),
         )
         .with_hint(
-            "run `kbw init --name <name> --namespace <ns>` (dry-run) and then with `--apply`",
+            "run `kb init --name <name> --namespace <ns>` (dry-run) and then with `--apply`",
         ),
         Profile::Maintainer => KbError::new(
             ErrorCode::ConfigInvalid,
@@ -794,7 +794,7 @@ pub fn render_plan(plan: &MigrationPlan, changes: &[FileChange], human: bool) ->
         s.push_str("nothing to migrate\n");
     } else {
         s.push_str(&format!(
-            "\nrun `kbw migrate --apply` to write {} file(s)\n",
+            "\nrun `kb migrate --apply` to write {} file(s)\n",
             changes.len()
         ));
     }
@@ -823,7 +823,7 @@ pub fn render_apply(report: &ApplyReport, human: bool) -> String {
         s.push_str(&format!("  skipped {}: {}\n", k.path, k.reason));
     }
     if human && !report.written.is_empty() {
-        s.push_str("next: run `kbw validate` and review the diff before committing\n");
+        s.push_str("next: run `kb validate` and review the diff before committing\n");
     }
     s
 }

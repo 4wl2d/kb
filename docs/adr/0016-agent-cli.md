@@ -99,7 +99,7 @@ with a note. kb runs configured commands: argv without a shell,
 in the code root, with the tool's deadline and output limits, `{files}` expanded to the
 matched files. The rule of ADR 0015 holds unchanged: nothing a record supplies is ever
 executed. Commands come only from the registry of the KB checkout that supplies the engine,
-which is the same trust root as the `kbw` binary the user already runs; a registry change
+which is the same trust root as the `kb` binary the user already runs; a registry change
 is reviewed like engine code. `--plan` lists what would run. Any failure is
 `CHECKS_FAILED` (46) with the full answer printed.
 

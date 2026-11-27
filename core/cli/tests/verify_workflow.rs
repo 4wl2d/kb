@@ -1,4 +1,7 @@
 //! Declarative probes through the CLI, using only synthetic local Git history.
+// Helpers of the Unix-only tests (shell hooks, process groups) are unused elsewhere.
+#![cfg_attr(not(unix), allow(dead_code))]
+
 mod common;
 
 use std::fs;
@@ -31,6 +34,7 @@ fn git_env(sb: &Sandbox, dir: &Path, args: &[&str], envs: &[(&str, &str)]) -> Ou
         .args(["-c", "maintenance.auto=false", "-c", "gc.auto=0"])
         .args(args);
     common::isolated_env(&mut cmd, &sb.home());
+    cmd.env("PATH", common::path_with_kb(&sb.path()));
     cmd.envs(envs.iter().copied());
     cmd.output().unwrap()
 }
@@ -72,7 +76,7 @@ impl World {
         sb.git(&kb, &["remote", "add", "origin", kb.to_str().unwrap()]);
         sb.git(&kb, &["update-ref", "refs/remotes/origin/main", &commit]);
         sb.init_repo(&host);
-        write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+        write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
         write(
             &host.join("app/auth/Client.kt"),
             "// Synthetic fixture\nlegacyCall()\n",
@@ -97,12 +101,9 @@ impl World {
         write(&self.kb.join(PROBES), &policy_text(scope, rules));
     }
 
-    /// Install the shipped hook the way Git runs it (`core.hooksPath`, no `sh` wrapper), with
-    /// the engine at the hook's KB entry path.
+    /// Install the shipped hook the way Git runs it (`core.hooksPath`, no `sh` wrapper); the
+    /// built `kb` is on PATH (`git_env`).
     fn install_hook(&self) {
-        fs::create_dir_all(self.host.join(".kb")).unwrap();
-        // The production launcher has separate e2e/launcher tests.
-        fs::hard_link(common::kb_bin(), self.host.join(".kb/kbw")).unwrap();
         write(&self.host.join(".gitignore"), ".kb/\n");
         self.sb.git(&self.host, &["add", ".gitignore"]);
         self.sb
@@ -511,10 +512,7 @@ kind = "commit-message"
 pattern = '^feat:'
 "#,
     );
-    fs::create_dir_all(w.host.join(".kb")).unwrap();
-    // Exercise the shipped hook's argv/exit behavior with the actual engine binary at
-    // its entry path. The production launcher has separate e2e/launcher tests.
-    fs::hard_link(common::kb_bin(), w.host.join(".kb/kbw")).unwrap();
+    // Exercise the shipped hook's argv/exit behavior with the built kb on PATH.
     write(&w.host.join(".gitignore"), ".kb/\n");
     w.sb.git(&w.host, &["add", "--all"]);
     let message = w.sb.path().join("pending message.txt");
@@ -524,7 +522,9 @@ pattern = '^feat:'
             .arg(&message)
             .current_dir(&w.host);
         common::isolated_env(&mut cmd, &w.sb.home());
-        cmd.env("KB_ROOT", &w.kb).env("KB_SNAPSHOT", "working-tree");
+        cmd.env("KB_ROOT", &w.kb)
+            .env("KB_SNAPSHOT", "working-tree")
+            .env("PATH", common::path_with_kb(&w.sb.path()));
         cmd.output().unwrap()
     };
     write(&message, "feat: synthetic hook check\n");
@@ -822,7 +822,7 @@ fn prefix_remote(sb: &Sandbox) -> (String, String) {
 fn prefix_host(sb: &Sandbox) -> PathBuf {
     let host = sb.path().join("host");
     sb.init_repo(&host);
-    write(&host.join(".kbw.toml"), "schema = 1\nrepo = \"mobile\"\n");
+    write(&host.join(".kb.toml"), "schema = 1\nrepo = \"mobile\"\n");
     write(&host.join("app/auth/Client.kt"), "// Synthetic fixture\n");
     sb.commit_all(&host, "feat: synthetic baseline");
     install_hooks_path(sb, &host);
@@ -849,15 +849,14 @@ fn shipped_hook_reads_the_host_pin_unless_the_binding_selects_and_skips_freshnes
     sb.git(&host, &["submodule", "add", "-q", &origin, ".kb"]);
     sb.git(&kb, &["checkout", "-q", "--detach", &first]);
     sb.git(&host, &["add", ".kb"]);
-    fs::hard_link(common::kb_bin(), kb.join("kbw")).unwrap();
     let commit = |message: &str, envs: &[(&str, &str)]| hook_commit(&sb, &host, message, envs);
     assert_rejected(&commit("feat: mount the KB", &[]), "VALIDATION_FAILED");
     assert_committed(&commit("chore: mount the KB", &[]));
     // No KB_SNAPSHOT: the pinned KB applies, not UPDATE_REQUIRED or the approved tip.
     assert_committed(&commit("feat: synthetic change", &[]));
     assert_rejected(&commit("chore: not yet pinned", &[]), "VALIDATION_FAILED");
-    // A selection that `.kbw.toml` declares is the engine's to apply.
-    let binding = host.join(".kbw.toml");
+    // A selection that `.kb.toml` declares is the engine's to apply.
+    let binding = host.join(".kb.toml");
     write(
         &binding,
         "schema = 1\nrepo = \"mobile\"\nselection = \"latest\"\n",
@@ -880,17 +879,15 @@ fn shipped_hook_reads_the_approved_tip_for_a_separate_checkout_without_a_pin() {
     let sb = Sandbox::new();
     let (origin, first) = prefix_remote(&sb);
     let host = prefix_host(&sb);
-    let kb = host.join(".kb");
     // A KB clone that the host neither tracks nor pins.
     sb.git(&host, &["clone", "-q", &origin, ".kb"]);
     write(&host.join(".git/info/exclude"), ".kb/\n");
-    fs::hard_link(common::kb_bin(), kb.join("kbw")).unwrap();
     let commit = |message: &str| hook_commit(&sb, &host, message, &[]);
     assert_committed(&commit("chore: synthetic change"));
     assert_rejected(&commit("feat: synthetic change"), "VALIDATION_FAILED");
-    // A `.kbw.toml` pin is a host pin too.
+    // A `.kb.toml` pin is a host pin too.
     write(
-        &host.join(".kbw.toml"),
+        &host.join(".kb.toml"),
         &format!("schema = 1\nrepo = \"mobile\"\npin = \"{first}\"\n"),
     );
     assert_committed(&commit("feat: synthetic pinned change"));

@@ -1,6 +1,6 @@
 ## Code, knowledge and tools (kb)
 
-Use the {{project_name}} KB at `{{kb_path}}` through `{{kb_path}}/kbw` for code lookups,
+Use the {{project_name}} KB at `{{kb_path}}` through `{{kb}}` for code lookups,
 feature documentation, obligations and checks, instead of choosing between grep, file
 search and code-graph tools. Skills: `{{agents_skill_path}}` (commands and answers),
 `{{skills_dir}}/kb-change/SKILL.md` (changing code), `{{skills_dir}}/kb-review/SKILL.md`,
@@ -8,14 +8,14 @@ search and code-graph tools. Skills: `{{agents_skill_path}}` (commands and answe
 matches the selected snapshot; if that proof fails, use full current context and repair the
 integration before reusing the core.
 {{core_lines}}
-Locate code with `{{kb_path}}/kbw sym`, `{{kb_path}}/kbw callers`, `{{kb_path}}/kbw impact <symbol>{{snapshot_arg}}` and `{{kb_path}}/kbw find`. Before the
-first edit, read `{{kb_path}}/kbw doc <path>{{snapshot_arg}}` and request
+Locate code with `{{kb}} sym`, `{{kb}} callers`, `{{kb}} impact <symbol>{{snapshot_arg}}` and `{{kb}} find`. Before the
+first edit, read `{{kb}} doc <path>{{snapshot_arg}}` and request
 
-    {{kb_path}}/kbw context --intent implement --task "<task>" --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
+    {{kb}} context --intent implement --task "<task>" --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}
 
 (`--intent review --changed --base <target>` for a review). Apply all mandatory knowledge;
-resolve missing scope and conflicts. Before finishing, run `{{kb_path}}/kbw check --base <target>{{snapshot_arg}}` and
-`{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}`; update the
+resolve missing scope and conflicts. Before finishing, run `{{kb}} check --base <target>{{snapshot_arg}}` and
+`{{kb}} impact --base <target> --working-tree{{snapshot_arg}}`; update the
 documentation in the same change when behavior changed. Answers are bounded and name their
 source; acceptance of knowledge requires review and merge into the approved ref.
 
@@ -23,4 +23,4 @@ After compaction, hand-off or a new session request full context again. Only use
 receipt after reading its source above; stale or missing installation evidence must be
 repaired.
 
-Managed by `{{kb_path}}/kbw integrate`; edit the KB and regenerate instead of this block.
+Managed by `{{kb}} integrate`; edit the KB and regenerate instead of this block.

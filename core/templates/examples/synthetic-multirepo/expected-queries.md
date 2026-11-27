@@ -1,6 +1,6 @@
 # Expected context queries (SYNTHETIC example)
 
-Run these from the root of a KB initialized with `./kbw init --example synthetic-multirepo
+Run these from the root of a KB initialized with `kb init --example synthetic-multirepo
 --apply`. Add `--offline --snapshot working-tree` when the example is not yet on the approved
 ref (see README.md). The mandatory ids below follow from scope alone (AND across dimensions,
 OR within one) and are checked by `project/routing-tests/*.toml`; supplementary records may
@@ -11,7 +11,7 @@ even though their own scope does not apply to the task.
 ## 1. Mobile token refresh (cross-repository contract)
 
 ```sh
-./kbw context --intent implement --task "Retry the token refresh after a network error" \
+kb context --intent implement --task "Retry the token refresh after a network error" \
   --repo mobile --path mobile:app/auth/TokenRefresher.kt
 ```
 
@@ -30,7 +30,7 @@ even though their own scope does not apply to the task.
 ## 2. Weak wording in the same module
 
 ```sh
-./kbw context --intent refactor --task "rename a local variable" \
+kb context --intent refactor --task "rename a local variable" \
   --repo mobile --path mobile:app/auth/SessionStore.kt
 ```
 
@@ -40,7 +40,7 @@ even though their own scope does not apply to the task.
 ## 3. "Композиция" with a UI path
 
 ```sh
-./kbw context --intent implement --task "Исправить композицию экрана профиля" \
+kb context --intent implement --task "Исправить композицию экрана профиля" \
   --repo mobile --path mobile:app/ui/ProfileScreen.kt
 ```
 
@@ -52,7 +52,7 @@ even though their own scope does not apply to the task.
 ## 4. "Композиция" without a path
 
 ```sh
-./kbw context --intent explain --task "Как устроена композиция?" --repo mobile
+kb context --intent explain --task "Как устроена композиция?" --repo mobile
 ```
 
 * Mandatory: `example.common.code-review` only.
@@ -64,7 +64,7 @@ even though their own scope does not apply to the task.
 ## 5. Backend payment code (override and known gap)
 
 ```sh
-./kbw context --intent implement --task "Add a retry to the charge call" \
+kb context --intent implement --task "Add a retry to the charge call" \
   --repo backend --path backend:src/payments/ChargeService.kt
 ```
 
@@ -80,7 +80,7 @@ even though their own scope does not apply to the task.
 ## 6. Backend domain refactoring
 
 ```sh
-./kbw context --intent refactor --task "Split the order aggregate into smaller services" \
+kb context --intent refactor --task "Split the order aggregate into smaller services" \
   --repo backend --path backend:src/domain/order/OrderAggregate.kt
 ```
 
@@ -91,7 +91,7 @@ even though their own scope does not apply to the task.
 ## 7. Shared schema change
 
 ```sh
-./kbw context --intent implement --task "Add a retry-after field to the error envelope" \
+kb context --intent implement --task "Add a retry-after field to the error envelope" \
   --repo shared-contracts --path shared-contracts:schemas/errors/envelope.json
 ```
 
@@ -100,8 +100,8 @@ even though their own scope does not apply to the task.
 ## Other commands
 
 ```sh
-./kbw show example.contract.payment-intent            # full record, authoritative text
-./kbw show example.reference.auth-overview --section sequence
-./kbw search "идемпотентность"                        # search is not a substitute for context
-./kbw validate                                        # includes the routing tests above
+kb show example.contract.payment-intent            # full record, authoritative text
+kb show example.reference.auth-overview --section sequence
+kb search "идемпотентность"                        # search is not a substitute for context
+kb validate                                        # includes the routing tests above
 ```

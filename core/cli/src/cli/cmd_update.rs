@@ -4,7 +4,7 @@ use super::Ctx;
 use super::args::{UpdateCommand, UpdateSourceArgs};
 use crate::error::{KbError, Result};
 use crate::output::{CommandOutput, Format};
-use crate::update::{self, KbwRunner, UpstreamSource};
+use crate::update::{self, KbRunner, UpstreamSource};
 
 pub fn run(ctx: &Ctx, cmd: &UpdateCommand) -> Result<CommandOutput> {
     let human = ctx.format == Format::Human;
@@ -19,7 +19,7 @@ pub fn run(ctx: &Ctx, cmd: &UpdateCommand) -> Result<CommandOutput> {
             )
         }
         UpdateCommand::Prepare(a) => {
-            let runner = KbwRunner::new(&ctx.env.kb_root);
+            let runner = KbRunner::new(&ctx.env.kb_root);
             let report = update::prepare(
                 &ctx.env,
                 &ctx.location()?,

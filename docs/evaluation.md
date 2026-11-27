@@ -7,10 +7,10 @@ source-evidence results separate from held-out replay outcomes.
 ## Tier A: routing
 
 ```sh
-./kbw eval routing --json
-./kbw eval routing --profile maintainer --json
-./kbw eval routing --example synthetic-multirepo --json
-./kbw eval routing --context-format terse --json
+kb eval routing --json
+kb eval routing --profile maintainer --json
+kb eval routing --example synthetic-multirepo --json
+kb eval routing --context-format terse --json
 ```
 
 Ordinary evaluation uses the same validated corpus and schema-1 routing fixtures as
@@ -50,9 +50,9 @@ not factual correctness, runtime behavior or instruction compliance.
 ## Tier A: history
 
 ```sh
-./kbw eval history --host /synthetic/host --repo mobile \
+kb eval history --host /synthetic/host --repo mobile \
   --snapshot working-tree --offline --range BASE..HEAD --json
-./kbw eval history --host /synthetic/host --repo mobile \
+kb eval history --host /synthetic/host --repo mobile \
   --snapshot KB_SHA --offline --range BASE..HEAD --as-of \
   --labels merged-descriptions.json --check --json
 ```

@@ -20,15 +20,10 @@ pub fn supports_document_schema(version: u32) -> bool {
     (OLDEST_READABLE_DOCUMENT_SCHEMA..=DOCUMENT_SCHEMA).contains(&version)
 }
 
-/// Engine fingerprint the launcher passed to this build (`KBW_BUILD_FINGERPRINT`, set by
-/// `kbw` for source builds), or "unknown" for a build made outside the launcher. As an
-/// `option_env!` it is a tracked build input: cargo recompiles the engine whenever the
-/// launcher's fingerprint changes, even when source mtimes look fresh, and `kbw` accepts a
-/// binary as the runtime of a fingerprint only if `kb --json version` reports it.
-pub const BUILD_FINGERPRINT: &str = match option_env!("KBW_BUILD_FINGERPRINT") {
-    Some(fp) if !fp.is_empty() => fp,
-    _ => "unknown",
-};
+/// Engine fingerprint of the sources this binary was built from, computed by `build.rs`
+/// (`launcher::fingerprint`), or "unknown" for a build outside a full checkout. `kb` runs a
+/// binary as the engine of a checkout only when it reports that checkout's fingerprint.
+pub const BUILD_FINGERPRINT: &str = env!("KB_BUILD_FINGERPRINT");
 
 /// Path of the manifest relative to the KB root.
 pub const MANIFEST_PATH: &str = "core/release.toml";
@@ -123,7 +118,7 @@ pub struct CompiledVersions {
     pub index_schema: u32,
     pub skill_protocol: u32,
     pub parser_version: u32,
-    /// The launcher fingerprint of the engine inputs this binary was built from.
+    /// The engine fingerprint of the sources this binary was built from (`build.rs`).
     pub build_fingerprint: &'static str,
 }
 
@@ -156,7 +151,7 @@ pub fn check_runtime(local: &ReleaseManifest) -> Result<()> {
     .with_details(json!({
         "mismatches": mm.iter().map(|(f, m, r)| json!({"field": f, "manifest": m, "runtime": r})).collect::<Vec<_>>()
     }))
-    .with_hint("run kb through the project launcher (./kbw), which runs the runtime built for this checkout's engine; kbw never builds implicitly: a missing runtime is reported as KBW_RUNTIME_NOT_BOOTSTRAPPED and is created explicitly with `./kbw --kbw-bootstrap` or `./kbw --kbw-install-artifact`"))
+    .with_hint("run the checkout through plain `kb`, which selects the engine built from the checkout's own engine sources (`kb engine info` shows which runtime serves it); normal commands never build implicitly: a missing runtime is reported as RUNTIME_NOT_BOOTSTRAPPED and is created explicitly with `kb engine install` or `kb engine bootstrap`"))
 }
 
 /// Verify that a snapshot's manifest is served by the running engine. Any difference in
@@ -179,7 +174,7 @@ pub fn check_snapshot_compat(snapshot: &ReleaseManifest, revision: &str) -> Resu
         "revision": revision,
         "mismatches": mm.iter().map(|(f, m, r)| json!({"field": f, "snapshot": m, "runtime": r})).collect::<Vec<_>>()
     }))
-    .with_hint("update the KB checkout to that revision through review, then bootstrap its engine explicitly with `./kbw --kbw-bootstrap` or `./kbw --kbw-install-artifact` (kbw never builds implicitly), or select --snapshot pinned"))
+    .with_hint("update the KB checkout to that revision through review, then get the runtime of its engine explicitly with `kb engine install` or `kb engine bootstrap` (kb never builds implicitly), or select --snapshot pinned"))
 }
 
 #[cfg(test)]
@@ -237,8 +232,8 @@ mod tests {
         ];
         for err in errors {
             let hint = err.hint.unwrap();
-            assert!(hint.contains("./kbw --kbw-bootstrap"), "{hint}");
-            assert!(hint.contains("never builds implicitly"), "{hint}");
+            assert!(hint.contains("kb engine bootstrap"), "{hint}");
+            assert!(hint.contains("never build"), "{hint}");
         }
     }
 

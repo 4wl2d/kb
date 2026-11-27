@@ -157,6 +157,39 @@ pub fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
     })
 }
 
+/// `std::fs::canonicalize` without the Windows verbatim prefix (`\\?\C:\...` becomes
+/// `C:\...`, `\\?\UNC\server\share` becomes `\\server\share`) when the shorter form names
+/// the same path, so canonical paths can be shown, compared and passed to other programs
+/// (Git rejects verbatim paths). Elsewhere it is `canonicalize` unchanged.
+pub fn canonicalize(p: &Path) -> std::io::Result<PathBuf> {
+    let c = p.canonicalize()?;
+    #[cfg(windows)]
+    {
+        let s = c.to_string_lossy();
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return Ok(PathBuf::from(format!(r"\\{rest}")));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\")
+            && rest.as_bytes().get(1) == Some(&b':')
+            && rest.len() < 260
+        {
+            return Ok(PathBuf::from(rest));
+        }
+    }
+    Ok(c)
+}
+
+/// [`canonicalize`] as a method on paths.
+pub trait PathExt {
+    fn canonical(&self) -> std::io::Result<PathBuf>;
+}
+
+impl PathExt for Path {
+    fn canonical(&self) -> std::io::Result<PathBuf> {
+        canonicalize(self)
+    }
+}
+
 pub(crate) fn unique_suffix() -> u64 {
     use std::sync::atomic::{AtomicU64, Ordering};
     static N: AtomicU64 = AtomicU64::new(0);

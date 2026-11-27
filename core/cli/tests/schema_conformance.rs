@@ -140,7 +140,7 @@ fn committed_schemas_match_the_model() {
     let drift = schema_export::check(&common::repo_root()).unwrap();
     assert!(
         drift.is_empty(),
-        "core/schemas is out of date (run `kbw schema --write`): {drift:#?}"
+        "core/schemas is out of date (run `kb schema --write`): {drift:#?}"
     );
 }
 

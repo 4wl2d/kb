@@ -1,17 +1,17 @@
-# Upstream CI for the kb engine: formatting, lints, tests, the launcher and the checks a
-# clean upstream checkout must pass. The job only reads the repository (contents: read) and
-# needs no secrets. Enabling Actions and making the `ci` job required for merging are
-# repository settings an administrator configures; this file does not enforce them. `ci`
-# passes only when every platform job passed, so a runner image can change without touching
-# the required checks.
+# Upstream CI for the kb engine on Linux, macOS and Windows: formatting, lints, tests, the kb
+# command and its installers, and the checks a clean upstream checkout must pass. The job only
+# reads the repository (contents: read) and needs no secrets. Enabling Actions and making the
+# `ci` job required for merging are repository settings an administrator configures; this file
+# does not enforce them. `ci` passes only when every platform job passed, so a runner image can
+# change without touching the required checks.
 #
 # Downstream opt-out: every downstream fork inherits this engine-owned file (core/release.toml
 # engine_paths), and editing or deleting it is reported as engine divergence by
-# `kbw update divergence`. To skip this CI in a downstream without touching the file, set
+# `kb update divergence`. To skip this CI in a downstream without touching the file, set
 # the repository variable KB_ENGINE_CI to `disabled` (Settings > Secrets and variables >
 # Actions > Variables, or `gh variable set KB_ENGINE_CI --body disabled`); the job is then
 # reported as skipped. Any other value, or no variable, runs it. The downstream's own
-# knowledge CI (.github/workflows/kb-knowledge.yml, installed by `kbw init`) is separate
+# knowledge CI (.github/workflows/kb-knowledge.yml, installed by `kb init`) is separate
 # and not affected.
 name: upstream-ci
 
@@ -39,15 +39,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu-latest is x86_64 Linux; macos-15 is arm64 macOS (macos-14 runners are retired).
-        os: [ubuntu-latest, macos-15]
+        # ubuntu-latest is x86_64 Linux; macos-15 is arm64 macOS (macos-14 runners are retired);
+        # windows-latest is x86_64 Windows, where kb runs natively (no POSIX shell needed).
+        os: [ubuntu-latest, macos-15, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 75
+    defaults:
+      run:
+        # CI glue only; the steps that prove kb itself on Windows use PowerShell and cmd.
+        shell: bash
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: "1"
-      # Let the launcher's source bootstrap reuse the workspace build cache.
-      KBW_CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      # Let `kb engine bootstrap|package` reuse the workspace build cache.
+      KB_CARGO_TARGET_DIR: ${{ github.workspace }}/target
     steps:
       - uses: actions/checkout@v7
         with:
@@ -68,9 +73,10 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Tests
-        run: cargo test --workspace --locked
+        # --no-fail-fast runs every test binary, so one run reports all failing tests.
+        run: cargo test --workspace --locked --no-fail-fast
 
-      - name: Shellcheck the launcher
+      - name: Shellcheck the installer, the kbw forwarder and the CI glue
         if: runner.os == 'Linux'
         run: |
           if ! command -v shellcheck >/dev/null 2>&1; then
@@ -78,24 +84,82 @@ jobs:
             sudo apt-get install -y shellcheck
           fi
           shellcheck --version
-          shellcheck kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
+          shellcheck install.sh kbw core/templates/ci/*.sh core/templates/ci/hooks/commit-msg
 
-      - name: Launcher source bootstrap
+      - name: Build the kb command from this checkout
         run: |
-          ./kbw --kbw-bootstrap
-          ./kbw --kbw-runtime-info
-          ./kbw version
+          cargo build --release --locked -p kb
+          echo "$GITHUB_WORKSPACE/target/release" >> "$GITHUB_PATH"
+
+      - name: kb serves this checkout itself (engine selection)
+        run: |
+          kb engine info
+          kb version
+
+      - name: kb from cmd (Windows)
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          kb --version || exit /b 1
+          kb engine info || exit /b 1
+          kb --json version || exit /b 1
 
       - name: Schema drift check
-        run: ./kbw schema --check
+        run: kb schema --check
 
       - name: Validate templates and the maintainer profile
-        run: ./kbw validate --profile maintainer --templates
+        run: kb validate --profile maintainer --templates
 
       - name: Tier A routing on maintainer and synthetic corpora
         run: |
-          ./kbw eval routing --profile maintainer --json
-          ./kbw eval routing --example synthetic-multirepo --json
+          kb eval routing --profile maintainer --json
+          kb eval routing --example synthetic-multirepo --json
+
+      - name: Package a release archive of this checkout
+        # A local stand-in for a GitHub release: download/v<version>/ and latest/download/
+        # with the archive and SHA256SUMS, read through KB_RELEASES_URL.
+        run: |
+          set -eu
+          version=$(sed -n 's/^engine_version[[:space:]]*=[[:space:]]*"\([^"]*\)".*$/\1/p' core/release.toml)
+          kb engine package "$RUNNER_TEMP/dist"
+          for dir in "download/v$version" latest/download; do
+            mkdir -p "$RUNNER_TEMP/releases/$dir"
+            cp "$RUNNER_TEMP"/dist/kb-*.tar.gz "$RUNNER_TEMP/releases/$dir/"
+            (cd "$RUNNER_TEMP/releases/$dir" && for f in kb-*.tar.gz; do
+              if command -v sha256sum >/dev/null 2>&1; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+            done > SHA256SUMS && cat SHA256SUMS)
+          done
+
+      - name: Install with install.sh, then kb self update and kb engine install (macOS, Linux)
+        if: runner.os != 'Windows'
+        env:
+          KB_RELEASES_URL: ${{ runner.temp }}/releases
+          KB_RUNTIME_DIR: ${{ runner.temp }}/kb-runtime
+        run: |
+          set -eu
+          sh install.sh --dir "$RUNNER_TEMP/kb-bin"
+          installed="$RUNNER_TEMP/kb-bin/kb"
+          "$installed" --version
+          "$installed" self update --check
+          "$installed" self update --force
+          "$installed" --version
+          "$installed" engine install
+          "$installed" engine info
+
+      - name: Install with install.ps1, then kb self update and kb engine install (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          KB_RELEASES_URL: ${{ runner.temp }}\releases
+          KB_RUNTIME_DIR: ${{ runner.temp }}\kb-runtime
+        run: |
+          $ErrorActionPreference = 'Stop'
+          .\install.ps1 -Dir "$env:RUNNER_TEMP\kb-bin" -NoPathUpdate
+          $installed = "$env:RUNNER_TEMP\kb-bin\kb.exe"
+          foreach ($args_ in @(@('--version'), @('self', 'update', '--check'), @('self', 'update', '--force'), @('--version'), @('engine', 'install'), @('engine', 'info'))) {
+            & $installed @args_
+            if ($LASTEXITCODE -ne 0) { throw "kb $($args_ -join ' ') exited with $LASTEXITCODE" }
+          }
 
       - name: Benchmark smoke run
         # A small, fast run of the benchmark harness; it reports measurements but has no
@@ -103,6 +167,8 @@ jobs:
         run: cargo run -p kb-bench --release --locked -- smoke
 
       # The replay steps run last, so a host that cannot sandbox does not skip the checks above.
+      # Replay isolation uses Seatbelt (macOS) or bubblewrap (Linux); it is not available on
+      # Windows.
       - name: Install the Linux replay isolation backend
         if: runner.os == 'Linux'
         # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor
@@ -130,6 +196,7 @@ jobs:
           fi
 
       - name: Replay isolation smoke (synthetic, offline, no model credentials)
+        if: runner.os != 'Windows'
         run: cargo test -p kb-eval --locked --test replay_workflow -- --ignored
 
   ci:

@@ -18,15 +18,15 @@ are shortened to `<...>`.
 
 | repository | contains | changed by |
 |---|---|---|
-| upstream kb | engine (`kbw`, `core/`, Cargo files), schemas, migrations, templates, skills, docs, release machinery; no project data | upstream maintainers |
-| downstream KB (one per product) | the upstream history and engine **plus** `project/` (knowledge, registries, routing tests, skill settings, tool registry) | knowledge through reviewed merge requests; engine only through `kbw update` |
+| upstream kb | engine (`core/`, Cargo files, installers), schemas, migrations, templates, skills, docs, release machinery; no project data | upstream maintainers |
+| downstream KB (one per product) | the upstream history and engine **plus** `project/` (knowledge, registries, routing tests, skill settings, tool registry) | knowledge through reviewed merge requests; engine only through `kb update` |
 | host repositories (mobile, backend, libraries, ...) | code; the KB mounted at `.kb` (or a separate checkout); generated skill files and instruction blocks | normal code review |
 
-Engine-owned paths are listed in `core/release.toml` (`engine_paths`: `kbw`, Cargo files,
+Engine-owned paths are listed in `core/release.toml` (`engine_paths`: the installers, `kbw`, Cargo files,
 `rust-toolchain.toml`, `core`, `docs`, `README.md`, `BOOTSTRAP.md`, `AGENTS.md`,
 `CONTRIBUTING.md`, `SECURITY.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore` and the two
 upstream workflows). Project-owned: `project/`. Edits to engine paths in the downstream are
-reported by `./kbw update divergence` (`ENGINE_DIVERGED`, exit 43) unless declared as
+reported by `kb update divergence` (`ENGINE_DIVERGED`, exit 43) unless declared as
 `[[engine_patches]]` with a reason in `project/upstream.toml`. Put project documents in
 `project/` or in paths outside `engine_paths`. The downstream security policy is one of
 them: render `core/templates/security/SECURITY.md.tmpl` to `.github/SECURITY.md` (outside
@@ -38,8 +38,8 @@ hosts, link `.github/SECURITY.md` from your own documentation.
 ## 2. Create the downstream
 
 Create one repository per product that keeps the upstream history (a platform fork or a
-private copy). Do not squash or re-initialize the history: `kbw update prepare` merges
-upstream commits and `kbw update divergence` compares against the upstream commit recorded
+private copy). Do not squash or re-initialize the history: `kb update prepare` merges
+upstream commits and `kb update divergence` compares against the upstream commit recorded
 in `project/upstream.toml`.
 
 ```sh
@@ -50,16 +50,16 @@ git push -u origin main          # publish the product repository with the full 
 ```
 
 `origin` must be the product repository: it is the approved source that every knowledge
-query checks. The `upstream` remote is only a convenience; `kbw update` takes the upstream
+query checks. The `upstream` remote is only a convenience; `kb update` takes the upstream
 URL explicitly.
 
 ## 3. Initialize and adapt
 
 ```sh
-./kbw --kbw-bootstrap                                                    # explicit runtime build
+kb engine info                       # which engine serves the checkout; see "Moving from kbw to kb"
 git switch -c feature/kb-init
-./kbw init --name "<Product>" --namespace <ns> --upstream-url <upstream-url>          # dry-run
-./kbw init --name "<Product>" --namespace <ns> --upstream-url <upstream-url> --apply
+kb init --name "<Product>" --namespace <ns> --upstream-url <upstream-url>          # dry-run
+kb init --name "<Product>" --namespace <ns> --upstream-url <upstream-url> --apply
 git add project .github/workflows/kb-knowledge.yml .github/pull_request_template.md .gitlab
 git commit -m "Initialize the project knowledge base"
 ```
@@ -79,18 +79,18 @@ review; initialization never manufactures accepted domain knowledge.
 
 Init also writes `project/tools.toml`, the tool registry
 ([agent-cli.md](agent-cli.md#tool-registry)): which code tools answer `sym`, `callers`,
-`impact <symbol>` and `find`, and which checks `kbw check` runs for changed files. A KB that
+`impact <symbol>` and `find`, and which checks `kb check` runs for changed files. A KB that
 describes several repositories declares the checks per repository with repo-qualified
 globs, for example `paths = ["mobile:app/**/*.kt"]`; such a glob matches only in the host
 that the registry identifies as `mobile` (see the synthetic example's `tools.toml`). The
-file is trusted configuration and is reviewed like code: `kbw check` runs its argv exactly
+file is trusted configuration and is reviewed like code: `kb check` runs its argv exactly
 as written, without a shell, in the host repository.
 
 ## 4. Mount the KB in host repositories
 
 kb identifies the host repository through Git, never through folder names: the Git top
 level of the current directory (or `--host`), or the superproject when you run inside the
-KB submodule itself. The registry repo of the host comes from `.kbw.toml repo = "<id>"` or
+KB submodule itself. The registry repo of the host comes from `.kb.toml repo = "<id>"` or
 from matching the host's remote URLs against `remotes` in `project/registry/repos.toml`
 (scheme, credentials and a trailing `.git` are ignored). Linked worktrees of a host are
 supported.
@@ -101,24 +101,27 @@ supported.
 # in the host repository, on a branch
 git submodule add <your-git-host>/<org>/<kb-repo>.git .kb
 git commit -m "Mount the knowledge base at .kb"
-.kb/kbw --kbw-bootstrap           # once per clone and engine version; .kb/.cache is git-ignored
+kb engine info                # from anywhere in the host: the KB at .kb and the engine serving it
 ```
 
-Other developers run `git submodule update --init -- .kb` and `.kb/kbw --kbw-bootstrap`.
+Other developers install `kb` once (README.md, "Install and update") and run
+`git submodule update --init -- .kb`. When `kb engine info` reports the runtime as missing
+(the KB's engine differs from the installed `kb`), run `kb engine install` (the release of
+the KB's engine version) or `kb engine bootstrap` (a source build); both are explicit.
 The gitlink recorded in the host's `HEAD` is the **host pin**. kb reads it and never
 changes it: reading commands do not pull, merge, reset, check out or update submodules.
 
 ```text
-$ .kb/kbw context --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
+$ kb context --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
 snapshot: c0e732dff499 (latest, freshness=verified); approved=yes; ref=origin refs/heads/main; ...; latest=c0e732dff499; pin=c0e732dff499; ...
 host: repo=mobile (remote); head=319558f5b7ea; versions=mobile=2.3.0
 scope: repos=mobile; modules=mobile.auth; features=login; concepts=auth-token (alias `token refresh`)
 status: COMPLETE
 ```
 
-### 4.2 Separate checkout with `.kbw.toml`
+### 4.2 Separate checkout with `.kb.toml`
 
-Without a submodule, bind the host with an optional `.kbw.toml` in the host root (strict
+Without a submodule, bind the host with an optional `.kb.toml` in the host root (strict
 TOML; unknown fields are errors):
 
 ```toml
@@ -128,16 +131,17 @@ pin = "6a434be45089"      # KB revision this host is tested with (resolved in th
 selection = "pinned"      # default for --snapshot auto: auto | latest | pinned
 ```
 
-Run the KB's launcher from inside the host (`<kb-checkout>/kbw context ...`) or pass
-`--host <dir>`. The generated skill and instruction blocks tell agents to run
-`<kb_path>/kbw`, where `kb_path` is host-relative and may not contain `..`. If the checkout
-is not at that path, `kbw integrate` warns `KB_PATH_MISMATCH`. It also warns
-`BUNDLE_STALE` when the committed bundle differs from what `kbw integrate --generate`
+Run `kb --root <kb-checkout> ...` inside the host (or `KB_ROOT=<kb-checkout>`), or run kb in
+the checkout with `--host <dir>`. The generated skill and instruction blocks tell agents to
+run `kb --root <kb_path> ...` (plain `kb` when `kb_path` is `.kb`), where `kb_path` is
+host-relative and may not contain `..`. If the checkout
+is not at that path, `kb integrate` warns `KB_PATH_MISMATCH`. It also warns
+`BUNDLE_STALE` when the committed bundle differs from what `kb integrate --generate`
 renders now (it installs the committed, reviewed bundle; regenerate it through review) and
 `BUNDLE_UNVERIFIED` when the bundle cannot be re-rendered to check it (the message gives
 the cause). The simplest layout is a
 plain clone at `kb_path` inside the host, excluded from the host's Git (for example in
-`.git/info/exclude`), with the pin in `.kbw.toml`.
+`.git/info/exclude`), with the pin in `.kb.toml`.
 
 ### 4.3 Snapshot selection
 
@@ -147,14 +151,14 @@ to read:
 
 | `--snapshot` | reads | notes |
 |---|---|---|
-| `auto` (default) | `.kbw.toml selection` if set; else the approved tip, unless a host pin differs from it | a pin that differs from the tip → `UPDATE_REQUIRED` (exit 21) with both revisions |
+| `auto` (default) | `.kb.toml selection` if set; else the approved tip, unless a host pin differs from it | a pin that differs from the tip → `UPDATE_REQUIRED` (exit 21) with both revisions |
 | `latest` | the approved tip | the pin is still reported; never called "latest" itself |
-| `pinned` | the host pin (gitlink or `.kbw.toml pin`) | freshness is still verified; the tip is reported |
+| `pinned` | the host pin (gitlink or `.kb.toml pin`) | freshness is still verified; the tip is reported |
 | `<revision>` | that commit | not reachable from the approved tip → `approved=no`, at best `partial` |
 | `working-tree` | the KB working tree | never approved; at best `partial` |
 
 ```text
-$ .kb/kbw context --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
+$ kb context --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
 error[UPDATE_REQUIRED]: the host pins KB revision c0e732dff499 but the latest approved revision is 6a434be45089
   details: {"latest_approved":"6a434be4508908b10841c7f6f908bdd39e050373","pin":{"path":".kb","revision":"c0e732dff499c1d3a9d43db3ba81fa6acc6fa002","source":"submodule"}}
   hint: select --snapshot pinned to use the pinned knowledge (both revisions are reported), --snapshot latest to use the approved tip, or update the host pin through review
@@ -162,7 +166,7 @@ error[UPDATE_REQUIRED]: the host pins KB revision c0e732dff499 but the latest ap
 
 The `snapshot` setting of `project/skill-config/skill.toml` controls what agents pass:
 `latest` or `pinned` is written as `--snapshot` into every command the generated skill
-shows; `auto` (the default) writes nothing, so the host's `.kbw.toml selection` or the
+shows; `auto` (the default) writes nothing, so the host's `.kb.toml selection` or the
 `auto` rule decides.
 
 Host detection and selection rules in full: [snapshots-and-trust.md](snapshots-and-trust.md#selection).
@@ -170,11 +174,11 @@ Host detection and selection rules in full: [snapshots-and-trust.md](snapshots-a
 ## 5. Host integration and managed blocks
 
 The KB carries a committed skill bundle in `project/skill-config/generated/` (rendered by
-`./kbw integrate --generate --apply` from `core/skills/` and `skill.toml`). Each host
-installs it with the KB's launcher; dry-run is the default:
+`kb integrate --generate --apply` from `core/skills/` and `skill.toml`). Each host
+installs it with `kb integrate`; dry-run is the default:
 
 ```text
-$ .kb/kbw integrate --apply
+$ kb integrate --apply
 kb integrate (apply): host <...>/mobile
   create    .agents/skills/kb-change/SKILL.md
   create    .agents/skills/kb-document/SKILL.md
@@ -215,7 +219,7 @@ host integration written; review and commit it (including the lock)
 * Accepted unconditional product policies/invariants with `delivery = "always"` form a
   core capped at 600 estimated tokens. Native instruction/skill byte caps are enforced;
   nothing is truncated. Context reuses that core only with a verified installed receipt.
-* `.kb/kbw integrate --probe` checks installation and produces a challenge for a fresh
+* `kb integrate --probe` checks installation and produces a challenge for a fresh
   harness session. It does not run a model or claim runtime loading. Preserve actual
   version/response/tool-call evidence when executing a load probe.
 
@@ -229,8 +233,8 @@ Structural code answers need the code tool in each host checkout. With the defau
 registry, `sym`, `callers` and `impact <symbol>` use the host's live CodeGraph index and fall
 back to a lexical git grep when it is missing, which the answer reports. kb never creates
 the index: create it once per host checkout with `codegraph init --yes <host root>` and keep
-`.codegraph/` out of Git (for example in `.git/info/exclude`). `.kb/kbw tools` and
-`.kb/kbw doctor` (checks `tools` and `code-index`) show what this machine can answer.
+`.codegraph/` out of Git (for example in `.git/info/exclude`). `kb tools` and
+`kb doctor` (checks `tools` and `code-index`) show what this machine can answer.
 
 Instruction files and skills are text: they make the protocol available to agents but do
 not enforce it, and kb uses no undocumented harness hooks.
@@ -260,13 +264,13 @@ in [the CI guide](../core/templates/ci/README.md) before enabling these optional
 Host CI reads the pinned KB revision (`--snapshot pinned`) because `auto` returns
 `UPDATE_REQUIRED` whenever the approved tip is ahead of the pin, which is the normal state
 between merging knowledge and updating the pin. Freshness is still verified. The host CI
-templates therefore need a pin (a KB submodule gitlink or a `.kbw.toml` `pin`); a host that
+templates therefore need a pin (a KB submodule gitlink or a `.kb.toml` `pin`); a host that
 mounts a separate checkout without a pin changes `--snapshot` in its copy of the template.
 The commit-msg hook also works in a host without a pin and selects its snapshot as follows.
 
-When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kbw.toml`
+When `KB_SNAPSHOT` is set, the hook passes it as-is. Otherwise, if the host's `.kb.toml`
 declares `selection`, the hook passes `auto` and the engine applies that selection.
-Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kbw.toml`
+Otherwise, if the host pins the KB (a gitlink at the KB path in `HEAD`, or a `.kb.toml`
 `pin`), it passes `pinned`; otherwise it passes `auto`, the approved tip. `KB_OFFLINE=1`
 adds `--offline`. The hook honors `commit.cleanup`; when that is unset and `GIT_EDITOR` is
 exactly `:`, the hook cannot tell whether Git will strip comments, so it checks both the
@@ -295,7 +299,7 @@ change_id = "AUTH-42"
 | `change_id` | optional shared id, 1–128 characters on one line; `linked` needs `kb_revision` or `change_id` |
 | `applicable`, `not_applicable`, `applicability_reviewed` | optional human applicability labels used by history evaluation; no labels means unknown, not perfect coverage |
 
-`kbw impact --check` fails with `IMPACT_UNACKNOWLEDGED` (exit 44) when the diff touches
+`kb impact --check` fails with `IMPACT_UNACKNOWLEDGED` (exit 44) when the diff touches
 knowledge-linked files or files with unknown coverage and neither the pointer changes nor a
 valid block acknowledges it, when the block is malformed, and when it contradicts the diff
 (`none` with a pointer change, `included` without one while a KB submodule is known). It
@@ -303,13 +307,13 @@ checks presence and structure only; reviewers judge the reasoning. Unknown cover
 that no record is linked to a file, not that no knowledge is needed.
 
 ```text
-$ .kb/kbw impact --base main --snapshot pinned --check
+$ kb impact --base main --snapshot pinned --check
 snapshot: c0e732dff499 (pinned, freshness=verified); approved=yes; latest=6a434be45089; pin=c0e732dff499
 ...
 summary files=2 covered=1 unknown=1 affected=8 stale-anchors=0
 ...
 error[IMPACT_UNACKNOWLEDGED]: 8 affected record(s) and 1 file(s) with unknown coverage are not acknowledged: ...
-$ .kb/kbw impact --base main --snapshot pinned --check --statement mr.md
+$ kb impact --base main --snapshot pinned --check --statement mr.md
 check ok acknowledgement-required=true: acknowledged: linked KB change (change_id AUTH-42); the link itself is not verified
 ```
 
@@ -324,11 +328,11 @@ Knowledge is written together with the implementation, reviewed before it is acc
 published by merging into the approved ref. When code and knowledge change together:
 
 1. **Prepare knowledge.** In the KB (for example in the host's `.kb` checkout, on a new
-   branch), write draft records or edits with evidence, run `.kb/kbw validate`, and open the
+   branch), write draft records or edits with evidence, run `kb validate`, and open the
    KB merge request.
 2. **Test the code with that KB revision.** From the host:
-   `.kb/kbw context --include-proposals ...` (local KB changes as a labeled overlay, never
-   mandatory) or `.kb/kbw context --snapshot <kb-commit> ...` (that exact commit; reported as
+   `kb context --include-proposals ...` (local KB changes as a labeled overlay, never
+   mandatory) or `kb context --snapshot <kb-commit> ...` (that exact commit; reported as
    `approved=no` and at best `partial` until it is merged).
 3. **Open the host merge request** with `kb_change = "linked"` and a `change_id` shared by
    both merge requests (or the KB commit as `kb_revision` once it exists).
@@ -361,14 +365,14 @@ These are different operations in the same downstream:
 | | routine sync of the project origin | upstream upgrade |
 |---|---|---|
 | what moves | knowledge merged into the product KB's approved ref | engine, schemas, migrations, templates, skills from upstream |
-| how | automatic per-call freshness; `kbw sync` to inspect; pin updates in hosts through review | `kbw update check` → `update prepare` → review → merge |
+| how | automatic per-call freshness; `kb sync` to inspect; pin updates in hosts through review | `kb update check` → `update prepare` → review → merge |
 | writes | only kb's isolated mirror cache | `prepare` only: the ref `refs/kb/upstream/<ref>`, a `kb-update/<ref>` branch and a worktree under `.cache/update/` |
 
-`kbw sync` fetches the approved ref and reports the tip, the local KB checkout and the host
+`kb sync` fetches the approved ref and reports the tip, the local KB checkout and the host
 pin; it modifies nothing else:
 
 ```text
-$ .kb/kbw sync
+$ kb sync
 kb sync: refs/heads/main on origin (<...>/kb-demo-origin.git)
   freshness:      verified (fetched now)
   approved tip:   6a434be45089 (unchanged)
@@ -382,15 +386,15 @@ kb sync: refs/heads/main on origin (<...>/kb-demo-origin.git)
 Upstream upgrades run in the KB checkout:
 
 ```sh
-./kbw update check --upstream <upstream-url> --ref <tag-or-commit>     # read-only prediction
-./kbw update prepare --upstream <upstream-url> --ref <tag-or-commit>   # reviewable branch
-./kbw update divergence                                                # engine drift report
-./kbw update abandon kb-update/<ref>                                   # dry-run: what would be removed
-./kbw update abandon kb-update/<ref> --apply                           # discard a prepared update
+kb update check --upstream <upstream-url> --ref <tag-or-commit>     # read-only prediction
+kb update prepare --upstream <upstream-url> --ref <tag-or-commit>   # reviewable branch
+kb update divergence                                                # engine drift report
+kb update abandon kb-update/<ref>                                   # dry-run: what would be removed
+kb update abandon kb-update/<ref> --apply                           # discard a prepared update
 ```
 
 ```text
-$ ./kbw update check --upstream <...>/upstream --ref v0.1.1
+$ kb update check --upstream <...>/upstream --ref v0.1.1
 update check: upstream v0.1.1 = 323c06a5ab5e (from <...>/upstream)
   versions: unchanged
   schema: project [1] -> target 1 (migrates from [0])
@@ -403,8 +407,9 @@ update check: upstream v0.1.1 = 323c06a5ab5e (from <...>/upstream)
   `UNSUPPORTED_SCHEMA_VERSION` (13); predicted conflicts → `UPDATE_CONFLICT` (51).
 * `prepare` creates the branch `kb-update/<ref>` (or `--branch kb-update/<name>`) in a linked
   worktree under `.cache/update/`, merges the upstream commit with hooks disabled, then runs
-  the target engine there: explicit `kbw --kbw-bootstrap` (a source build), `migrate
-  --apply`, `integrate --generate --apply`, `validate`; it records the new base in
+  the target engine there (this `kb` with the worktree as root, so engine selection runs
+  the worktree's engine): explicit `kb engine bootstrap` (a source build only when no runtime
+  serves its fingerprint yet), `migrate --apply`, `integrate --generate --apply`, `validate`; it records the new base in
   `project/upstream.toml` and commits. The main checkout (HEAD, index, work tree, other
   branches, runtime) is not modified and nothing is pushed. Conflicts stop with
   `UPDATE_CONFLICT` and leave the worktree for manual resolution; kb never resolves
@@ -428,7 +433,7 @@ For this upgrade, document schema 1 → 2 changes only the declarations and pres
 kind, status, comments, body and existing facts. Skill protocol changes to 3 (schema 2
 raised it to 2, the agent CLI of [ADR 0016](adr/0016-agent-cli.md) to 3), index schema to 2
 and parser version to 6. `update prepare` runs the adjacent migration and regeneration in
-its review worktree; a manual migration remains previewable with `./kbw migrate` before
+its review worktree; a manual migration remains previewable with `kb migrate` before
 `--apply`. Host-binding, routing and skill-config schema numbers remain independently 1.
 New engine templates do not overwrite an existing downstream's `project/` or host CI.
 After the mechanical update, copy/adapt CI/MR templates, re-run adaptation v2 in re-run mode
@@ -443,13 +448,15 @@ and the regenerated skill together. After it is merged, hosts still pin older KB
   the engine version or a contract version, `--snapshot latest` with the host's older
   engine returns `UPDATE_REQUIRED` too: kb reads `core/release.toml` of a snapshot before
   interpreting it and refuses a different engine version, document schema, index schema or
-  protocol. `--snapshot pinned` keeps working. `kbw doctor` shows this in advance: its
+  protocol. `--snapshot pinned` keeps working. `kb doctor` shows this in advance: its
   `snapshot-engine` check reads `core/release.toml` of the approved tip and of the host pin
   and fails when the revision `--snapshot auto` would read needs another engine.
 * Each host upgrades in its own reviewed pin update: move `.kb` to the new revision (as in
-  §7); if the update changed engine build inputs, run `.kb/kbw --kbw-bootstrap` (the engine
-  fingerprint changed, and `kbw` reports `KBW_RUNTIME_NOT_BOOTSTRAPPED` until you do); run
-  `.kb/kbw integrate --apply` for the regenerated skill; commit the pointer and the
+  §7); if the update changed engine build inputs, get a runtime for the new engine with
+  `kb engine install` or `kb engine bootstrap` (the engine fingerprint changed, and `kb`
+  reports `RUNTIME_NOT_BOOTSTRAPPED` until you do), or update the installed `kb` to that
+  release with `kb self update`; run
+  `kb integrate --apply` for the regenerated skill; commit the pointer and the
   integration files together. Host CI (`integrate --check`) catches a forgotten step.
 * Agents started with an older skill fail with `SKILL_OUTDATED` (exit 23) once the skill
   protocol changes; they must re-read the skill or start a new session, because changing a
@@ -458,9 +465,11 @@ and the regenerated skill together. After it is merged, hosts still pin older KB
   no new bootstrap.
 
 Instead of a source build, a runtime can be installed from a release archive built by the
-upstream release workflow: `.kb/kbw --kbw-install-artifact <archive-or-https-url> --sha256
-<hex>` (or `--sha256-file SHA256SUMS`). The digest is verified before extraction and the
-archive's `BUILD-INFO` must match this checkout's engine fingerprint and platform. No
+upstream release workflow: `kb engine install` takes the release of the checkout's
+`engine_version` (digest from its `SHA256SUMS`), `kb engine install <archive-or-https-url>
+--sha256 <hex>` (or `--sha256-file SHA256SUMS`) an explicit one. The digest is verified
+before extraction and the archive's `BUILD-INFO` must match this checkout's engine
+fingerprint and platform, so a downstream with engine patches needs a source build. No
 release has been published yet.
 
 ## 10. Offline and failure recovery
@@ -471,14 +480,14 @@ release has been published yet.
 | explicit `--offline` | `freshness=unverified`, completeness at best `partial`, exit 30 | uses the last fetched approved revision (mirror), else the KB checkout's remote-tracking ref; report it as unverified |
 | host pin differs from the tip | `UPDATE_REQUIRED` (21) | `--snapshot pinned` explicitly, or update the pin through review |
 | requested revision missing | `SNAPSHOT_NOT_FOUND` (22) | check the revision; fetch it into the KB checkout (for example `git -C .kb fetch origin <branch>`) |
-| no runtime for this engine | `kbw: error[KBW_RUNTIME_NOT_BOOTSTRAPPED]` (exit 50) | `kbw --kbw-bootstrap` (needs the pinned toolchain and the crates in `Cargo.lock`), or `--kbw-install-artifact` with a local archive path and its digest |
-| index cache damaged | warning `INDEX_RECOVERED`, query retried once | nothing; `kbw index --rebuild` if `INDEX_ERROR` (61) persists; `.cache/` is derived data |
+| no runtime for this engine | `RUNTIME_NOT_BOOTSTRAPPED` (exit 54) | `kb engine bootstrap` (needs the pinned toolchain and the crates in `Cargo.lock`), or `kb engine install <archive> --sha256 <hex>` with a local archive and its digest |
+| index cache damaged | warning `INDEX_RECOVERED`, query retried once | nothing; `kb index --rebuild` if `INDEX_ERROR` (61) persists; `.cache/` is derived data |
 | edited generated files | `CONFLICT` (45) / `DRIFT_DETECTED` (42) | move edits into `skill.toml` `notes`, regenerate, re-apply |
 
 More symptoms and fixes: [troubleshooting.md](troubleshooting.md#offline-recovery).
 
 ```text
-$ .kb/kbw context --offline --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
+$ kb context --offline --intent implement --task "Retry the token refresh" --path app/auth/TokenRefresher.kt
 snapshot: 6a434be45089 (latest, freshness=unverified); approved=yes; ...
 status: PARTIAL
 - [partial] FRESHNESS_UNVERIFIED: the approved ref was not checked against the remote in this call
@@ -486,10 +495,10 @@ error[CONTEXT_INCOMPLETE]: context is partial: FRESHNESS_UNVERIFIED
 ```
 
 Fetches run with `GIT_TERMINAL_PROMPT=0`, so credentials must come from a credential helper
-or an SSH agent. `kbw doctor` checks the environment, configuration, runtime, approved
+or an SSH agent. `kb doctor` checks the environment, configuration, runtime, approved
 source, host binding and pin, the engine compatibility of the approved tip and the pin
 (`snapshot-engine`), index, tool registry and CodeGraph index (`tools`, `code-index`),
-installed skill and engine divergence; `kbw doctor --online` also fetches the approved ref
+installed skill and engine divergence; `kb doctor --online` also fetches the approved ref
 (it cannot be combined with `--offline`). Failed bootstraps, installs and updates leave the
 previous runtime and the main checkout intact.
 
@@ -505,8 +514,37 @@ The shipped files report problems; they do not grant or enforce anything by them
 | KB repository | read access for every developer and every host CI job (keys or tokens as secrets, job-token allowlists) | every knowledge query and the host impact check fetch the KB |
 | KB repository | decide whether the inherited upstream workflows run in your fork: the repository variable `KB_ENGINE_CI` set to `disabled` skips the `upstream-ci.yml` job `check`; `KB_RELEASE` set to `disabled` skips every `release.yml` job (`verify`, `build`, `publish`), so a `v*` tag publishes nothing. Set them under Settings > Secrets and variables > Actions > Variables, or with `gh variable set KB_ENGINE_CI --body disabled` and `gh variable set KB_RELEASE --body disabled`; an unset variable or any other value keeps the workflows enabled | both files are engine-owned: editing or deleting them counts as engine divergence. The downstream's own `kb-knowledge` workflow is not affected |
 | KB repository | review `project/project.toml` (approved ref, `allowed_protocols`) like code | it is trusted configuration |
-| KB repository | review `project/tools.toml` like code | `kbw check` runs the argv written there wherever checks run |
+| KB repository | review `project/tools.toml` like code | `kb check` runs the argv written there wherever checks run |
 | KB repository | publish the security policy at `.github/SECURITY.md`, rendered from `core/templates/security/SECURITY.md.tmpl` with your contact | the root `SECURITY.md` is engine-owned and covers the engine only |
 | host repositories | make `kb-impact` a required check; allow CI to check out the KB submodule | files alone do not block merges or grant access |
 | host repositories | review pointer updates of `.kb` and changes to `.claude/`, `.agents/`, `AGENTS.md`, `CLAUDE.md`, `.kbw/` | these change what agents read |
 | upstream (maintainers) | Actions enabled, `contents: write` for the release job, protected `v*` tags | the release workflow publishes only after an owner pushes a tag |
+
+## Moving from kbw to kb
+
+The per-checkout launcher `kbw` is replaced by one installed `kb` command
+([ADR 0017](adr/0017-kb-command.md)). Knowledge is still read by the engine its checkout
+pins: `kb` selects the engine built from the checkout's own engine sources by their
+fingerprint, as `kbw` did.
+
+* **People.** Install `kb` once (README.md, "Install and update") and run `kb ...` where you
+  ran `./kbw ...` or `.kb/kbw ...`; from a host repository it finds the KB at `.kb` by
+  itself. Runtimes that `kbw` already built in `.cache/runtime/` are reused, so nothing is
+  rebuilt. The `--kbw-*` flags became `kb engine bootstrap|install|package|info|fingerprint`,
+  `KBW_*` variables became `KB_*`.
+* **Downstream KBs.** Take the engine with the next `kb update prepare` as usual. A kbw-era
+  engine runs that step itself: its runner calls `<worktree>/kbw`, which in the new engine
+  is the deprecated forwarder to `kb`, so `kb` must be installed on the machine that
+  prepares the update. Regenerate the skill bundle on the update branch (`prepare` does it)
+  and update the CI files the project installed from `core/templates/ci/` (they now install
+  `kb` with `core/templates/ci/install-kb.sh`).
+* **Host repositories.** After the pin update, run `kb integrate --apply` (the skills now
+  call `kb`, or `kb --root <kb_path>` when the KB is not mounted at `.kb`), rename
+  `.kbw.toml` to `.kb.toml` (the old name is still read when it is the only one; `kb doctor`
+  warns; both at once is `CONFIG_INVALID`), and replace host CI steps and hooks copied from
+  the templates. The integration state directory `.kbw/` keeps its name.
+* **Scripts and CI jobs** that still call `<kb>/kbw` keep working while `kb` is on PATH: the
+  forwarder runs `kb` for its checkout. It will be removed in a later release.
+* **A personal wrapper** named `kb` that ran `<checkout>/kbw` must be replaced by the real `kb`:
+  the forwarder detects the loop (`KBW_LOOP`), and the installers do not overwrite such a
+  wrapper without `--force`.

@@ -37,12 +37,12 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
           path: kb-source
-      - name: Verify the reviewed engine pin and bootstrap
+      - name: Verify the reviewed engine pin and install kb for it
         working-directory: kb-source
         run: |
           test "$(git rev-parse HEAD)" = "$KB_PIN"
-          rustup toolchain install
-          ./kbw --kbw-bootstrap
+          sh core/templates/ci/install-kb.sh . "$RUNNER_TEMP/kb-bin"
+          echo "$RUNNER_TEMP/kb-bin" >> "$GITHUB_PATH"
       - name: Export merged MR and all published review comments
         working-directory: host
         env:
@@ -50,7 +50,7 @@ jobs:
         run: |
           gh auth setup-git
           sh ../kb-source/core/templates/ci/export-merged-change.sh github "$KB_HOST_REPO_ID" "$PR_NUMBER" "$RUNNER_TEMP/change"
-          ../kb-source/kbw propose begin --host "$PWD" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$RUNNER_TEMP/change/export.json" --json > "$RUNNER_TEMP/work-order.json"
+          kb --root ../kb-source propose begin --host "$PWD" --repo "$KB_HOST_REPO_ID" --snapshot working-tree --offline --from-change "$RUNNER_TEMP/change/export.json" --json > "$RUNNER_TEMP/work-order.json"
       - name: Team configured agent produces drafts only
         env:
           KB_AGENT_KEY: ${{ secrets.KB_AGENT_KEY }}
@@ -109,9 +109,8 @@ jobs:
         working-directory: kb-source
         run: |
           test "$(git rev-parse HEAD)" = "$KB_PIN"
-          rustup toolchain install
-          ./kbw --kbw-bootstrap
-          sh core/templates/ci/submit-drafts.sh "$RUNNER_TEMP/drafts" "$GITHUB_WORKSPACE/host" "$KB_HOST_REPO_ID" "$RUNNER_TEMP/submission"
+          sh core/templates/ci/install-kb.sh . "$RUNNER_TEMP/kb-bin"
+          PATH="$RUNNER_TEMP/kb-bin:$PATH" sh core/templates/ci/submit-drafts.sh "$RUNNER_TEMP/drafts" "$GITHUB_WORKSPACE/host" "$KB_HOST_REPO_ID" "$RUNNER_TEMP/submission"
           cp core/templates/mr/kb_review.md "$RUNNER_TEMP/knowledge-mr.md"
       - name: Publish a draft for human review
         working-directory: kb-source

@@ -22,7 +22,7 @@ role = "Produces kb.cli.v1 envelopes and stable error codes"
 id = "skill"
 repo = "kb"
 modules = ["kb.integrate"]
-role = "Instructs agents how to call the launcher and interpret results"
+role = "Instructs agents how to call kb and interpret results"
 
 [[obligations]]
 id = "bump-protocol"

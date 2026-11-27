@@ -117,12 +117,20 @@ fn command_name(c: &Command) -> &'static str {
         Command::Update(_) => "update",
         Command::Schema(_) => "schema",
         Command::Version => "version",
+        Command::Engine(_) => "engine",
+        Command::SelfCmd(_) => "self",
     }
 }
 
 /// Entry point used by `main`. Returns the process exit code.
 pub fn run() -> i32 {
     let started = Instant::now();
+    // Knowledge is read by the engine its checkout pins: run that engine when it is not
+    // this binary.
+    let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
+    if let crate::launcher::Selected::Exit(code) = crate::launcher::select(&args) {
+        return code;
+    }
     let cli = match Cli::try_parse() {
         Ok(c) => c,
         Err(e) => return parse_failure(e),
@@ -163,7 +171,7 @@ fn parse_failure(e: clap::Error) -> i32 {
             // clap's rendering (with usage and suggestions) always goes to stderr.
             let _ = e.print();
             let err = KbError::new(ErrorCode::Usage, text.trim().to_string())
-                .with_hint("run `kbw <command> --help` for the accepted arguments");
+                .with_hint("run `kb <command> --help` for the accepted arguments");
             crate::output::emit_unparsed(command.as_deref(), json_mode, None, Some(&err))
         }
     }
@@ -183,6 +191,11 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
         );
         return Ok(CommandOutput::new(json!(v), text));
     }
+    match &cli.command {
+        Command::Engine(a) => return crate::launcher::engine::run(&cli.global, a),
+        Command::SelfCmd(a) => return crate::launcher::selfupdate::run(&cli.global, a),
+        _ => {}
+    }
     if let Some(p) = cli.global.skill_protocol
         && p != SKILL_PROTOCOL
     {
@@ -193,7 +206,11 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
             .with_details(json!({"caller": p, "engine": SKILL_PROTOCOL}))
             .with_hint("re-read the kb skill (SKILL.md) or start a new session so the updated instructions are loaded"));
     }
-    let env = Env::discover(cli.global.root.as_deref(), cli.global.quiet)?;
+    let env = Env::discover(
+        cli.global.root.as_deref(),
+        cli.global.host.as_deref(),
+        cli.global.quiet,
+    )?;
     check_runtime(&env.manifest)?;
     let ctx = Ctx {
         env,
@@ -232,6 +249,8 @@ fn dispatch(cli: Cli, format: Format) -> Result<CommandOutput> {
         Command::Migrate(a) => cmd_migrate::run(&ctx, a),
         Command::Update(a) => cmd_update::run(&ctx, a),
         Command::Schema(a) => cmd_schema::run(&ctx, a),
-        Command::Version => unreachable!("handled above"),
+        Command::Version | Command::Engine(_) | Command::SelfCmd(_) => {
+            unreachable!("handled above")
+        }
     }
 }

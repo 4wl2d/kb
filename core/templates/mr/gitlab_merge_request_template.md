@@ -14,7 +14,7 @@ mandatory id). `eval history` reports unlabeled precision as unknown.
 
 ## Knowledge base impact
 
-Fill in the machine-readable block below; CI (`kbw impact --check`) verifies that it is
+Fill in the machine-readable block below; CI (`kb impact --check`) verifies that it is
 present and well formed, and reviewers judge the reasoning. Keep it near the top of the
 description: GitLab truncates long descriptions in `CI_MERGE_REQUEST_DESCRIPTION`.
 
@@ -39,7 +39,7 @@ reason = ""
 
 - [ ] Knowledge proposal opened in the KB repository as `status = "draft"` records with
       evidence, or as changes to accepted records.
-- [ ] This code was tested against that KB revision (`kbw context --snapshot <revision>` or
+- [ ] This code was tested against that KB revision (`kb context --snapshot <revision>` or
       `--include-proposals`).
 - [ ] The KB merge request was reviewed and merged into the approved ref first.
 - [ ] The host pin (KB submodule pointer) is updated through review, in this or a follow-up

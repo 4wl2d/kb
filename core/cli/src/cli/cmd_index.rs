@@ -94,7 +94,7 @@ fn render(
     );
     let _ = writeln!(
         o,
-        "  diagnostics:  {} errors, {} warnings (run `kbw validate` for details)",
+        "  diagnostics:  {} errors, {} warnings (run `kb validate` for details)",
         b.errors, b.warnings
     );
     if b.collected > 0 {

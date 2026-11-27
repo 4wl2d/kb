@@ -10,6 +10,44 @@ schema, skill protocol) are independent integers in `core/release.toml`.
 First complete version of the upstream repository. No release has been published yet;
 the release workflow builds archives when an owner pushes a `v0.1.0` tag.
 
+### kb command (unreleased)
+
+One installed `kb` command replaces the per-checkout launcher `./kbw`
+([ADR 0017](docs/adr/0017-kb-command.md); supersedes ADR 0006, amends ADR 0001).
+
+- `kb` runs natively on macOS, Linux and Windows (PowerShell and cmd, no POSIX shell). It
+  finds the KB checkout (`--root`, `KB_ROOT`, else the nearest directory upwards that has
+  `core/release.toml` or mounts one at `.kb`), computes the checkout's engine fingerprint
+  (the kbw definition, CRLF hashed as LF, `core/cli/build.rs` as an input) and runs the
+  command in-process when it was built from those sources, otherwise the runtime of that
+  fingerprint from a per-user store (or one kbw built in `.cache/runtime/`). Every build
+  compiles its fingerprint in through `build.rs`; a stamp in `.cache/engine-stamp` keeps
+  warm starts free of hashing.
+- `kb engine info|fingerprint|bootstrap|install|package` replace the `--kbw-*` flags.
+  `engine install` without arguments takes the release archive of the checkout's engine
+  version and verifies it against that release's `SHA256SUMS`.
+- `kb self update [--version <v>] [--check] [--force]` replaces the installed binary after
+  verifying the release (digest, entries, `BUILD-INFO`, smoke run); on Windows the running
+  executable is renamed aside.
+- `install.sh` (macOS, Linux) and `install.ps1` (Windows) install `kb` from a GitHub release
+  and refuse to replace a foreign `kb` (a wrapper script) without `--force`.
+- Releases build `aarch64-apple-darwin`, `x86_64-unknown-linux-musl`,
+  `aarch64-unknown-linux-musl` and `x86_64-pc-windows-msvc` and verify each archive with its
+  installer and `kb self update`. Upstream CI adds `windows-latest` and runs the installers
+  and `kb self update` against locally packaged archives on every platform.
+- New protocol error codes (additive within `kb.cli.v1`): `RUNTIME_NOT_BOOTSTRAPPED` 54,
+  `BOOTSTRAP_FAILED` 55, `TOOLCHAIN_MISMATCH` 56, `ARTIFACT_INVALID` 57, `PACKAGE_FAILED` 58,
+  `DOWNLOAD_FAILED` 66. Engine selection errors are envelope errors of the requested command
+  instead of `kbw: error[...]` lines.
+- The host binding is `.kb.toml`; `.kbw.toml` is still read when it is the only one (doctor
+  warns), both at once is `CONFIG_INVALID`. The host state directory `.kbw/` is unchanged.
+- Generated skills call `kb` (`kb --root <kb_path>` for a KB not mounted at `.kb`); the CI
+  templates install `kb` with `core/templates/ci/install-kb.sh`; the commit-msg hook calls
+  `kb` from PATH. `kb update prepare` runs the target engine through engine selection.
+- `kbw` remains for one release as a deprecated POSIX forwarder to `kb` (flags mapped to
+  `kb engine ...`, `KBW_*` variables passed on as `KB_*`), so scripts and kbw-era engines keep
+  working. `.gitattributes` keeps LF line endings on every platform.
+
 ### Agent CLI (unreleased)
 
 kb becomes the single CLI between a coding agent, the code, the project knowledge and the

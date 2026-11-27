@@ -115,7 +115,7 @@ fn render_text(p: &InitPlan, applied: bool, written: usize) -> String {
             _ => paths.concat(),
         };
         s.push_str(&format!(
-            "next: review and commit {list}, then run `./kbw validate`\n"
+            "next: review and commit {list}, then run `kb validate`\n"
         ));
     } else {
         s.push_str("next: re-run with --apply to write these files\n");

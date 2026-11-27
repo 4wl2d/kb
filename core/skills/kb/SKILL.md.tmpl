@@ -5,8 +5,8 @@ description: The one CLI between you and the code, the project knowledge and the
 
 # kb: code, knowledge and tools for {{project_name}}
 
-Run `{{kb_path}}/kbw <command>` (namespace `{{namespace}}`, skill protocol {{skill_protocol}},
-engine {{engine_version}}). Do not substitute a `kb` binary from PATH. Do not choose between
+Run `{{kb}} <command>` (namespace `{{namespace}}`, skill protocol {{skill_protocol}},
+engine {{engine_version}}); kb runs the engine this KB pins. Do not choose between
 CodeGraph, grep, file search or other tools yourself: kb routes each request to the
 connected tool its configuration names, falls back when that tool cannot answer, and says
 which tool answered. Read the managed instructions in `{{core_source}}` first.
@@ -19,20 +19,20 @@ Procedures: `{{skills_dir}}/kb-change/SKILL.md` (change code),
 
 | you need | command |
 |---|---|
-| where a symbol is defined | `{{kb_path}}/kbw sym <name> [--file <text>] [--kind <kind>]` |
-| the code that calls it | `{{kb_path}}/kbw callers <symbol> [--file <text>]` |
-| what a change to it affects, in code and knowledge | `{{kb_path}}/kbw impact <symbol> [--depth 1..4]{{snapshot_arg}}` |
-| the records that document a path or symbol, by id and title | `{{kb_path}}/kbw doc <path-or-symbol>{{snapshot_arg}}` |
-| text in the repository | `{{kb_path}}/kbw find "<text>" [--regex] [--glob <glob>]` |
-| numbered source lines to cite | `{{kb_path}}/kbw read <path> [<first> [<last>]]` (40 lines from `<first>`, at most 80; it says where to resume and where the file ends); further ranges only after `<first> <last>`: `read <path> <first> <last> [[<path>] <first> <last>]...` (without a path: the file named last; at most 12 ranges and 240 lines per call, `-- not read` names the ranges past 240 lines) |
-| the records and the code files that match a task's words | `{{kb_path}}/kbw search "<words>"{{snapshot_arg}}` |
-| which records apply to files, by id, before reading any | `{{kb_path}}/kbw outline --intent explain --path <file> [--path <file>]... --format terse{{snapshot_arg}}` |
-| the checks for changed files | `{{kb_path}}/kbw check [<file>...] [--base <target>]{{snapshot_arg}}` (`--plan` runs nothing) |
-| every obligation before an edit, with a receipt | `{{kb_path}}/kbw context --intent implement --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}` |
-| what a diff touches in the knowledge | `{{kb_path}}/kbw impact --base <target> --working-tree{{snapshot_arg}}` |
-| a record or one section | `{{kb_path}}/kbw show <id> [--section <section>]{{snapshot_arg}}` |
-| a capability this project connected (dependencies, affected tests, ...) | `{{kb_path}}/kbw run <capability> [args]` (`kbw tools` lists them) |
-| the connected tools; the environment | `{{kb_path}}/kbw tools`; `{{kb_path}}/kbw doctor` |
+| where a symbol is defined | `{{kb}} sym <name> [--file <text>] [--kind <kind>]` |
+| the code that calls it | `{{kb}} callers <symbol> [--file <text>]` |
+| what a change to it affects, in code and knowledge | `{{kb}} impact <symbol> [--depth 1..4]{{snapshot_arg}}` |
+| the records that document a path or symbol, by id and title | `{{kb}} doc <path-or-symbol>{{snapshot_arg}}` |
+| text in the repository | `{{kb}} find "<text>" [--regex] [--glob <glob>]` |
+| numbered source lines to cite | `{{kb}} read <path> [<first> [<last>]]` (40 lines from `<first>`, at most 80; it says where to resume and where the file ends); further ranges only after `<first> <last>`: `read <path> <first> <last> [[<path>] <first> <last>]...` (without a path: the file named last; at most 12 ranges and 240 lines per call, `-- not read` names the ranges past 240 lines) |
+| the records and the code files that match a task's words | `{{kb}} search "<words>"{{snapshot_arg}}` |
+| which records apply to files, by id, before reading any | `{{kb}} outline --intent explain --path <file> [--path <file>]... --format terse{{snapshot_arg}}` |
+| the checks for changed files | `{{kb}} check [<file>...] [--base <target>]{{snapshot_arg}}` (`--plan` runs nothing) |
+| every obligation before an edit, with a receipt | `{{kb}} context --intent implement --path <file> --skill-protocol {{skill_protocol}}{{snapshot_arg}}{{core_arg}}` |
+| what a diff touches in the knowledge | `{{kb}} impact --base <target> --working-tree{{snapshot_arg}}` |
+| a record or one section | `{{kb}} show <id> [--section <section>]{{snapshot_arg}}` |
+| a capability this project connected (dependencies, affected tests, ...) | `{{kb}} run <capability> [args]` (`kb tools` lists them) |
+| the connected tools; the environment | `{{kb}} tools`; `{{kb}} doctor` |
 
 Paths are relative to the host repository root;
 `repo:path` names a file of another repository the KB describes.
@@ -91,14 +91,14 @@ next: <suggested kb command>
   `from x import y`) are listed, not shown. Excerpts are headed by their path, a single
   one unless every item shown is in its file. Cite them as printed; read only the rest.
 - Exit 0 is success; 16 `NOT_FOUND` (the answer is still printed); 46 `CHECKS_FAILED`;
-  65 `TOOL_UNAVAILABLE` (see `{{kb_path}}/kbw tools`, then read the source directly); 30 incomplete
+  65 `TOOL_UNAVAILABLE` (see `{{kb}} tools`, then read the source directly); 30 incomplete
   context. All codes: `references/recovery.md`.
 
 ## Investigating without editing
 
 To explain or trace code, collect cited lines and records in as few requests as you can,
 then answer. Every call re-sends the conversation: put every lookup you can already name
-into one shell call, each on its own line with `{{kb_path}}/kbw` written out.
+into one shell call, each on its own line with `{{kb}}` written out.
 
 1. `search "<the task's words>"`: the records that match and up to eight code files named
    like the words, with the declaration line of a file that declares the name it carries.

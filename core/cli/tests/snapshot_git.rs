@@ -18,6 +18,7 @@ use kb::knowledge::{Freshness, KnowledgeView, Origin, OverlayStatus, PinSource, 
 use kb::model::{Profile, ProfileLocation};
 use kb::snapshot::{self, ResolvedSnapshot, SelectionRequest, SnapshotRequest};
 use kb::source::{SourceTree, WorkingTreeSource};
+use kb::util::PathExt;
 use kb::util::sha256_hex;
 use kb::versions::{ENGINE_VERSION, ReleaseManifest};
 
@@ -127,7 +128,7 @@ impl World {
 }
 
 fn env_for(kb_root: &Path, cwd: &Path, cache: &Path) -> Env {
-    let kb_root = kb_root.canonicalize().unwrap();
+    let kb_root = kb_root.canonical().unwrap();
     let manifest =
         ReleaseManifest::parse(&fs::read_to_string(kb_root.join("core/release.toml")).unwrap())
             .unwrap();
@@ -372,7 +373,7 @@ fn stale_host_pin_requires_update_under_auto_and_pinned_reports_both_revisions()
     let hc = host::detect(&env, None)
         .unwrap()
         .expect("superproject is the host");
-    assert_eq!(hc.root, host.canonicalize().unwrap());
+    assert_eq!(hc.root, host.canonical().unwrap());
     assert!(!hc.linked_worktree);
     assert_eq!(hc.kb_submodule_path.as_deref(), Some(".kb"));
     let pin = hc.pin.clone().unwrap();
@@ -465,7 +466,7 @@ fn host_binding_file_selection_pin_and_repo_are_honored() {
     let env = env_for(&kb_root, &kb_root, &w.cache);
 
     write(
-        &host.join(".kbw.toml"),
+        &host.join(".kb.toml"),
         "schema = 1\nselection = \"latest\"\n",
     );
     let hc = host::detect(&env, None).unwrap().unwrap();
@@ -474,7 +475,7 @@ fn host_binding_file_selection_pin_and_repo_are_honored() {
     assert_eq!(snap.info.revision.as_deref(), Some(c2.as_str()));
 
     write(
-        &host.join(".kbw.toml"),
+        &host.join(".kb.toml"),
         "schema = 1\nselection = \"pinned\"\n",
     );
     let hc = host::detect(&env, None).unwrap().unwrap();
@@ -482,29 +483,29 @@ fn host_binding_file_selection_pin_and_repo_are_honored() {
     assert_eq!(snap.info.selection, Selection::Pinned);
     assert_eq!(snap.info.revision.as_deref(), Some(w.c1.as_str()));
 
-    write(&host.join(".kbw.toml"), "schema = 1\nsurprise = true\n");
+    write(&host.join(".kb.toml"), "schema = 1\nsurprise = true\n");
     assert_eq!(
         host::detect(&env, None).unwrap_err().code,
         ErrorCode::ConfigInvalid
     );
-    fs::remove_file(host.join(".kbw.toml")).unwrap();
+    fs::remove_file(host.join(".kb.toml")).unwrap();
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(w.kb.join("project/project.toml"), host.join(".kbw.toml"))
+        std::os::unix::fs::symlink(w.kb.join("project/project.toml"), host.join(".kb.toml"))
             .unwrap();
         assert_eq!(
             host::detect(&env, None).unwrap_err().code,
             ErrorCode::UnsafePath
         );
-        fs::remove_file(host.join(".kbw.toml")).unwrap();
+        fs::remove_file(host.join(".kb.toml")).unwrap();
     }
 
-    // A separate (non-submodule) checkout pinned by `.kbw.toml`, host given with --host.
+    // A separate (non-submodule) checkout pinned by `.kb.toml`, host given with --host.
     let plain = w.sb.path().join("plain-host");
     w.sb.init_repo(&plain);
     let short: String = w.c1.chars().take(10).collect();
     write(
-        &plain.join(".kbw.toml"),
+        &plain.join(".kb.toml"),
         &format!("schema = 1\nrepo = \"backend\"\npin = \"{short}\"\n"),
     );
     w.sb.commit_all(&plain, "bind kb");
@@ -795,9 +796,9 @@ fn linked_worktrees_of_the_host_carry_their_own_pins() {
     // From the linked worktree: its own HEAD pins c2.
     let env = env_for(&kb_root, &wt, &w.cache);
     let hc = host::detect(&env, None).unwrap().unwrap();
-    assert_eq!(hc.root, wt.canonicalize().unwrap());
+    assert_eq!(hc.root, wt.canonical().unwrap());
     assert!(hc.linked_worktree);
-    assert_eq!(hc.git_common_dir, host.join(".git").canonicalize().unwrap());
+    assert_eq!(hc.git_common_dir, host.join(".git").canonical().unwrap());
     assert_eq!(hc.pin.as_ref().unwrap().revision, c2);
     let snap = resolve(&env, Some(&hc), SelectionRequest::Auto, false).unwrap();
     assert_eq!(snap.info.selection, Selection::Latest, "pin equals the tip");
@@ -849,7 +850,7 @@ fn host_detection_uses_git_context_remotes_and_version_files() {
     fs::create_dir_all(&sub).unwrap();
     let env = env_for(&w.kb, &sub, &w.cache);
     let hc = host::detect(&env, None).unwrap().unwrap();
-    assert_eq!(hc.root, app.canonicalize().unwrap());
+    assert_eq!(hc.root, app.canonical().unwrap());
     assert_eq!(hc.pin, None);
     assert_eq!(hc.binding, None);
     assert!(hc.head.is_some());

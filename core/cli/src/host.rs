@@ -16,10 +16,11 @@ use crate::env::Env;
 use crate::error::{ErrorCode, KbError, Result};
 use crate::git::{self, Git};
 use crate::knowledge::{PinInfo, PinSource};
-use crate::model::{HOST_BINDING_FILE, HostBinding, Registry};
+use crate::model::{HOST_BINDING_FILE, HostBinding, LEGACY_HOST_BINDING_FILE, Registry};
+use crate::util::PathExt;
 use crate::util::{check_rel_path, read_file_limited, rel_string, safe_join};
 
-/// Upper bound for small host files (`.kbw.toml`, version files).
+/// Upper bound for small host files (`.kb.toml`, version files).
 const MAX_HOST_FILE_BYTES: u64 = 64 * 1024;
 
 /// Git file mode of a gitlink (submodule commit) tree entry.
@@ -41,10 +42,13 @@ pub struct HostContext {
     pub remotes: Vec<(String, String)>,
     /// Host-relative path of the KB checkout when it is a submodule of the host.
     pub kb_submodule_path: Option<String>,
-    /// Explicit host pin (submodule gitlink in host `HEAD`, or `.kbw.toml pin`).
+    /// Explicit host pin (submodule gitlink in host `HEAD`, or `.kb.toml pin`).
     pub pin: Option<PinInfo>,
-    /// Parsed `.kbw.toml`, if present.
+    /// Parsed host binding (`.kb.toml`, or the legacy `.kbw.toml`), if present.
     pub binding: Option<HostBinding>,
+    /// File name the binding was read from.
+    #[serde(skip)]
+    pub binding_file: Option<&'static str>,
 }
 
 /// How the host repo id was determined.
@@ -101,7 +105,10 @@ fn inspect(root: &Path, kb_root: &Path) -> Result<HostContext> {
     let (git_dir, git_common_dir) = git_dirs(root)?;
     let head = git.resolve_commit("HEAD")?;
     let remotes = remotes(&git)?;
-    let binding = read_binding(root)?;
+    let (binding, binding_file) = match read_binding(root)? {
+        Some((b, f)) => (Some(b), Some(f)),
+        None => (None, None),
+    };
 
     let mut kb_submodule_path = None;
     let mut pin = None;
@@ -138,10 +145,11 @@ fn inspect(root: &Path, kb_root: &Path) -> Result<HostContext> {
         kb_submodule_path,
         pin,
         binding,
+        binding_file,
     })
 }
 
-/// Identify the registry repo of the host: `.kbw.toml repo`, else remote URL match.
+/// Identify the registry repo of the host: `.kb.toml repo`, else remote URL match.
 ///
 /// A binding `repo` that is not in the registry is ignored here (remote matching still
 /// applies); callers report it with [`unknown_binding_repo`].
@@ -160,7 +168,7 @@ pub fn identify_repo(host: &HostContext, registry: &Registry) -> Option<(String,
     })
 }
 
-/// The `.kbw.toml repo` value when it names a repo that the registry does not define.
+/// The `.kb.toml repo` value when it names a repo that the registry does not define.
 pub fn unknown_binding_repo(host: &HostContext, registry: &Registry) -> Option<String> {
     host.binding
         .as_ref()
@@ -188,7 +196,7 @@ pub fn host_version(
 }
 
 fn canonical(p: &Path) -> Result<PathBuf> {
-    p.canonicalize().map_err(|e| KbError::io(p.display(), e))
+    p.canonical().map_err(|e| KbError::io(p.display(), e))
 }
 
 /// Superproject work tree of the repository at `dir`, when it is a submodule checkout.
@@ -286,14 +294,34 @@ fn gitlink(git: &Git, commit: &str, rel: &str) -> Result<Option<String>> {
     Ok(None)
 }
 
-/// Read and strictly parse `<root>/.kbw.toml` (never through a symlink).
-fn read_binding(root: &Path) -> Result<Option<HostBinding>> {
-    let path = safe_join(root, HOST_BINDING_FILE)?;
-    match fs::symlink_metadata(&path) {
-        Ok(_) => {}
-        Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(KbError::io(path.display(), e)),
-    }
+/// Read and strictly parse the host binding (never through a symlink): `<root>/.kb.toml`,
+/// else the legacy `<root>/.kbw.toml`; both at once is a configuration error.
+fn read_binding(root: &Path) -> Result<Option<(HostBinding, &'static str)>> {
+    let exists = |name: &str| -> Result<Option<PathBuf>> {
+        let path = safe_join(root, name)?;
+        match fs::symlink_metadata(&path) {
+            Ok(_) => Ok(Some(path)),
+            Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(KbError::io(path.display(), e)),
+        }
+    };
+    let (path, name) = match (
+        exists(HOST_BINDING_FILE)?,
+        exists(LEGACY_HOST_BINDING_FILE)?,
+    ) {
+        (Some(_), Some(_)) => {
+            return Err(KbError::new(
+                ErrorCode::ConfigInvalid,
+                format!("the host has both {HOST_BINDING_FILE} and {LEGACY_HOST_BINDING_FILE}"),
+            )
+            .with_hint(format!(
+                "keep {HOST_BINDING_FILE} (the current name) and remove {LEGACY_HOST_BINDING_FILE}"
+            )));
+        }
+        (Some(p), None) => (p, HOST_BINDING_FILE),
+        (None, Some(p)) => (p, LEGACY_HOST_BINDING_FILE),
+        (None, None) => return Ok(None),
+    };
     let shown = path.display().to_string();
     let bytes = read_file_limited(&path, MAX_HOST_FILE_BYTES)?;
     let text = std::str::from_utf8(&bytes).map_err(|_| {
@@ -326,7 +354,7 @@ fn read_binding(root: &Path) -> Result<Option<HostBinding>> {
             )
         })?;
     }
-    Ok(Some(binding))
+    Ok(Some((binding, name)))
 }
 
 #[cfg(test)]
@@ -353,6 +381,7 @@ mod tests {
                 pin: None,
                 selection: None,
             }),
+            binding_file: binding_repo.map(|_| HOST_BINDING_FILE),
         }
     }
 
