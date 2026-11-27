@@ -1302,6 +1302,12 @@ fn list_worktrees(git: &Git) -> Result<Vec<Worktree>> {
     for field in out.split(|b| *b == 0) {
         let field = String::from_utf8_lossy(field);
         if let Some(p) = field.strip_prefix("worktree ") {
+            // Git for Windows prints `/`; report the path as `prepare` does, with `\`.
+            let p = if cfg!(windows) {
+                p.replace('/', "\\")
+            } else {
+                p.to_string()
+            };
             list.push(Worktree {
                 path: PathBuf::from(p),
                 branch: None,
